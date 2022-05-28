@@ -1,0 +1,32 @@
+[package]
+name = "sediment-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.sediment]
+path = ".."
+features = ["test-util"]
+
+# Prevent this from interfering with workspaces
+# [workspace]
+# members = ["."]
+
+[[bin]]
+name = "ranges"
+path = "fuzz_targets/ranges.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "grain_header_encoding"
+path = "fuzz_targets/grain_header_encoding.rs"
+test = false
+doc = false
