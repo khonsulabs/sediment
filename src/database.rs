@@ -1,17 +1,17 @@
 use std::{path::Path, sync::Arc};
 
-use lrumap::LruHashMap;
 use parking_lot::Mutex;
 
 use crate::{
-    database::{atlas::Atlas, committer::Committer, disk::DiskState},
-    format::{BatchId, GrainId, GrainMapPage},
-    io::{self, FileManager},
+    database::{atlas::Atlas, committer::Committer, disk::DiskState, page_cache::PageCache},
+    format::{self, BatchId, GrainId, GrainInfo},
+    io::{self, ext::ToIoResult, FileManager},
 };
 
 mod atlas;
 mod committer;
 mod disk;
+mod page_cache;
 mod session;
 
 pub use self::session::WriteSession;
@@ -50,7 +50,7 @@ where
                 atlas: Mutex::new(atlas),
                 committer: Committer::default(),
                 disk_state: Mutex::new(disk_state),
-                grain_map_pages: Mutex::new(LruHashMap::new(2048)),
+                grain_map_page_cache: PageCache::default(),
             }),
         })
     }
@@ -58,6 +58,26 @@ where
     /// Create a new session for writing data to this database.
     pub fn new_session(&mut self) -> WriteSession<'_, File> {
         WriteSession::new(self)
+    }
+
+    pub fn read(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
+        let mut atlas = self.state.atlas.lock();
+        let (offset, info) = match atlas.info_of_grain(
+            grain,
+            &self.state.grain_map_page_cache,
+            &mut self.file,
+            &mut self.scratch,
+        )? {
+            Some((_, info)) if info.allocated_at.is_none() => return Ok(None),
+            Some(result) => result,
+            None => return Ok(None),
+        };
+        drop(atlas);
+
+        let data = vec![0; usize::try_from(info.length).to_io()?];
+        let (result, data) = self.file.read_exact(data, offset);
+        result?;
+        Ok(Some(GrainData { info, data }))
     }
 
     /// Reserve space within the database. This may allocate additional disk
@@ -109,7 +129,19 @@ struct DatabaseState {
     atlas: Mutex<Atlas>,
     disk_state: Mutex<DiskState>,
     committer: Committer,
-    grain_map_pages: Mutex<LruHashMap<u64, GrainMapPage>>,
+    grain_map_page_cache: PageCache,
+}
+
+#[derive(Debug)]
+pub struct GrainData {
+    pub info: GrainInfo,
+    pub data: Vec<u8>,
+}
+
+impl GrainData {
+    pub fn is_crc_valid(&self) -> bool {
+        format::crc(&self.data) == self.info.crc
+    }
 }
 
 #[cfg(test)]
@@ -140,8 +172,9 @@ crate::io_test!(basic_op, {
     println!("Wrote to {grain_id}");
     let committed_sequence = session.commit().unwrap();
     println!("Batch sequence: {committed_sequence}");
-    return;
-    drop(db);
+
+    let grain_data = db.read(grain_id).unwrap().unwrap();
+    assert_eq!(grain_data.data, b"hello world");
 
     if path.exists() {
         std::fs::remove_file(&path).unwrap();

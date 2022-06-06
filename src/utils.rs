@@ -2,6 +2,8 @@
 //! locations and on both usize and u64.
 //!
 //! Uses the `num-traits` crate.
+use std::ops::{RangeInclusive, Sub};
+
 use num_traits::PrimInt;
 
 pub trait RoundToMultiple: Sized {
@@ -62,4 +64,17 @@ macro_rules! todo_if {
             todo!($message, $(args)+)
         }
     };
+}
+
+pub trait RangeLength<T> {
+    fn len(&self) -> T;
+}
+
+impl<T> RangeLength<T> for RangeInclusive<T>
+where
+    T: Sub<T, Output = T> + Copy,
+{
+    fn len(&self) -> T {
+        *self.end() - *self.start()
+    }
 }

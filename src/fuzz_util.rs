@@ -1,10 +1,7 @@
 use arbitrary::{Arbitrary, Unstructured};
 use std::collections::BTreeMap;
 
-use crate::{
-    format::{self},
-    ranges::Ranges,
-};
+use crate::ranges::Ranges;
 
 #[derive(Debug)]
 pub struct SetRange {

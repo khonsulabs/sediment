@@ -87,21 +87,18 @@ impl File for MemoryFile {
                 );
             }
         };
-        let mut buffer_slice = &*buffer;
+        let buffer_slice = &*buffer;
         let length_after_position = file.len().saturating_sub(position);
         let bytes_written = buffer_slice.len();
-        if length_after_position > 0 {
-            // Overwriting existing data
-            if length_after_position < buffer_slice.len() {
-                file[position..position + buffer_slice.len()].copy_from_slice(buffer_slice);
-                buffer_slice = &[];
-            } else {
-                // Write past the end.
-                file.truncate(position);
-            }
+        if length_after_position < buffer_slice.len() {
+            // The wrote will extend past the buffer
+            file.truncate(position);
+            file.extend(buffer_slice.iter().copied());
+        } else {
+            // Overwrite existing data
+            file[position..position + buffer_slice.len()].copy_from_slice(buffer_slice);
         }
 
-        file.extend(buffer_slice.iter().copied());
         (Ok(bytes_written), buffer.buffer)
     }
 

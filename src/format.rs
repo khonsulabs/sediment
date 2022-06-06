@@ -55,11 +55,10 @@ impl FileHeader {
         }
     }
 
-    pub fn write_next(&mut self) -> &mut Header {
+    pub fn write_next(&mut self) {
         // Copy the state from the current header to the next header
         let current = self.current().clone();
         *self.next_mut() = current;
-        self.next_mut()
     }
 
     pub fn next(&self) -> &Header {
@@ -468,7 +467,10 @@ impl StrataIndex {
     }
 
     pub fn grain_map_length(&self) -> u64 {
-        self.grains_per_map() * u64::from(self.grain_length())
+        self.header_length()
+            + (self.grains_per_map() * u64::from(self.grain_length()))
+                .round_to_multiple_of(PAGE_SIZE_U64)
+                .unwrap()
     }
 }
 
@@ -685,7 +687,7 @@ impl Default for Allocation {
 }
 
 /// Each GrainMapPage is a collection of 256 [`GrainInfo`] structures.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GrainMapPage {
     pub grains: [GrainInfo; 170],
 }
@@ -699,6 +701,37 @@ impl Default for GrainMapPage {
 }
 
 impl GrainMapPage {
+    pub fn deserialize(buffer: &[u8], verify_crc: bool) -> io::Result<Self> {
+        assert!(buffer.len() >= 170 * 24 + 4);
+        let mut offset = 0;
+        let mut page = GrainMapPage::default();
+        for grain in 0..170 {
+            page.grains[grain].allocated_at =
+                BatchId::from_le_bytes_slice(&buffer[offset..offset + 8]).validate();
+            offset += 8;
+            page.grains[grain].archived_at =
+                BatchId::from_le_bytes_slice(&buffer[offset..offset + 8]).validate();
+            offset += 8;
+            page.grains[grain].length =
+                u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
+            offset += 4;
+            page.grains[grain].crc =
+                u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
+            offset += 4;
+        }
+        if verify_crc {
+            let computed_crc = crc(&buffer[..offset]);
+            let stored_crc = u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
+            if stored_crc != computed_crc {
+                return Err(std::io::Error::new(
+                    ErrorKind::InvalidData,
+                    "grain map page crc check failed",
+                ));
+            }
+        }
+        Ok(page)
+    }
+
     pub fn write_to<File: io::File>(
         &self,
         offset: u64,
@@ -754,7 +787,7 @@ pub struct GrainInfo {
 }
 
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq, Hash)]
-pub struct BatchId(u64);
+pub struct BatchId(pub(crate) u64);
 
 impl BatchId {
     const ARCHIVED_MASK: u64 = 0x8000_0000_0000_0000;
@@ -786,6 +819,14 @@ impl BatchId {
 
     pub fn next(&self) -> Self {
         Self(self.0.checked_add(1).expect("u64 wrapped"))
+    }
+
+    pub const fn validate(self) -> Option<Self> {
+        if self.0 > 0 {
+            Some(self)
+        } else {
+            None
+        }
     }
 }
 

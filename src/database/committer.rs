@@ -4,12 +4,10 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::{
     database::{
-        disk::{self, BasinState, StrataState},
+        disk::{BasinState, StrataState},
         DatabaseState, GrainReservation,
     },
-    format::{
-        BasinHeader, BasinIndex, BatchId, GrainMap, GrainMapHeader, GrainMapPage, StrataIndex,
-    },
+    format::{BasinHeader, BasinIndex, BatchId, GrainMapHeader, GrainMapPage, StrataIndex},
     io::{self, ext::ToIoResult},
     todo_if,
 };
@@ -38,7 +36,7 @@ impl Committer {
         state.pending_batches.push(batch);
 
         loop {
-            if state.already_committing {
+            if state.committing {
                 // Wait for a commit to notify that a batch has been committed.
                 self.commit_sync.wait(&mut state);
                 // Check if our batch has been written.
@@ -54,14 +52,30 @@ impl Committer {
                 // Release the mutex, allowing other threads to queue batches
                 // while we write and sync the file.
                 drop(state);
-                return self.commit_batches(last_batch_id, grains, database, file, scratch);
+
+                let new_batch_id = self.commit_batches(grains, database, file, scratch)?;
+
+                // Re-acquire the state to update the knowledge of committed batches
+                let mut state = self.state.lock();
+                for id in (state.committed_batch_id.0 + 1)..=last_batch_id.0 {
+                    state
+                        .committed_batches
+                        .insert(GrainBatchId(id), new_batch_id);
+                }
+                state.committing = false;
+                drop(state);
+
+                // Even if we didn't commit multiple, another thread could still
+                // be waiting.
+                self.commit_sync.notify_all();
+
+                return Ok(new_batch_id);
             }
         }
     }
 
     fn commit_batches<File: io::File>(
         &self,
-        last_batch_id: GrainBatchId,
         mut grains: Vec<GrainReservation>,
         database: &DatabaseState,
         file: &mut File,
@@ -73,8 +87,8 @@ impl Committer {
 
         let mut disk_state = database.disk_state.lock();
 
-        let mut file_header = disk_state.header.write_next();
-        let committing_batch = file_header.sequence.next();
+        disk_state.header.write_next();
+        let committing_batch = disk_state.header.next().sequence.next();
 
         // Gather info about new basins and strata that the atlas has allocated.
         let atlas = database.atlas.lock();
@@ -83,7 +97,7 @@ impl Committer {
         let mut new_pages = HashSet::<u64>::new();
         for (basin_index, basin_atlas) in atlas.basins.iter().enumerate() {
             let mut changed = false;
-            let mut basin = if basin_index < disk_state.basins.len() {
+            let basin = if basin_index < disk_state.basins.len() {
                 todo_if!(
                     disk_state.header.next_mut().basins[basin_index].file_offset
                         != basin_atlas.location,
@@ -111,7 +125,9 @@ impl Committer {
                     &mut basin.stratum[strata_index]
                 } else {
                     changed = true;
-                    new_pages.insert(strata_atlas.grain_maps[0].offset);
+                    new_pages.insert(
+                        strata_atlas.grain_maps[0].offset + strata_atlas.grain_map_header_length,
+                    );
                     basin.header.next_mut().stratum.push(StrataIndex {
                         grain_map_count: u32::try_from(strata_atlas.grain_maps.len()).to_io()?,
                         grain_count_exp: strata_atlas.grain_count_exp(),
@@ -161,16 +177,26 @@ impl Committer {
             )
             .to_io()?;
 
-            let grain_map_offset = strata.grain_maps[grain_map_index].offset();
+            todo_if!(local_grain_index >= 170);
+            let grain_map_page_offset =
+                strata.grain_maps[grain_map_index].offset() + strata_info.header_length();
             let grain_map_page = match modified_pages.last_mut() {
-                Some((offset, grain_map_page)) if offset == &grain_map_offset => grain_map_page,
+                Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
+                    grain_map_page
+                }
                 _ => {
-                    if new_pages.remove(&grain_map_offset) {
+                    let page = if new_pages.remove(&grain_map_page_offset) {
                         // A new page, no need to load from disk.
-                        modified_pages.push((grain_map_offset, GrainMapPage::default()));
+                        GrainMapPage::default()
                     } else {
-                        todo!("load grain map from disk")
-                    }
+                        database.grain_map_page_cache.fetch(
+                            grain_map_page_offset,
+                            true,
+                            file,
+                            scratch,
+                        )?
+                    };
+                    modified_pages.push((grain_map_page_offset, page));
 
                     &mut modified_pages.last_mut().unwrap().1
                 }
@@ -192,10 +218,10 @@ impl Committer {
         }
 
         // TODO These writes should be able to be parallelized
+
         for (offset, grain_map_page) in &modified_pages {
             grain_map_page.write_to(*offset, file, scratch)?;
         }
-        // TODO overwrite pages in cache with the newly written pages
 
         for (basin_index, strata_index, grain_map_index) in modified_grain_maps {
             let grain_count =
@@ -220,6 +246,11 @@ impl Committer {
             .header
             .flush_to_file(committing_batch, file, scratch)?;
 
+        // Publish the updated grain maps
+        database
+            .grain_map_page_cache
+            .update_pages(modified_pages.into_iter());
+
         Ok(committing_batch)
     }
 }
@@ -235,7 +266,7 @@ struct GrainBatchId(u64);
 
 #[derive(Debug)]
 struct CommitBatches {
-    already_committing: bool,
+    committing: bool,
     batch_id: GrainBatchId,
     committed_batch_id: GrainBatchId,
     committed_batches: HashMap<GrainBatchId, BatchId>,
@@ -244,7 +275,7 @@ struct CommitBatches {
 
 impl CommitBatches {
     fn become_commit_thread(&mut self) -> (GrainBatchId, Vec<GrainReservation>) {
-        self.already_committing = true;
+        self.committing = true;
         let mut grains =
             Vec::with_capacity(self.pending_batches.iter().map(|b| b.grains.len()).sum());
         let mut latest_batch_id = self.pending_batches.last().unwrap().batch_id;
@@ -259,7 +290,7 @@ impl CommitBatches {
 impl Default for CommitBatches {
     fn default() -> Self {
         Self {
-            already_committing: false,
+            committing: false,
             batch_id: GrainBatchId(1),
             committed_batch_id: GrainBatchId(0),
             pending_batches: Vec::new(),

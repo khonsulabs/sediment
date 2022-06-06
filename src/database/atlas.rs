@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 
 use crate::{
-    database::{disk::DiskState, GrainReservation},
-    format::{Allocation, BasinHeader, GrainId, StrataIndex, PAGE_SIZE_U64},
+    database::{disk::DiskState, page_cache::PageCache, GrainReservation},
+    format::{Allocation, BasinHeader, GrainId, GrainInfo, StrataIndex, PAGE_SIZE_U64},
     io::{self, ext::ToIoResult},
     ranges::{Ranges, Span},
     todo_if,
-    utils::RoundToMultiple,
+    utils::{RangeLength, RoundToMultiple},
 };
 
 /// Controls the in-memory representation of grain locations and allocations.
@@ -72,10 +72,8 @@ impl Atlas {
                     map.allocations
                         .iter()
                         .fold(acc, |(free, allocated), (range, tag)| match tag {
-                            Allocation::Free => (free + range.end() - range.start(), allocated),
-                            Allocation::Allocated => {
-                                (free, allocated + range.end() - range.start())
-                            }
+                            Allocation::Free => (free + range.len(), allocated),
+                            Allocation::Allocated => (free, allocated + range.len()),
                         })
                 });
 
@@ -127,18 +125,16 @@ impl Atlas {
                             grain_map
                                 .allocations
                                 .iter()
-                                .find_map(|(range, allocation)| {
-                                    match (range.end() - range.start(), allocation) {
-                                        (free_grains, Allocation::Free)
-                                            if free_grains >= u64::from(grains_needed) =>
-                                        {
-                                            Some(
-                                                *range.start()
-                                                    + grain_map_index * strata.grains_per_map,
-                                            )
-                                        }
-                                        _ => None,
+                                .find_map(|(range, allocation)| match (range.len(), allocation) {
+                                    (free_grains, Allocation::Free)
+                                        if free_grains >= u64::from(grains_needed) =>
+                                    {
+                                        Some(
+                                            *range.start()
+                                                + grain_map_index * strata.grains_per_map,
+                                        )
                                     }
+                                    _ => None,
                                 })
                         })
                 {
@@ -174,6 +170,38 @@ impl Atlas {
             length,
             crc: 0,
         })
+    }
+
+    pub fn info_of_grain<File: io::File>(
+        &mut self,
+        grain_id: GrainId,
+        page_cache: &PageCache,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<Option<(u64, GrainInfo)>> {
+        let (offset, page_local_index, grain_map_page_offset) =
+            self.map_strata_for_grain(grain_id, |strata| -> io::Result<(u64, usize, u64)> {
+                let (offset, grain_map_index) =
+                    strata.offset_and_index_of_grain_data(grain_id.grain_index())?;
+                let page = u64::try_from(grain_map_index / 170).unwrap();
+                let page_local_index = grain_map_index % 170;
+
+                let grain_map_offset = strata.grain_maps[grain_map_index].offset;
+                let page_offset =
+                    grain_map_offset + strata.grain_map_header_length + PAGE_SIZE_U64 * page;
+
+                Ok((offset, page_local_index, page_offset))
+            })?;
+
+        let info = page_cache.fetch_grain_info(
+            grain_map_page_offset,
+            page_local_index,
+            true,
+            file,
+            scratch,
+        )?;
+
+        Ok(Some((offset, info)))
     }
 
     fn map_strata_for_grain<F: FnOnce(&mut StrataAtlas) -> R, R>(
@@ -243,7 +271,7 @@ impl Atlas {
 
         // Attempt to allocate a new basin
         if self.basins.len() < 254 {
-            let location = dbg!(self.allocate(PAGE_SIZE_U64 * 2, file))?;
+            let location = self.allocate(PAGE_SIZE_U64 * 2, file)?;
             self.basins.push(BasinAtlas::new(location));
             // Recurse. Now that we have a new basin, the previous loop will be
             // able to allocate a strata.
@@ -378,10 +406,6 @@ impl StrataAtlas {
         u8::try_from(self.grain_length.trailing_zeros()).unwrap()
     }
 
-    pub fn offset_of_grain_data(&self, grain_index: u64) -> io::Result<u64> {
-        Ok(self.offset_and_index_of_grain_data(grain_index)?.0)
-    }
-
     pub fn grain_map_index(&self, grain_index: u64) -> io::Result<(u64, usize)> {
         let grain_map_index = grain_index / self.grains_per_map;
         let grain_map_index_usize = usize::try_from(grain_map_index).to_io()?;
@@ -400,6 +424,7 @@ impl StrataAtlas {
             .expect("bad grain")
             .offset
             + self.grain_map_header_length
+            + u64::try_from(self.grain_maps.len()).unwrap() * PAGE_SIZE_U64
             + u64::from(self.grain_length) * local_grain_index;
 
         Ok((offset, grain_map_index))

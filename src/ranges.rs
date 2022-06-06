@@ -1,5 +1,7 @@
 use std::ops::{Bound, Deref, RangeBounds, RangeInclusive};
 
+use crate::utils::RangeLength;
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Ranges<Tag> {
     spans: Vec<Span<Tag>>,
@@ -308,7 +310,7 @@ where
         };
         for (range, tag) in iter {
             assert!(range.start() == &collected.maximum.map_or(0, |max| max + 1));
-            collected.extend_by(range.end() - range.start(), tag);
+            collected.extend_by(range.len(), tag);
         }
         collected
     }

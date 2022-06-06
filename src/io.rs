@@ -1,7 +1,9 @@
-use std::{io, path::Path};
+use std::{
+    io::{self, ErrorKind},
+    path::Path,
+};
 
 use crate::io::{
-    ext::ToIoResult,
     iobuffer::{IoBuffer, IoBufferExt},
     paths::PathId,
 };
@@ -43,6 +45,12 @@ pub trait File {
         let mut buffer = buffer.buffer;
         while start < end {
             buffer = match self.read_at(buffer.io_slice(start..end), position) {
+                (Ok(bytes_read), original_buffer) if bytes_read == 0 => {
+                    return (
+                        Err(std::io::Error::from(ErrorKind::UnexpectedEof)),
+                        original_buffer,
+                    );
+                }
                 (Ok(bytes_read), original_buffer) => {
                     start += bytes_read;
                     position += u64::try_from(bytes_read).unwrap();

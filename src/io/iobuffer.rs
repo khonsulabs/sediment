@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut, Range, RangeBounds};
 
+#[derive(Debug)]
 pub struct IoBuffer {
     pub buffer: Vec<u8>,
     pub range: Option<Range<usize>>,
