@@ -1,6 +1,7 @@
 use std::{io, path::Path};
 
 use crate::io::{
+    ext::ToIoResult,
     iobuffer::{IoBuffer, IoBufferExt},
     paths::PathId,
 };
@@ -13,6 +14,7 @@ pub mod memory;
 pub mod paths;
 pub mod uring;
 
+pub mod ext;
 #[cfg(target_os = "linux")]
 mod linux;
 

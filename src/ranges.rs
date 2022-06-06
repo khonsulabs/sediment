@@ -296,6 +296,41 @@ impl<'a, Tag> IntoIterator for &'a Ranges<Tag> {
     }
 }
 
+impl<Tag> FromIterator<(RangeInclusive<u64>, Tag)> for Ranges<Tag>
+where
+    Tag: Eq + Clone,
+{
+    fn from_iter<T: IntoIterator<Item = (RangeInclusive<u64>, Tag)>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let mut collected = Self {
+            spans: Vec::with_capacity(iter.size_hint().0),
+            maximum: None,
+        };
+        for (range, tag) in iter {
+            assert!(range.start() == &collected.maximum.map_or(0, |max| max + 1));
+            collected.extend_by(range.end() - range.start(), tag);
+        }
+        collected
+    }
+}
+
+impl<Tag> FromIterator<Tag> for Ranges<Tag>
+where
+    Tag: Eq + Clone,
+{
+    fn from_iter<T: IntoIterator<Item = Tag>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let mut collected = Self {
+            spans: Vec::with_capacity(iter.size_hint().0),
+            maximum: None,
+        };
+        for tag in iter {
+            collected.extend_by(1, tag);
+        }
+        collected
+    }
+}
+
 #[test]
 fn basics() {
     let mut ranges = Ranges::<usize>::default();

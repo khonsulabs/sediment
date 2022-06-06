@@ -2,7 +2,7 @@ use arbitrary::{Arbitrary, Unstructured};
 use std::collections::BTreeMap;
 
 use crate::{
-    format::{self, GrainAllocation, GrainRangeAllocationEncoder},
+    format::{self},
     ranges::Ranges,
 };
 
@@ -171,44 +171,4 @@ fn test_remove_from_start_exact_end() {
             value: 231,
         },
     ])
-}
-
-#[derive(Debug)]
-pub struct AllocationAmount {
-    pub allocation: GrainAllocation,
-    pub length: u8,
-}
-
-pub fn test_grain_header_encoding(allocations: Vec<AllocationAmount>) {
-    let mut ranges = Ranges::new(GrainAllocation::Free, None);
-    for allocation in allocations {
-        ranges.extend_by(u64::from(allocation.length), allocation.allocation);
-    }
-    let encoded = GrainRangeAllocationEncoder::new(&ranges).collect::<Vec<_>>();
-    let decoded_ranges = format::decode_grain_allocations(&encoded).unwrap();
-    assert_eq!(
-        ranges, decoded_ranges,
-        "expected {ranges:#?} got {decoded_ranges:#?}. Encoded: {encoded:2x?}"
-    );
-}
-
-impl<'a> Arbitrary<'a> for AllocationAmount {
-    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
-        let allocation = match u.arbitrary::<u8>()? {
-            0..=85 => GrainAllocation::Free,
-            86..=190 => GrainAllocation::Assigned,
-            _ => GrainAllocation::Archived,
-        };
-        let length = u.arbitrary()?;
-        Ok(Self { allocation, length })
-    }
-}
-
-#[test]
-#[cfg(feature = "test-util")]
-fn test_extend_free() {
-    test_grain_header_encoding(vec![AllocationAmount {
-        allocation: GrainAllocation::Free,
-        length: 5,
-    }])
 }

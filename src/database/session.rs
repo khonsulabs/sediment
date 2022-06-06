@@ -1,6 +1,6 @@
 use crate::{
     database::{Database, GrainReservation},
-    format::GrainId,
+    format::{BatchId, GrainId},
     io::{self, iobuffer::IoBufferExt},
 };
 
@@ -27,11 +27,10 @@ where
     pub fn write(&mut self, mut data: &[u8]) -> io::Result<GrainId> {
         let reservation = self
             .database
-            .new_grain(u64::try_from(data.len()).unwrap())?;
+            .new_grain(u32::try_from(data.len()).unwrap())?;
 
         let mut scratch = std::mem::take(&mut self.database.scratch);
-        scratch.clear();
-        scratch.reserve(data.len().min(16_384));
+        scratch.resize(data.len().min(16_384), 0);
         let mut write_at = reservation.offset;
         while !data.is_empty() {
             let bytes_to_copy = data.len().min(scratch.capacity());
@@ -54,7 +53,7 @@ where
         Ok(id)
     }
 
-    pub fn commit(mut self) -> io::Result<Vec<GrainId>> {
+    pub fn commit(mut self) -> io::Result<BatchId> {
         self.database.commit_reservations(self.writes.drain(..))
     }
 }
@@ -65,7 +64,9 @@ where
 {
     fn drop(&mut self) {
         if !self.writes.is_empty() {
-            self.database.forget_reservations(self.writes.drain(..));
+            self.database
+                .forget_reservations(self.writes.drain(..))
+                .unwrap();
         }
     }
 }

@@ -1,14 +1,17 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
+use lrumap::LruHashMap;
 use parking_lot::Mutex;
 
 use crate::{
-    database::atlas::Atlas,
-    format::{FileHeader, GrainId, SequenceId},
+    database::{atlas::Atlas, committer::Committer, disk::DiskState},
+    format::{BatchId, GrainId, GrainMapPage},
     io::{self, FileManager},
 };
 
 mod atlas;
+mod committer;
+mod disk;
 mod session;
 
 pub use self::session::WriteSession;
@@ -17,16 +20,7 @@ pub use self::session::WriteSession;
 pub struct Database<File> {
     file: File,
     scratch: Vec<u8>,
-    active_state: Arc<Mutex<DatabaseState>>,
-}
-
-#[derive(Debug)]
-struct DatabaseState {
-    header: FileHeader,
-    atlas: Atlas,
-    /// Grain reservations that are outstanding. The value is the length of the
-    /// reservation.
-    reserved: HashMap<GrainId, u64>,
+    state: Arc<DatabaseState>,
 }
 
 impl<File> Database<File>
@@ -45,26 +39,19 @@ where
         let mut file = manager.write(&path_id)?;
 
         let mut scratch = Vec::new();
-        let header = if file.is_empty()? {
-            // Initialize the an empty database.
-            let mut header = FileHeader::default();
-            header.write_to(&mut file, true, &mut scratch)?;
-            file.synchronize()?;
-            header
-        } else {
-            FileHeader::read_from(&mut file, &mut scratch)?
-        };
 
-        let atlas = Atlas::load_from(&mut file, header.current())?;
+        let disk_state = DiskState::recover(&mut file, &mut scratch)?;
+        let atlas = Atlas::from_state(&disk_state, &mut file)?;
 
         Ok(Self {
             file,
             scratch,
-            active_state: Arc::new(Mutex::new(DatabaseState {
-                header,
-                atlas,
-                reserved: HashMap::default(),
-            })),
+            state: Arc::new(DatabaseState {
+                atlas: Mutex::new(atlas),
+                committer: Committer::default(),
+                disk_state: Mutex::new(disk_state),
+                grain_map_pages: Mutex::new(LruHashMap::new(2048)),
+            }),
         })
     }
 
@@ -82,53 +69,47 @@ where
     /// While the data being written may be synced during another session's
     /// commit, the Strata is not updated with the new information until the
     /// commit phase.
-    fn new_grain(&mut self, length: u64) -> io::Result<GrainReservation> {
-        let mut active_state = self.active_state.lock();
+    fn new_grain(&mut self, length: u32) -> io::Result<GrainReservation> {
+        let mut active_state = self.state.atlas.lock();
 
-        active_state.new_grain(length, &mut self.file)
+        active_state.reserve_grain(length, &mut self.file)
     }
 
     /// Persists all of the writes to the database. When this function returns,
-    /// the data is fully flushed to disk to the best guarantee.
+    /// the data is fully flushed to disk.
     fn commit_reservations(
         &mut self,
         reservations: impl Iterator<Item = GrainReservation>,
-    ) -> io::Result<Vec<GrainId>> {
-        let mut active_state = self.active_state.lock();
-        active_state.commit_reservations(reservations, &mut self.file)
+    ) -> io::Result<BatchId> {
+        self.state
+            .committer
+            .commit(reservations, &self.state, &mut self.file, &mut self.scratch)
     }
 
-    fn forget_reservations(&self, reservations: impl Iterator<Item = GrainReservation>) {
-        let mut active_state = self.active_state.lock();
-
-        active_state.forget_reservations(reservations);
-    }
-}
-
-impl DatabaseState {
-    fn new_grain<File: io::File>(
-        &mut self,
-        length: u64,
-        file: &mut File,
-    ) -> io::Result<GrainReservation> {
-        self.atlas.reserve_grain(length)
-    }
-    fn commit_reservations<File: io::File>(
-        &mut self,
+    fn forget_reservations(
+        &self,
         reservations: impl Iterator<Item = GrainReservation>,
-        file: &mut File,
-    ) -> io::Result<Vec<GrainId>> {
-        todo!("commit reservations")
-    }
+    ) -> io::Result<()> {
+        let mut active_state = self.state.atlas.lock();
 
-    fn forget_reservations(&mut self, reservations: impl Iterator<Item = GrainReservation>) {}
+        active_state.forget_reservations(reservations)
+    }
 }
 
 #[derive(Debug)]
 pub struct GrainReservation {
     pub grain_id: GrainId,
     pub offset: u64,
-    pub length: u64,
+    pub length: u32,
+    pub crc: u32,
+}
+
+#[derive(Debug)]
+struct DatabaseState {
+    atlas: Mutex<Atlas>,
+    disk_state: Mutex<DiskState>,
+    committer: Committer,
+    grain_map_pages: Mutex<LruHashMap<u64, GrainMapPage>>,
 }
 
 #[cfg(test)]
@@ -141,6 +122,51 @@ crate::io_test!(empty, {
     drop(Database::<Manager::File>::open(&path).unwrap());
     // Test opening it again.
     drop(Database::<Manager::File>::open(&path).unwrap());
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+});
+
+#[cfg(test)]
+crate::io_test!(basic_op, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    // Create the database.
+    let mut db = Database::<Manager::File>::open(&path).unwrap();
+    let mut session = db.new_session();
+    let grain_id = session.write(b"hello world").unwrap();
+    println!("Wrote to {grain_id}");
+    let committed_sequence = session.commit().unwrap();
+    println!("Batch sequence: {committed_sequence}");
+    return;
+    drop(db);
+
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+});
+
+#[cfg(test)]
+crate::io_test!(basic_abort_reuse, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    // Create the database.
+    let mut db = Database::<Manager::File>::open(&path).unwrap();
+    let mut session = db.new_session();
+    let first_grain_id = session.write(b"hello world").unwrap();
+    drop(session);
+
+    let mut session = db.new_session();
+    let second_grain_id = session.write(b"hello world").unwrap();
+    drop(session);
+
+    assert_eq!(first_grain_id, second_grain_id);
+
+    drop(db);
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
