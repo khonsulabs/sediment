@@ -222,25 +222,24 @@ where
         match self.maximum {
             // Shortening is ignored.
             Some(existing_maximum) if new_maximum <= existing_maximum => {}
-            existing_maximum => {
+            Some(existing_maximum) => {
                 let last_span = self.spans.last_mut().expect("should never be empty");
-                if let Some(existing_maximum) = existing_maximum {
-                    // The maximum is inclusive, so the new range starts
-                    // after it
-                    if let Some(new_start) = existing_maximum.checked_add(1) {
-                        if last_span.start == new_start {
-                            last_span.tag = tag;
-                        } else if last_span.tag != tag {
-                            self.spans.push(Span {
-                                tag,
-                                start: new_start,
-                            });
-                        }
+                // The maximum is inclusive, so the new range starts
+                // after it
+                if let Some(new_start) = existing_maximum.checked_add(1) {
+                    if last_span.start == new_start {
+                        last_span.tag = tag;
+                    } else if last_span.tag != tag {
+                        self.spans.push(Span {
+                            tag,
+                            start: new_start,
+                        });
                     }
-                } else {
-                    // Empty set before this extension.
-                    last_span.tag = tag;
                 }
+                self.maximum = Some(new_maximum);
+            }
+            None => {
+                self.spans.push(Span { tag, start: 0 });
                 self.maximum = Some(new_maximum);
             }
         }

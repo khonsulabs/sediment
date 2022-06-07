@@ -77,7 +77,7 @@ impl Atlas {
                         })
                 });
 
-                todo_if!(grain_maps.len() <= 1, "need to handle multiple map offsets");
+                todo_if!(grain_maps.len() > 1, "need to handle multiple map offsets");
 
                 stratum.push(StrataAtlas {
                     free_grains,
@@ -150,19 +150,21 @@ impl Atlas {
             self.allocate_new_grain_map(length, file)?
         };
 
-        let offset = self.map_strata_for_grain(grain_id, |strata| -> io::Result<u64> {
-            let grains_needed = length
-                .round_to_multiple_of(strata.grain_length)
-                .expect("practically impossible to overflow");
+        let offset = self
+            .map_strata_for_grain(grain_id, |strata| -> io::Result<u64> {
+                let grains_needed = length
+                    .round_to_multiple_of(strata.grain_length)
+                    .expect("practically impossible to overflow");
 
-            let (offset, grain_map_index) =
-                strata.offset_and_index_of_grain_data(grain_id.grain_index())?;
+                let (offset, grain_map_index) =
+                    strata.offset_and_index_of_grain_data(grain_id.grain_index())?;
 
-            strata.grain_maps[grain_map_index]
-                .allocations
-                .set(..u64::from(grains_needed), Allocation::Allocated);
-            Ok(offset)
-        })?;
+                strata.grain_maps[grain_map_index]
+                    .allocations
+                    .set(..u64::from(grains_needed), Allocation::Allocated);
+                Ok(offset)
+            })
+            .expect("reserved bad grain")?;
 
         Ok(GrainReservation {
             grain_id,
@@ -180,7 +182,7 @@ impl Atlas {
         scratch: &mut Vec<u8>,
     ) -> io::Result<Option<(u64, GrainInfo)>> {
         let (offset, page_local_index, grain_map_page_offset) =
-            self.map_strata_for_grain(grain_id, |strata| -> io::Result<(u64, usize, u64)> {
+            match self.map_strata_for_grain(grain_id, |strata| -> io::Result<(u64, usize, u64)> {
                 let (offset, grain_map_index) =
                     strata.offset_and_index_of_grain_data(grain_id.grain_index())?;
                 let page = u64::try_from(grain_map_index / 170).unwrap();
@@ -191,7 +193,11 @@ impl Atlas {
                     grain_map_offset + strata.grain_map_header_length + PAGE_SIZE_U64 * page;
 
                 Ok((offset, page_local_index, page_offset))
-            })?;
+            }) {
+                Some(Ok(result)) => result,
+                Some(Err(err)) => return Err(err),
+                None => return Ok(None),
+            };
 
         let info = page_cache.fetch_grain_info(
             grain_map_page_offset,
@@ -208,16 +214,12 @@ impl Atlas {
         &mut self,
         grain_id: GrainId,
         map: F,
-    ) -> R {
-        let basin = self
-            .basins
-            .get_mut(usize::from(grain_id.basin_index()))
-            .expect("reserved bad grain");
+    ) -> Option<R> {
+        let basin = self.basins.get_mut(usize::from(grain_id.basin_index()))?;
         let strata = basin
             .stratum
-            .get_mut(usize::from(grain_id.strata_index()))
-            .expect("reserved bad grain");
-        map(strata)
+            .get_mut(usize::from(grain_id.strata_index()))?;
+        Some(map(strata))
     }
 
     fn allocate_new_grain_map<File: io::File>(
@@ -237,7 +239,7 @@ impl Atlas {
             .enumerate()
             .find_map(|(index, basin)| (basin.stratum.len() < 255).then(|| index))
         {
-            let grain_count_exp = 1; // TODO change this. it should increment until the maximum each time we create a new map for a specific size.
+            let grain_count_exp = 0; // TODO change this. it should increment until the maximum each time we create a new map for a specific size.
             let mut strata = StrataIndex {
                 grain_map_count: 1,
                 grain_count_exp,
@@ -332,39 +334,29 @@ impl Atlas {
         Ok(start)
     }
 
-    // pub fn commit_reservations<File: io::File>(
-    //     &mut self,
-    //     reservations: impl Iterator<Item = GrainReservation>,
-    //     file: &mut File,
-    // ) -> io::Result<SequenceId> {
-    //     let new_sequence = self.header.current().sequence.next();
-    //     // TODO these reservations need to be able to be batched with other
-    //     // writers.
-
-    //     // Rewrite all grain maps affected by the reservations.
-
-    //     Ok(new_sequence)
-    // }
-
     pub fn forget_reservations(
         &mut self,
         reservations: impl Iterator<Item = GrainReservation>,
     ) -> io::Result<()> {
         for reservation in reservations {
-            self.map_strata_for_grain(reservation.grain_id, |strata| -> io::Result<()> {
-                let grains_needed = reservation
-                    .length
-                    .round_to_multiple_of(strata.grain_length)
-                    .expect("practically impossible to overflow");
+            if let Some(Err(err)) =
+                self.map_strata_for_grain(reservation.grain_id, |strata| -> io::Result<()> {
+                    let grains_needed = reservation
+                        .length
+                        .round_to_multiple_of(strata.grain_length)
+                        .expect("practically impossible to overflow");
 
-                let (start_grain, grain_map_index) =
-                    strata.grain_map_index(reservation.grain_id.grain_index())?;
-                let end_grain = start_grain + u64::from(grains_needed);
-                strata.grain_maps[grain_map_index]
-                    .allocations
-                    .set(start_grain..end_grain, Allocation::Free);
-                Ok(())
-            })?;
+                    let (start_grain, grain_map_index) =
+                        strata.grain_map_index(reservation.grain_id.grain_index())?;
+                    let end_grain = start_grain + u64::from(grains_needed);
+                    strata.grain_maps[grain_map_index]
+                        .allocations
+                        .set(start_grain..end_grain, Allocation::Free);
+                    Ok(())
+                })
+            {
+                return Err(err);
+            }
         }
         Ok(())
     }

@@ -150,10 +150,11 @@ crate::io_test!(empty, {
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
+    let manager = Manager::default();
     // Create the database.
-    drop(Database::<Manager::File>::open(&path).unwrap());
+    drop(Database::<Manager::File>::open_with_manager(&path, &manager).unwrap());
     // Test opening it again.
-    drop(Database::<Manager::File>::open(&path).unwrap());
+    drop(Database::<Manager::File>::open_with_manager(&path, &manager).unwrap());
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
@@ -165,13 +166,21 @@ crate::io_test!(basic_op, {
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
+    let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open(&path).unwrap();
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
     let mut session = db.new_session();
     let grain_id = session.write(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
     let committed_sequence = session.commit().unwrap();
     println!("Batch sequence: {committed_sequence}");
+
+    let grain_data = db.read(grain_id).unwrap().unwrap();
+    assert_eq!(grain_data.data, b"hello world");
+
+    // Reopen the database.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(grain_data.data, b"hello world");
@@ -187,8 +196,9 @@ crate::io_test!(basic_abort_reuse, {
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
+    let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open(&path).unwrap();
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
     let mut session = db.new_session();
     let first_grain_id = session.write(b"hello world").unwrap();
     drop(session);

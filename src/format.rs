@@ -392,7 +392,7 @@ impl Basin {
         }
 
         if verify_crc {
-            let total_bytes = stratum_count * 16 + 16;
+            let total_bytes = stratum_count * 16 + 32;
             let calculated_crc = crc(&bytes[4..total_bytes]);
             let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
             if calculated_crc != stored_crc {
@@ -400,8 +400,8 @@ impl Basin {
             }
         }
 
-        let sequence = BatchId::from_le_bytes_slice(&bytes[8..10]);
-        let mut offset = 16;
+        let sequence = BatchId::from_le_bytes_slice(&bytes[8..16]);
+        let mut offset = 32;
         let mut stratum = Vec::with_capacity(255);
         for _ in 0..stratum_count {
             let mut int_bytes = [0; 4];
@@ -606,10 +606,7 @@ impl GrainMap {
 
     fn unaligned_header_length_for_grain_count(grain_count: u64) -> u64 {
         // 8 bits per 8 grains, plus 12 bytes of header overhead (crc + sequence ID)
-        grain_count
-            .round_to_multiple_of(8)
-            .map(|bytes| bytes + 12)
-            .expect("impossible to overflow")
+        (grain_count + 7) / 8 + 12
     }
 
     pub fn header_length_for_grain_count(grain_count: u64) -> u64 {
