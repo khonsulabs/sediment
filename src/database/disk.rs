@@ -1,4 +1,5 @@
 use crate::{
+    database::log::CommitLog,
     format::{BasinHeader, BatchId, FileHeader, GrainMapHeader},
     io,
 };
@@ -19,7 +20,10 @@ pub struct DiskState {
 }
 
 impl DiskState {
-    pub fn recover<File: io::File>(file: &mut File, scratch: &mut Vec<u8>) -> io::Result<Self> {
+    pub fn recover<File: io::File>(
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<(Self, CommitLog)> {
         let header = if file.is_empty()? {
             // Initialize the an empty database.
             let mut header = FileHeader::default();
@@ -33,35 +37,46 @@ impl DiskState {
         let mut basins = Vec::new();
         for basin in &header.current().basins {
             let header = BasinHeader::read_from(file, basin.file_offset, &mut Vec::new(), true)?;
-            let mut stratum = Vec::with_capacity(header.current().stratum.len());
-            for strata in &header.current().stratum {
-                assert_eq!(strata.grain_map_count, 1, "need to support multiple maps");
+            let mut strata = Vec::with_capacity(header.current().strata.len());
+            for stratum in &header.current().strata {
+                assert_eq!(stratum.grain_map_count, 1, "need to support multiple maps");
 
                 let grain_map = GrainMapHeader::read_from(
                     file,
-                    strata.grain_map_location,
-                    strata.grains_per_map(),
+                    stratum.grain_map_location,
+                    stratum.grains_per_map(),
                     scratch,
                 )?;
 
-                stratum.push(StrataState {
+                strata.push(StratumState {
                     grain_maps: vec![grain_map],
                 });
             }
-            basins.push(BasinState { header, stratum });
+            basins.push(BasinState { header, strata });
         }
 
-        Ok(DiskState { header, basins })
+        let log = if header.current().log_offset > 0 {
+            CommitLog::read_from(
+                header.current().log_offset,
+                file,
+                scratch,
+                header.current().checkpoint,
+            )?
+        } else {
+            CommitLog::default()
+        };
+
+        Ok((DiskState { header, basins }, log))
     }
 }
 
 #[derive(Debug)]
 pub struct BasinState {
     pub header: BasinHeader,
-    pub stratum: Vec<StrataState>,
+    pub strata: Vec<StratumState>,
 }
 
 #[derive(Debug)]
-pub struct StrataState {
+pub struct StratumState {
     pub grain_maps: Vec<GrainMapHeader>,
 }

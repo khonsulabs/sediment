@@ -179,3 +179,10 @@ io_test!(basics, {
         std::fs::remove_file(&path).unwrap();
     }
 });
+
+pub(crate) fn invalid_data_error<E>(message: E) -> std::io::Error
+where
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    std::io::Error::new(ErrorKind::InvalidData, message)
+}

@@ -9,7 +9,7 @@ use crc::{Crc, CRC_32_MPEG_2};
 
 use crate::{
     io::{self, ext::ToIoResult, iobuffer::IoBufferExt},
-    utils::RoundToMultiple,
+    utils::Multiples,
 };
 
 /// The fundamental size and alignment of data within the file.
@@ -137,17 +137,13 @@ pub struct Header {
     pub sequence: BatchId,
     /// The [`SequenceId`] of the last batch checkpointed.
     pub checkpoint: BatchId,
+    /// The location on disk of the most recent [`LogPage`].
+    pub log_offset: u64,
     /// The list of basins. Cannot exceed 255.
     pub basins: Vec<BasinIndex>,
 }
 
 impl Header {
-    // pub fn stripe_offset(&self, stripe: GrainId) -> Option<u64> {
-    //     self.stratum
-    //         .get(usize::from(stripe.segment().0))
-    //         .map(|index| index.grains_offset + index.bytes_per_stripe() * stripe.index())
-    // }
-
     pub fn write_to<File: io::File>(
         &self,
         offset: u64,
@@ -164,6 +160,7 @@ impl Header {
         buffer[4] = self.basins.len().try_into().unwrap();
         buffer[8..16].copy_from_slice(&self.sequence.to_le_bytes());
         buffer[16..24].copy_from_slice(&self.checkpoint.to_le_bytes());
+        buffer[24..32].copy_from_slice(&self.log_offset.to_le_bytes());
         let mut length = 32;
         for basin in &self.basins {
             buffer[length..length + 8].copy_from_slice(&basin.sequence_id.to_le_bytes());
@@ -198,12 +195,13 @@ impl Header {
             let calculated_crc = crc(&bytes[4..total_bytes]);
             let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
             if calculated_crc != stored_crc {
-                return Err(std::io::Error::new(ErrorKind::InvalidData, format!("Basin CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
+                return Err(io::invalid_data_error(format!("Basin CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
         }
 
         let sequence = BatchId::from_le_bytes_slice(&bytes[8..16]);
         let checkpoint = BatchId::from_le_bytes_slice(&bytes[16..24]);
+        let log_offset = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
         let mut offset = 32;
         let mut basins = Vec::with_capacity(256);
         for _ in 0..basin_count {
@@ -220,6 +218,7 @@ impl Header {
         Ok(Self {
             sequence,
             checkpoint,
+            log_offset,
             basins,
         })
     }
@@ -328,16 +327,10 @@ impl BasinHeader {
 #[derive(Default, Clone, Debug)]
 pub struct Basin {
     pub sequence: BatchId,
-    pub stratum: Vec<StrataIndex>,
+    pub strata: Vec<StratumIndex>,
 }
 
 impl Basin {
-    // pub fn stripe_offset(&self, stripe: GrainId) -> Option<u64> {
-    //     self.stratum
-    //         .get(usize::from(stripe.segment().0))
-    //         .map(|index| index.grains_offset + index.bytes_per_stripe() * stripe.index())
-    // }
-
     pub fn write_to<File: io::File>(
         &self,
         offset: u64,
@@ -349,11 +342,11 @@ impl Basin {
         std::mem::swap(&mut buffer, scratch);
         buffer.resize(PAGE_SIZE, 0);
 
-        assert!(self.stratum.len() <= 254, "too many stratum");
-        buffer[4] = self.stratum.len().try_into().unwrap();
+        assert!(self.strata.len() <= 254, "too many strata");
+        buffer[4] = self.strata.len().try_into().unwrap();
         buffer[8..16].copy_from_slice(&self.sequence.to_le_bytes());
         let mut length = 32;
-        for stratum in &self.stratum {
+        for stratum in &self.strata {
             buffer[length..length + 4].copy_from_slice(&stratum.grain_map_count.to_le_bytes());
             length += 4;
             buffer[length] = stratum.grain_count_exp;
@@ -383,27 +376,24 @@ impl Basin {
     pub fn read_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
         assert!(bytes.len() == PAGE_SIZE);
 
-        let stratum_count = usize::from(bytes[4]);
-        if stratum_count == 255 {
-            return Err(std::io::Error::new(
-                ErrorKind::InvalidData,
-                "too many stratum",
-            ));
+        let strata_count = usize::from(bytes[4]);
+        if strata_count == 255 {
+            return Err(io::invalid_data_error("too many strata"));
         }
 
         if verify_crc {
-            let total_bytes = stratum_count * 16 + 32;
+            let total_bytes = strata_count * 16 + 32;
             let calculated_crc = crc(&bytes[4..total_bytes]);
             let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
             if calculated_crc != stored_crc {
-                return Err(std::io::Error::new(ErrorKind::InvalidData, format!("Strata CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
+                return Err(io::invalid_data_error(format!("Stratum CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
         }
 
         let sequence = BatchId::from_le_bytes_slice(&bytes[8..16]);
         let mut offset = 32;
-        let mut stratum = Vec::with_capacity(255);
-        for _ in 0..stratum_count {
+        let mut strata = Vec::with_capacity(255);
+        for _ in 0..strata_count {
             let mut int_bytes = [0; 4];
             int_bytes.copy_from_slice(&bytes[offset..offset + 4]);
             let grain_map_count = u32::from_le_bytes(int_bytes);
@@ -418,7 +408,7 @@ impl Basin {
             let grain_map_location =
                 u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
             offset += 8;
-            stratum.push(StrataIndex {
+            strata.push(StratumIndex {
                 grain_map_count,
                 grain_count_exp,
                 grain_length_exp,
@@ -426,12 +416,12 @@ impl Basin {
             });
         }
 
-        Ok(Self { sequence, stratum })
+        Ok(Self { sequence, strata })
     }
 }
 // Stored on-disk as 16 bytes.
 #[derive(Clone, Debug)]
-pub struct StrataIndex {
+pub struct StratumIndex {
     // The number of grain maps allocated.
     pub grain_map_count: u32,
     /// 2^`grain_count_exp` is the number of pages of grains each map contains.
@@ -447,7 +437,7 @@ pub struct StrataIndex {
     pub grain_map_location: u64,
 }
 
-impl StrataIndex {
+impl StratumIndex {
     pub const fn grains_per_map(&self) -> u64 {
         2_u64.pow(self.grain_count_exp as u32) * 170
     }
@@ -634,7 +624,7 @@ impl GrainMap {
             let calculated_crc = crc(&buffer[4..]);
             let stored_crc = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
             if calculated_crc != stored_crc {
-                return Err(std::io::Error::new(ErrorKind::InvalidData, format!("Grain Map CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
+                return Err(io::invalid_data_error(format!("Grain Map CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
         }
         let sequence = BatchId::from_le_bytes_slice(&buffer[4..12]);
@@ -720,10 +710,7 @@ impl GrainMapPage {
             let computed_crc = crc(&buffer[..offset]);
             let stored_crc = u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
             if stored_crc != computed_crc {
-                return Err(std::io::Error::new(
-                    ErrorKind::InvalidData,
-                    "grain map page crc check failed",
-                ));
+                return Err(io::invalid_data_error("grain map page crc check failed"));
             }
         }
         Ok(page)
@@ -848,13 +835,11 @@ impl Display for BatchId {
     }
 }
 
-/// A grain id is a reference to a stored value. Internally, this value is
-/// represented by 48 bits:
+/// A grain id is a reference to a stored value.
 ///
 /// - 8 bits: Basin Index
-/// - 8 bits: Strata Index
-/// - 32 bits: Grain Index
-///
+/// - 8 bits: Stratum Index
+/// - 48 bits: Grain Index
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct GrainId(u64);
 
@@ -862,7 +847,7 @@ impl Debug for GrainId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GrainId")
             .field("basin", &self.basin_index())
-            .field("strata", &self.strata_index())
+            .field("stratum", &self.stratum_index())
             .field("grain", &self.grain_index())
             .finish()
     }
@@ -879,7 +864,7 @@ impl GrainId {
         (self.0 >> 56) as u8
     }
 
-    pub const fn strata_index(&self) -> u8 {
+    pub const fn stratum_index(&self) -> u8 {
         ((self.0 >> 48) & 0xFF) as u8
     }
 
@@ -889,19 +874,18 @@ impl GrainId {
 
     pub fn from_parts(
         basin_index: usize,
-        strata_index: usize,
+        stratum_index: usize,
         grain_index: u64,
     ) -> io::Result<Self> {
-        match (u64::try_from(basin_index), u64::try_from(strata_index)) {
-            (Ok(basin_index), Ok(strata_index))
-                if basin_index < 255 && strata_index < 255 && grain_index < 0x1_0000_0000_0000 =>
+        match (u64::try_from(basin_index), u64::try_from(stratum_index)) {
+            (Ok(basin_index), Ok(stratum_index))
+                if basin_index < 255 && stratum_index < 255 && grain_index < 0x1_0000_0000_0000 =>
             {
-                Ok(Self(basin_index << 56 | strata_index << 48 | grain_index))
+                Ok(Self(basin_index << 56 | stratum_index << 48 | grain_index))
             }
-            (_, _) => Err(std::io::Error::new(
-                ErrorKind::InvalidData,
-                format!("argument of range ({basin_index}, {strata_index}, {grain_index}"),
-            )),
+            (_, _) => Err(io::invalid_data_error(format!(
+                "argument of range ({basin_index}, {stratum_index}, {grain_index}"
+            ))),
         }
     }
 }
@@ -912,23 +896,248 @@ fn grain_id_format_tests() {
     assert_eq!(format!("{test}"), "0102-3");
     assert_eq!(
         format!("{test:?}"),
-        "GrainId { basin: 1, strata: 2, grain: 3 }"
+        "GrainId { basin: 1, stratum: 2, grain: 3 }"
     );
 }
 
-pub struct Log {
-    /// GrainIds of stored [`LogEntry`] values that have not been checkpointed.
-    pub entries: Vec<GrainId>,
+/// A single page of the commit log.
+///
+/// Each page can contain 170 entries. Once an entry is written, it stays in the
+/// log page and is never removed. Entries can only be added. If this page has
+/// additional entries, `previous_offset` will point to an additional page of
+/// log entries. This can continue indefinitely.
+///
+/// Once all of the entries on a page have been checkpointed, the page will be
+/// freed.
+///
+/// Only entries whose `BatchId`s are greater than the checkpointed ID should be
+/// considered valid. Similarly, if the first entry in a page is the `BatchId`
+/// after the checkpoint, the previous page will have been freed and should not
+/// be loaded. This allows minimal writes to maintain the log: checkpointing
+/// does not require changing any log entries, just updating the header.
+#[derive(Debug)]
+pub struct LogPage {
+    /// The location on-disk of the previous `LogPage`. This page is only valid
+    /// if the first entry of this page is greater than the current checkpoint
+    /// plus 1.
+    pub previous_offset: u64,
+    /// The log entry indexes.
+    pub entries: [LogEntryIndex; 170],
 }
 
-pub struct LogEntry {
+impl LogPage {
+    pub fn serialize_into(&self, buffer: &mut Vec<u8>) {
+        buffer.resize(PAGE_SIZE, 0);
+
+        buffer[..8].copy_from_slice(&self.previous_offset.to_le_bytes());
+        let mut offset = 8;
+        for entry in &self.entries {
+            // No need to write any more data
+            if entry.position == 0 {
+                break;
+            }
+            buffer[offset..offset + 8].copy_from_slice(&entry.position.to_le_bytes());
+            offset += 8;
+            buffer[offset..offset + 8].copy_from_slice(&entry.batch.to_le_bytes());
+            offset += 8;
+            buffer[offset..offset + 8].copy_from_slice(
+                &entry
+                    .embedded_header
+                    .map_or(0, |grain| grain.0)
+                    .to_le_bytes(),
+            );
+            offset += 8;
+        }
+
+        // If we exited early, we want to ensure the remaining portion of the
+        // page is zeroed.
+        buffer[offset..].fill(0);
+    }
+
+    pub fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
+        if serialized.len() < 8 {
+            return Err(io::invalid_data_error("page not long enough"));
+        }
+
+        let previous_offset = u64::from_le_bytes(serialized[..8].try_into().unwrap());
+        serialized = &serialized[8..];
+        let mut entries = [LogEntryIndex::default(); 170];
+
+        let mut index = 0;
+        while serialized.len() >= 24 {
+            let data = u64::from_le_bytes(serialized[..8].try_into().unwrap());
+            let batch = BatchId::from_le_bytes_slice(&serialized[8..16]);
+            let embedded_header = u64::from_le_bytes(serialized[16..24].try_into().unwrap());
+            entries[index] = LogEntryIndex {
+                position: data,
+                batch,
+                embedded_header: if embedded_header == 0 {
+                    None
+                } else {
+                    Some(GrainId(embedded_header))
+                },
+            };
+            index += 1;
+            serialized = &serialized[24..]
+        }
+        if !serialized.is_empty() && index < 170 {
+            Err(io::invalid_data_error("extra trailing bytes"))
+        } else {
+            Ok(Self {
+                previous_offset,
+                entries,
+            })
+        }
+    }
+}
+
+impl Default for LogPage {
+    fn default() -> Self {
+        Self {
+            previous_offset: 0,
+            entries: [LogEntryIndex::default(); 170],
+        }
+    }
+}
+
+/// Metadata about a single entry in the commit log.
+#[derive(Debug, Default, Copy, Clone)]
+pub struct LogEntryIndex {
+    /// The location of the data containing a [`CommitLog`].
+    pub position: u64,
+    /// The batch of this entry.
+    pub batch: BatchId,
+    /// The embedded header at the time of this batch.
+    pub embedded_header: Option<GrainId>,
+}
+
+/// A list of changes that happened during a commit.
+#[derive(Debug, Default)]
+pub struct CommitLogEntry {
     /// The list of all changed grains.
     ///
-    /// To verify that this log entry is valid,
-    /// all GrainHeaders of affected GrainIds must be inspected to ensure they
-    /// all reflect the same sequence as this entry.
+    /// To verify that this log entry is valid, all GrainHeaders of affected
+    /// GrainIds must be inspected to ensure they all reflect the same sequence
+    /// as this entry.
     ///
     /// A full validation will require checksumming the stored values of those
     /// grains.
-    pub grain_changes: Vec<GrainId>,
+    pub grain_changes: Vec<GrainChange>,
+}
+
+impl CommitLogEntry {
+    pub fn serialize_into(&self, buffer: &mut Vec<u8>) {
+        buffer.clear();
+        // Reserve space for the CRC
+        buffer.extend([0; 4]);
+        buffer.extend(
+            u32::try_from(self.grain_changes.len())
+                .unwrap()
+                .to_le_bytes(),
+        );
+        for change in &self.grain_changes {
+            buffer.extend(change.start.0.to_le_bytes());
+            // Top 2 bits are the operation.
+            assert!(change.count < 2_u32.pow(30));
+            let op_and_count = (change.operation as u32) << 30 | change.count;
+            buffer.extend(op_and_count.to_le_bytes());
+        }
+        let crc = crc(&buffer[4..]);
+        buffer[..4].copy_from_slice(&crc.to_le_bytes());
+
+        // Pad the structure to the next page size.
+        buffer.resize(buffer.len().round_to_multiple_of(PAGE_SIZE).unwrap(), 0);
+    }
+
+    pub fn read_from<File: io::File>(
+        offset: u64,
+        verify_crc: bool,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<Self> {
+        // This structure is always at least one page long. We'll start there to
+        // get the length.
+        let mut buffer = std::mem::take(scratch);
+        buffer.resize(PAGE_SIZE, 0);
+        let (result, mut buffer) = file.read_exact(buffer, offset);
+        result?;
+
+        let grain_count =
+            usize::try_from(u32::from_le_bytes(buffer[4..8].try_into().unwrap())).unwrap();
+        let total_length = grain_count
+            .checked_mul(12)
+            .and_then(|l| l.checked_add(8))
+            .unwrap();
+        if total_length > PAGE_SIZE {
+            // Read the remaining amount of data
+            buffer.resize(total_length, 0);
+            let (result, returned_buffer) =
+                file.read_exact(buffer.io_slice(PAGE_SIZE..), offset + PAGE_SIZE_U64);
+            buffer = returned_buffer;
+            result?;
+        }
+        *scratch = buffer;
+
+        if verify_crc {
+            let calculated_crc = crc(&scratch[4..]);
+            let stored_crc = u32::from_le_bytes(scratch[0..4].try_into().unwrap());
+            if calculated_crc != stored_crc {
+                return Err(io::invalid_data_error(format!("Commit Log Entry CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
+            }
+        }
+
+        let mut log = Self::default();
+        let mut serialized = &scratch[8..];
+        while serialized.len() >= 12 {
+            let start = GrainId(u64::from_le_bytes(serialized[..8].try_into().unwrap()));
+            let op_and_count = u32::from_le_bytes(serialized[8..12].try_into().unwrap());
+            log.grain_changes.push(GrainChange {
+                start,
+                operation: GrainOperation::try_from(op_and_count >> 30)?,
+                count: op_and_count & 0x3FFF_FFFF,
+            });
+            serialized = &serialized[12..];
+        }
+
+        if !serialized.is_empty() {
+            Err(io::invalid_data_error("extra trailing bytes"))
+        } else {
+            Ok(log)
+        }
+    }
+}
+
+/// A single change to a sequence of grains.
+#[derive(Debug)]
+pub struct GrainChange {
+    /// The operation that happened to this grain.
+    pub operation: GrainOperation,
+    /// The starting grain ID of the operation.
+    pub start: GrainId,
+    /// The number of sequential grains affected by this operation.
+    pub count: u32,
+}
+
+/// The operation being performed on the grain.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum GrainOperation {
+    /// The grain transitioned from Free to Allocated.
+    Allocate = 0,
+    /// The grain transitioned from Allocated to Archived.
+    Archive = 1,
+    /// The grain transitioned from Archived to Free,
+    Free = 2,
+}
+
+impl TryFrom<u32> for GrainOperation {
+    type Error = std::io::Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Allocate),
+            1 => Ok(Self::Archive),
+            2 => Ok(Self::Free),
+            _ => Err(io::invalid_data_error("invalid value for GrainOperation")),
+        }
+    }
 }

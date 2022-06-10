@@ -4,15 +4,18 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::{
     database::{
-        disk::{BasinState, StrataState},
+        disk::{BasinState, StratumState},
         DatabaseState, GrainReservation,
     },
-    format::{BasinHeader, BasinIndex, BatchId, GrainMapHeader, GrainMapPage, StrataIndex},
+    format::{
+        BasinHeader, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMapHeader,
+        GrainMapPage, GrainOperation, LogEntryIndex, StratumIndex,
+    },
     io::{self, ext::ToIoResult},
     todo_if,
 };
 
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub(super) struct Committer {
     commit_sync: Condvar,
     state: Mutex<CommitBatches>,
@@ -109,7 +112,7 @@ impl Committer {
                 changed = true;
                 disk_state.basins.push(BasinState {
                     header: BasinHeader::default(),
-                    stratum: Vec::new(),
+                    strata: Vec::new(),
                 });
                 disk_state.header.next_mut().basins.push(BasinIndex {
                     sequence_id: committing_batch,
@@ -118,34 +121,34 @@ impl Committer {
                 disk_state.basins.last_mut().unwrap()
             };
 
-            for (strata_index, strata_atlas) in basin_atlas.stratum.iter().enumerate() {
-                todo_if!(strata_atlas.grain_maps.len() > 1);
+            for (stratum_index, stratum_atlas) in basin_atlas.strata.iter().enumerate() {
+                todo_if!(stratum_atlas.grain_maps.len() > 1);
 
-                let strata = if strata_index < basin.stratum.len() {
-                    &mut basin.stratum[strata_index]
+                let stratum = if stratum_index < basin.strata.len() {
+                    &mut basin.strata[stratum_index]
                 } else {
                     changed = true;
                     new_pages.insert(
-                        strata_atlas.grain_maps[0].offset + strata_atlas.grain_map_header_length,
+                        stratum_atlas.grain_maps[0].offset + stratum_atlas.grain_map_header_length,
                     );
-                    basin.header.next_mut().stratum.push(StrataIndex {
-                        grain_map_count: u32::try_from(strata_atlas.grain_maps.len()).to_io()?,
-                        grain_count_exp: strata_atlas.grain_count_exp(),
-                        grain_length_exp: strata_atlas.grain_length_exp(),
-                        grain_map_location: strata_atlas.grain_maps[0].offset,
+                    basin.header.next_mut().strata.push(StratumIndex {
+                        grain_map_count: u32::try_from(stratum_atlas.grain_maps.len()).to_io()?,
+                        grain_count_exp: stratum_atlas.grain_count_exp(),
+                        grain_length_exp: stratum_atlas.grain_length_exp(),
+                        grain_map_location: stratum_atlas.grain_maps[0].offset,
                     });
-                    basin.stratum.push(StrataState {
+                    basin.strata.push(StratumState {
                         grain_maps: vec![GrainMapHeader::new(
-                            strata_atlas.grain_maps[0].offset,
-                            strata_atlas.grains_per_map,
+                            stratum_atlas.grain_maps[0].offset,
+                            stratum_atlas.grains_per_map,
                         )],
                     });
-                    modified_grain_maps.insert((basin_index, strata_index, 0));
-                    basin.stratum.last_mut().unwrap()
+                    modified_grain_maps.insert((basin_index, stratum_index, 0));
+                    basin.strata.last_mut().unwrap()
                 };
 
                 todo_if!(
-                    strata_atlas.grain_maps[0].offset != strata.grain_maps[0].offset(),
+                    stratum_atlas.grain_maps[0].offset != stratum.grain_maps[0].offset(),
                     "need to handle relocation"
                 );
             }
@@ -158,28 +161,30 @@ impl Committer {
         drop(atlas);
 
         let mut modified_pages = Vec::<(u64, GrainMapPage)>::new();
+        let mut grain_changes = Vec::with_capacity(grains.len());
         for reservation in grains {
             // Load any existing grain map pages, modify then, and add them to
             // `modified_pages`. We must keep the atlas locked as little as
             // possible during this phase.
             let basin_index = usize::from(reservation.grain_id.basin_index());
             let basin = &mut disk_state.basins[basin_index];
-            let strata_index = usize::from(reservation.grain_id.strata_index());
-            let strata_info = &basin.header.next().stratum[strata_index];
-            let strata = &mut basin.stratum[strata_index];
+            let stratum_index = usize::from(reservation.grain_id.stratum_index());
+            let stratum_info = &basin.header.next().strata[stratum_index];
+            let stratum = &mut basin.strata[stratum_index];
 
             let grain_index = reservation.grain_id.grain_index();
-            let grains_per_map = strata_info.grains_per_map();
+            let grains_per_map = stratum_info.grains_per_map();
             let grain_map_index = usize::try_from(grain_index / grains_per_map).to_io()?;
             let local_grain_index = usize::try_from(grain_index % grains_per_map).to_io()?;
             let grain_count = usize::try_from(
-                (reservation.length + strata_info.grain_length() - 1) / strata_info.grain_length(),
+                (reservation.length + stratum_info.grain_length() - 1)
+                    / stratum_info.grain_length(),
             )
             .to_io()?;
 
             todo_if!(local_grain_index >= 170);
             let grain_map_page_offset =
-                strata.grain_maps[grain_map_index].offset() + strata_info.header_length();
+                stratum.grain_maps[grain_map_index].offset() + stratum_info.header_length();
             let grain_map_page = match modified_pages.last_mut() {
                 Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
                     grain_map_page
@@ -202,7 +207,7 @@ impl Committer {
                 }
             };
 
-            strata.grain_maps[grain_map_index]
+            stratum.grain_maps[grain_map_index]
                 .next_mut()
                 .allocation_state[local_grain_index..local_grain_index + grain_count]
                 .fill(true);
@@ -214,19 +219,46 @@ impl Committer {
                 grain.length = reservation.length;
                 grain.archived_at = None;
             }
-            modified_grain_maps.insert((basin_index, strata_index, grain_map_index));
+            modified_grain_maps.insert((basin_index, stratum_index, grain_map_index));
+            grain_changes.push(GrainChange {
+                operation: GrainOperation::Allocate,
+                start: reservation.grain_id,
+                count: u32::try_from(grain_count).unwrap(),
+            });
         }
 
         // TODO These writes should be able to be parallelized
+
+        // Write the commit log for these changes.
+        let log_entry = CommitLogEntry { grain_changes };
+        log_entry.serialize_into(scratch);
+        let log_entry_offset = database
+            .file_allocations
+            .allocate(u64::try_from(scratch.len()).to_io()?, file)?;
+        let buffer = std::mem::take(scratch);
+        let (result, buffer) = file.write_all(buffer, log_entry_offset);
+        *scratch = buffer;
+        result?;
+
+        // Point to the new entry from the commit log.
+        let mut log = database.log.write();
+        log.push(LogEntryIndex {
+            position: log_entry_offset,
+            batch: committing_batch,
+            embedded_header: None,
+        });
+        log.write_to(&database.file_allocations, file, scratch)?;
+        disk_state.header.next_mut().log_offset = log.position().unwrap();
+        drop(log);
 
         for (offset, grain_map_page) in &modified_pages {
             grain_map_page.write_to(*offset, file, scratch)?;
         }
 
-        for (basin_index, strata_index, grain_map_index) in modified_grain_maps {
+        for (basin_index, stratum_index, grain_map_index) in modified_grain_maps {
             let grain_count =
-                disk_state.basins[basin_index].header.next().stratum[strata_index].grains_per_map();
-            let grain_map = &mut disk_state.basins[basin_index].stratum[strata_index].grain_maps
+                disk_state.basins[basin_index].header.next().strata[stratum_index].grains_per_map();
+            let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
                 [grain_map_index];
             grain_map.write_to(committing_batch, grain_count, file, scratch)?;
         }

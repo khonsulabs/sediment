@@ -1,16 +1,21 @@
 use std::{path::Path, sync::Arc};
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 
 use crate::{
-    database::{atlas::Atlas, committer::Committer, disk::DiskState, page_cache::PageCache},
+    database::{
+        allocations::FileAllocations, atlas::Atlas, committer::Committer, disk::DiskState,
+        log::CommitLog, page_cache::PageCache,
+    },
     format::{self, BatchId, GrainId, GrainInfo},
     io::{self, ext::ToIoResult, FileManager},
 };
 
+mod allocations;
 mod atlas;
 mod committer;
 mod disk;
+mod log;
 mod page_cache;
 mod session;
 
@@ -40,17 +45,20 @@ where
 
         let mut scratch = Vec::new();
 
-        let disk_state = DiskState::recover(&mut file, &mut scratch)?;
-        let atlas = Atlas::from_state(&disk_state, &mut file)?;
+        let (disk_state, log) = DiskState::recover(&mut file, &mut scratch)?;
+        let file_allocations = FileAllocations::new(file.len()?);
+        let atlas = Atlas::from_state(&disk_state, &file_allocations)?;
 
         Ok(Self {
             file,
             scratch,
             state: Arc::new(DatabaseState {
                 atlas: Mutex::new(atlas),
-                committer: Committer::default(),
+                log: RwLock::new(log),
                 disk_state: Mutex::new(disk_state),
+                committer: Committer::default(),
                 grain_map_page_cache: PageCache::default(),
+                file_allocations,
             }),
         })
     }
@@ -87,12 +95,12 @@ where
     /// region, preventing other writers from using this space.
     ///
     /// While the data being written may be synced during another session's
-    /// commit, the Strata is not updated with the new information until the
+    /// commit, the Stratum is not updated with the new information until the
     /// commit phase.
     fn new_grain(&mut self, length: u32) -> io::Result<GrainReservation> {
         let mut active_state = self.state.atlas.lock();
 
-        active_state.reserve_grain(length, &mut self.file)
+        active_state.reserve_grain(length, &mut self.file, &self.state.file_allocations)
     }
 
     /// Persists all of the writes to the database. When this function returns,
@@ -128,8 +136,10 @@ pub struct GrainReservation {
 struct DatabaseState {
     atlas: Mutex<Atlas>,
     disk_state: Mutex<DiskState>,
+    log: RwLock<CommitLog>,
     committer: Committer,
     grain_map_page_cache: PageCache,
+    file_allocations: FileAllocations,
 }
 
 #[derive(Debug)]

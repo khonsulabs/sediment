@@ -92,44 +92,11 @@ perform a single `fsync` operation to ensure complete data reliability.
 ## Theoretical Limits
 
 * Up to 254 Basins per file
-* Up to 254 Stratum per Basin
-* Up to 64,516 Stratum per file
+* Up to 254 Strata per Basin
+* Up to 64,516 Strata per file
 * Up to 4 billion Grains per Stratum
 * Up to 277 trillion Grains per file
 * Up to 4GB (2^32 bytes - 32 bytes) per Grain
 
 Practically speaking, a file would need no fragmentation to reach all of the
 limits.
-
-## File Layout
-
-```text
-+---------------------------
-| 0x00000 - BasinMap A
-|---------------------------
-| 0x01000 - BasinMap B
-|---------------------------
-| 0x02000 - StrataMap 1A
-|---------------------------
-| 0x03000 - StrataMap 1B
-|---------------------------
-| 0x04000 - GrainMapHeader 1.1A
-| 0x05000 - GrainMapHeader 1.1B
-| 0x06000 - Grains 1.1 Page 1
-| 0x07000 - Grains 1.1 Page 2
-|---------------------------
-| 0x08000 - GrainMapHeader 1.2A
-| 0x09000 - GrainMapHeader 1.2B
-| 0x0A000 - Grains 1.2 Page 1
-| 0x0B000 - Grains 1.2 Page 2
-|---------------------------
-| 0x0C000 - StrataMap 2A
-|---------------------------
-| 0x0D000 - StrataMap 2B
-|---------------------------
-| 0x0E000 - GrainMapHeader 2.1A
-| 0x0F000 - GrainMapHeader 2.1B
-| 0x10000 - Grains 2.1 Page 1
-| 0x11000 - Grains 2.1 Page 2
-+---------------------------
-```

@@ -6,14 +6,16 @@ use std::ops::{RangeInclusive, Sub};
 
 use num_traits::PrimInt;
 
-pub trait RoundToMultiple: Sized {
+pub trait Multiples: Sized {
     /// Rounds a number up to the nearest multiple of `factor`. This is commonly
     /// used in this crate to ensure file allocations are aligned to page
     /// boundaries.
     fn round_to_multiple_of(self, factor: Self) -> Option<Self>;
+
+    fn ceil_div_by(self, divisor: Self) -> Self;
 }
 
-impl<T> RoundToMultiple for T
+impl<T> Multiples for T
 where
     T: PrimInt,
 {
@@ -27,6 +29,11 @@ where
             self.checked_add(&(factor - one))
                 .map(|adjusted| adjusted / factor * factor)
         }
+    }
+
+    fn ceil_div_by(self, divisor: Self) -> Self {
+        assert!(divisor > T::zero());
+        (self + divisor - T::one()) / divisor
     }
 }
 
