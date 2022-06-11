@@ -1,7 +1,6 @@
 use std::{
     cmp::Ordering,
     fmt::{Debug, Display},
-    io::ErrorKind,
 };
 
 use bitvec::prelude::BitVec;
@@ -25,110 +24,6 @@ pub fn crc(data: &[u8]) -> u32 {
     digest.finalize()
 }
 
-/// The file header is made up of two [`Header`]s. This structure is always
-/// located at the beginning of the file.
-///
-/// When reading from disk, compare the stored [`SequenceId`]s. Whichever is
-/// larger should be validated (verify all reachable headers have the correct
-/// CRCs or sequence IDs). If it cannot be validated, the other header should be
-/// validated.
-///
-/// If both can't be validated, the file has been corrupted. If either can be
-/// validated, it will be used as the active state of the file. The next write
-/// *must* overwrite the version that was not used when loading from the file.
-#[derive(Default, Debug)]
-pub struct FileHeader {
-    pub active: usize,
-    pub headers: [Header; 2],
-}
-
-impl FileHeader {
-    pub fn current(&self) -> &Header {
-        &self.headers[self.active]
-    }
-
-    const fn next_index(&self) -> usize {
-        if self.active == 0 {
-            1
-        } else {
-            0
-        }
-    }
-
-    pub fn write_next(&mut self) {
-        // Copy the state from the current header to the next header
-        let current = self.current().clone();
-        *self.next_mut() = current;
-    }
-
-    pub fn next(&self) -> &Header {
-        &self.headers[self.next_index()]
-    }
-
-    pub fn next_mut(&mut self) -> &mut Header {
-        let (_, basin) = self.next_with_offset();
-        basin
-    }
-
-    pub fn move_next(&mut self) {
-        self.active = self.next_index();
-    }
-
-    fn next_with_offset(&mut self) -> (u64, &mut Header) {
-        let next = self.next_index();
-
-        (
-            u64::try_from(next * PAGE_SIZE).unwrap(),
-            &mut self.headers[next],
-        )
-    }
-
-    pub fn flush_to_file<File: io::File>(
-        &mut self,
-        new_sequence: BatchId,
-        file: &mut File,
-        scratch: &mut Vec<u8>,
-    ) -> io::Result<()> {
-        if self.headers[0].sequence.0 == 0 && self.headers[1].sequence.0 == 0 {
-            self.next_mut().sequence = new_sequence;
-            self.headers[0].write_to(0, file, true, scratch)?;
-            self.headers[1].write_to(PAGE_SIZE_U64, file, true, scratch)?;
-        } else {
-            let (offset, basin) = self.next_with_offset();
-            basin.sequence = new_sequence;
-            basin.write_to(offset, file, false, scratch)?;
-        }
-
-        file.synchronize()?;
-
-        self.move_next();
-
-        Ok(())
-    }
-
-    pub fn read_from<File: io::File>(file: &mut File, scratch: &mut Vec<u8>) -> io::Result<Self> {
-        let mut buffer = Vec::new();
-        std::mem::swap(&mut buffer, scratch);
-        buffer.resize(PAGE_SIZE * 2, 0);
-        let (result, buffer) = file.read_exact(buffer, 0);
-        *scratch = buffer;
-        result?;
-
-        let headers = [
-            Header::read_from(&scratch[..PAGE_SIZE], true)?,
-            Header::read_from(&scratch[PAGE_SIZE..], true)?,
-        ];
-
-        let active = if headers[0].sequence > headers[1].sequence {
-            0
-        } else {
-            1
-        };
-
-        Ok(Self { active, headers })
-    }
-}
-
 /// A header contains a sequence ID and a list of segment indexes. On-disk, this
 /// structure will never be longer than [`PAGE_SIZE`].
 #[derive(Default, Clone, Debug)]
@@ -147,8 +42,8 @@ impl Header {
     pub fn write_to<File: io::File>(
         &self,
         offset: u64,
-        file: &mut File,
         write_full_page: bool,
+        file: &mut File,
         scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
         let mut buffer = Vec::new();
@@ -183,7 +78,7 @@ impl Header {
         result
     }
 
-    pub fn read_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
+    pub fn deserialize_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
         assert!(bytes.len() == PAGE_SIZE);
 
         let basin_count = usize::from(bytes[4]);
@@ -229,96 +124,6 @@ impl Header {
 pub struct BasinIndex {
     pub sequence_id: BatchId,
     pub file_offset: u64,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct BasinHeader {
-    active: usize,
-    basins: [Basin; 2],
-}
-
-impl BasinHeader {
-    pub fn current(&self) -> &Basin {
-        &self.basins[self.active]
-    }
-
-    const fn next_index(&self) -> usize {
-        if self.active == 0 {
-            1
-        } else {
-            0
-        }
-    }
-
-    pub fn next(&self) -> &Basin {
-        &self.basins[self.next_index()]
-    }
-
-    pub fn next_mut(&mut self) -> &mut Basin {
-        let (_, basin) = self.next_with_offset();
-        basin
-    }
-
-    pub fn move_next(&mut self) {
-        self.active = self.next_index();
-    }
-
-    fn next_with_offset(&mut self) -> (u64, &mut Basin) {
-        let next = self.next_index();
-
-        (
-            u64::try_from(next * PAGE_SIZE).unwrap(),
-            &mut self.basins[next],
-        )
-    }
-
-    pub fn read_from<File: io::File>(
-        file: &mut File,
-        offset: u64,
-        scratch: &mut Vec<u8>,
-        verify_crc: bool,
-    ) -> io::Result<Self> {
-        let mut buffer = Vec::new();
-        std::mem::swap(&mut buffer, scratch);
-        buffer.resize(PAGE_SIZE * 2, 0);
-        let (result, buffer) = file.read_exact(buffer, offset);
-        *scratch = buffer;
-        result?;
-
-        let basins = [
-            Basin::read_from(&scratch[..PAGE_SIZE], verify_crc)?,
-            Basin::read_from(&scratch[PAGE_SIZE..], verify_crc)?,
-        ];
-
-        let active = if basins[0].sequence > basins[1].sequence {
-            0
-        } else {
-            1
-        };
-
-        Ok(Self { active, basins })
-    }
-
-    pub fn write_to<File: io::File>(
-        &mut self,
-        new_sequence: BatchId,
-        file: &mut File,
-        offset: u64,
-        scratch: &mut Vec<u8>,
-    ) -> io::Result<()> {
-        if self.basins[0].sequence.0 == 0 && self.basins[1].sequence.0 == 0 {
-            self.next_mut().sequence = new_sequence;
-            self.basins[0].write_to(offset, file, true, scratch)?;
-            self.basins[1].write_to(offset + PAGE_SIZE_U64, file, true, scratch)?;
-        } else {
-            let (basin_offset, basin) = self.next_with_offset();
-            basin.write_to(offset + basin_offset, file, false, scratch)?;
-        }
-
-        self.move_next();
-
-        Ok(())
-    }
 }
 
 /// A header contains a sequence ID and a list of segment indexes. A header is
@@ -373,7 +178,7 @@ impl Basin {
         result
     }
 
-    pub fn read_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
+    pub fn deserialize_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
         assert!(bytes.len() == PAGE_SIZE);
 
         let strata_count = usize::from(bytes[4]);
@@ -464,116 +269,6 @@ impl StratumIndex {
     }
 }
 
-#[derive(Debug)]
-pub struct GrainMapHeader {
-    offset: u64,
-    active: usize,
-    headers: [GrainMap; 2],
-}
-
-impl GrainMapHeader {
-    pub fn new(offset: u64, grain_count: u64) -> Self {
-        Self {
-            offset,
-            active: 0,
-            headers: [GrainMap::new(grain_count), GrainMap::new(grain_count)],
-        }
-    }
-
-    pub const fn offset(&self) -> u64 {
-        self.offset
-    }
-
-    pub fn current(&self) -> &GrainMap {
-        &self.headers[self.active]
-    }
-
-    const fn next_index(&self) -> usize {
-        if self.active == 0 {
-            1
-        } else {
-            0
-        }
-    }
-
-    pub fn next(&self) -> &GrainMap {
-        &self.headers[self.next_index()]
-    }
-
-    pub fn next_mut(&mut self) -> &mut GrainMap {
-        let (_, basin) = self.next_with_offset();
-        basin
-    }
-
-    pub fn move_next(&mut self) {
-        self.active = self.next_index();
-    }
-
-    fn next_with_offset(&mut self) -> (u64, &mut GrainMap) {
-        let next = self.next_index();
-
-        (
-            u64::try_from(next * PAGE_SIZE).unwrap(),
-            &mut self.headers[next],
-        )
-    }
-
-    pub fn write_to<File: io::File>(
-        &mut self,
-        new_sequence_id: BatchId,
-        grain_count: u64,
-        file: &mut File,
-        scratch: &mut Vec<u8>,
-    ) -> io::Result<()> {
-        if self.headers[0].sequence.0 == 0 && self.headers[1].sequence.0 == 0 {
-            self.next_mut().sequence = new_sequence_id;
-            self.headers[0].write_to(file, self.offset, scratch)?;
-            self.headers[1].write_to(
-                file,
-                self.offset + GrainMap::header_length_for_grain_count(grain_count),
-                scratch,
-            )?;
-        } else {
-            let (offset, basin) = self.next_with_offset();
-            basin.write_to(file, offset, scratch)?;
-        }
-
-        self.move_next();
-
-        Ok(())
-    }
-
-    pub fn read_from<File: io::File>(
-        file: &mut File,
-        offset: u64,
-        grain_count: u64,
-        scratch: &mut Vec<u8>,
-    ) -> io::Result<Self> {
-        let headers = [
-            GrainMap::read_from(file, offset, grain_count, scratch, true)?,
-            GrainMap::read_from(
-                file,
-                offset + GrainMap::header_length_for_grain_count(grain_count),
-                grain_count,
-                scratch,
-                true,
-            )?,
-        ];
-
-        let active = if headers[0].sequence > headers[1].sequence {
-            0
-        } else {
-            1
-        };
-
-        Ok(Self {
-            active,
-            offset,
-            headers,
-        })
-    }
-}
-
 /// Written in duplicate.
 #[derive(Debug, Default)]
 pub struct GrainMap {
@@ -638,8 +333,8 @@ impl GrainMap {
 
     pub fn write_to<File: io::File>(
         &self,
-        file: &mut File,
         offset: u64,
+        file: &mut File,
         scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
         let mut buffer = std::mem::take(scratch);

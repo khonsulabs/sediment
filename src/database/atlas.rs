@@ -2,7 +2,7 @@ use crate::{
     database::{
         allocations::FileAllocations, disk::DiskState, page_cache::PageCache, GrainReservation,
     },
-    format::{Allocation, BasinHeader, GrainId, GrainInfo, StratumIndex, PAGE_SIZE_U64},
+    format::{Allocation, Basin, GrainId, GrainInfo, StratumIndex, PAGE_SIZE_U64},
     io::{self, ext::ToIoResult},
     ranges::Ranges,
     todo_if,
@@ -24,7 +24,7 @@ impl Atlas {
         file_allocations.set(0..PAGE_SIZE_U64 * 2, Allocation::Allocated);
 
         let mut basins = Vec::new();
-        for (basin_index, basin) in state.header.current().basins.iter().enumerate() {
+        for (basin_index, basin) in state.header.basins.iter().enumerate() {
             file_allocations.set(
                 basin.file_offset..basin.file_offset + PAGE_SIZE_U64 * 2,
                 Allocation::Allocated,
@@ -36,7 +36,7 @@ impl Atlas {
             for (stratum_state, stratum_index) in basin_state
                 .strata
                 .iter()
-                .zip(basin_state.header.current().strata.iter())
+                .zip(basin_state.header.strata.iter())
             {
                 let grain_maps = stratum_state
                     .grain_maps
@@ -52,7 +52,7 @@ impl Atlas {
                             new: false,
                             offset: stratum_index.grain_map_location,
                             allocations: grain_map
-                                .current()
+                                .map
                                 .allocation_state
                                 .iter()
                                 .map(|bit| {
@@ -261,7 +261,7 @@ impl Atlas {
                 }],
                 grain_map_header_length,
             });
-            basin.header.next_mut().strata.push(stratum);
+            basin.header.strata.push(stratum);
             return Ok(grain_id);
         }
 
@@ -308,7 +308,7 @@ impl Atlas {
 #[derive(Debug)]
 pub struct BasinAtlas {
     pub location: u64,
-    pub header: BasinHeader,
+    pub header: Basin,
     pub strata: Vec<StratumAtlas>,
 }
 
@@ -316,7 +316,7 @@ impl BasinAtlas {
     pub fn new(location: u64) -> Self {
         Self {
             location,
-            header: BasinHeader::default(),
+            header: Basin::default(),
             strata: Vec::new(),
         }
     }

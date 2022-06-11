@@ -4,12 +4,12 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::{
     database::{
-        disk::{BasinState, StratumState},
+        disk::{BasinState, GrainMapState, StratumState},
         DatabaseState, GrainReservation,
     },
     format::{
-        BasinHeader, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMapHeader,
-        GrainMapPage, GrainOperation, LogEntryIndex, StratumIndex,
+        BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMapPage, GrainOperation,
+        LogEntryIndex, StratumIndex, PAGE_SIZE_U64,
     },
     io::{self, ext::ToIoResult},
     todo_if,
@@ -90,8 +90,7 @@ impl Committer {
 
         let mut disk_state = database.disk_state.lock();
 
-        disk_state.header.write_next();
-        let committing_batch = disk_state.header.next().sequence.next();
+        let committing_batch = disk_state.header.sequence.next();
 
         // Gather info about new basins and strata that the atlas has allocated.
         let atlas = database.atlas.lock();
@@ -102,19 +101,15 @@ impl Committer {
             let mut changed = false;
             let basin = if basin_index < disk_state.basins.len() {
                 todo_if!(
-                    disk_state.header.next_mut().basins[basin_index].file_offset
-                        != basin_atlas.location,
+                    disk_state.header.basins[basin_index].file_offset != basin_atlas.location,
                     "need to handle relocation"
                 );
 
                 &mut disk_state.basins[basin_index]
             } else {
                 changed = true;
-                disk_state.basins.push(BasinState {
-                    header: BasinHeader::default(),
-                    strata: Vec::new(),
-                });
-                disk_state.header.next_mut().basins.push(BasinIndex {
+                disk_state.basins.push(BasinState::default());
+                disk_state.header.basins.push(BasinIndex {
                     sequence_id: committing_batch,
                     file_offset: basin_atlas.location,
                 });
@@ -131,14 +126,14 @@ impl Committer {
                     new_pages.insert(
                         stratum_atlas.grain_maps[0].offset + stratum_atlas.grain_map_header_length,
                     );
-                    basin.header.next_mut().strata.push(StratumIndex {
+                    basin.header.strata.push(StratumIndex {
                         grain_map_count: u32::try_from(stratum_atlas.grain_maps.len()).to_io()?,
                         grain_count_exp: stratum_atlas.grain_count_exp(),
                         grain_length_exp: stratum_atlas.grain_length_exp(),
                         grain_map_location: stratum_atlas.grain_maps[0].offset,
                     });
                     basin.strata.push(StratumState {
-                        grain_maps: vec![GrainMapHeader::new(
+                        grain_maps: vec![GrainMapState::new(
                             stratum_atlas.grain_maps[0].offset,
                             stratum_atlas.grains_per_map,
                         )],
@@ -148,7 +143,7 @@ impl Committer {
                 };
 
                 todo_if!(
-                    stratum_atlas.grain_maps[0].offset != stratum.grain_maps[0].offset(),
+                    stratum_atlas.grain_maps[0].offset != stratum.grain_maps[0].offset,
                     "need to handle relocation"
                 );
             }
@@ -169,7 +164,7 @@ impl Committer {
             let basin_index = usize::from(reservation.grain_id.basin_index());
             let basin = &mut disk_state.basins[basin_index];
             let stratum_index = usize::from(reservation.grain_id.stratum_index());
-            let stratum_info = &basin.header.next().strata[stratum_index];
+            let stratum_info = &basin.header.strata[stratum_index];
             let stratum = &mut basin.strata[stratum_index];
 
             let grain_index = reservation.grain_id.grain_index();
@@ -184,7 +179,7 @@ impl Committer {
 
             todo_if!(local_grain_index >= 170);
             let grain_map_page_offset =
-                stratum.grain_maps[grain_map_index].offset() + stratum_info.header_length();
+                stratum.grain_maps[grain_map_index].offset + stratum_info.header_length();
             let grain_map_page = match modified_pages.last_mut() {
                 Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
                     grain_map_page
@@ -207,9 +202,8 @@ impl Committer {
                 }
             };
 
-            stratum.grain_maps[grain_map_index]
-                .next_mut()
-                .allocation_state[local_grain_index..local_grain_index + grain_count]
+            stratum.grain_maps[grain_map_index].map.allocation_state
+                [local_grain_index..local_grain_index + grain_count]
                 .fill(true);
             for local_grain_index in local_grain_index..local_grain_index + grain_count {
                 let grain = &mut grain_map_page.grains[local_grain_index];
@@ -248,7 +242,7 @@ impl Committer {
             embedded_header: None,
         });
         log.write_to(&database.file_allocations, file, scratch)?;
-        disk_state.header.next_mut().log_offset = log.position().unwrap();
+        disk_state.header.log_offset = log.position().unwrap();
         drop(log);
 
         for (offset, grain_map_page) in &modified_pages {
@@ -256,27 +250,39 @@ impl Committer {
         }
 
         for (basin_index, stratum_index, grain_map_index) in modified_grain_maps {
-            let grain_count =
-                disk_state.basins[basin_index].header.next().strata[stratum_index].grains_per_map();
             let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
                 [grain_map_index];
-            grain_map.write_to(committing_batch, grain_count, file, scratch)?;
+            grain_map.map.sequence = committing_batch;
+            let offset = grain_map.offset_to_write_at();
+            grain_map.map.write_to(offset, file, scratch)?;
+            grain_map.first_is_current = !grain_map.first_is_current;
         }
 
         for basin_index in modified_basins {
-            let offset = disk_state.header.next().basins[basin_index].file_offset;
-            disk_state.basins[basin_index].header.write_to(
-                committing_batch,
-                file,
-                offset,
-                scratch,
-            )?;
+            let mut offset = disk_state.header.basins[basin_index].file_offset;
+
+            let basin = &mut disk_state.basins[basin_index];
+            if basin.first_is_current {
+                offset += PAGE_SIZE_U64
+            }
+
+            basin.header.sequence = committing_batch;
+            basin.header.write_to(offset, file, false, scratch)?;
+            basin.first_is_current = !basin.first_is_current;
         }
 
-        disk_state.header.next_mut().sequence = committing_batch;
-        disk_state
-            .header
-            .flush_to_file(committing_batch, file, scratch)?;
+        disk_state.header.sequence = committing_batch;
+        disk_state.header.write_to(
+            if disk_state.first_header_is_current {
+                PAGE_SIZE_U64
+            } else {
+                0
+            },
+            false,
+            file,
+            scratch,
+        )?;
+        disk_state.first_header_is_current = !disk_state.first_header_is_current;
 
         // Publish the updated grain maps
         database
