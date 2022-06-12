@@ -4,7 +4,7 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::io::{self, paths::PathIds, File, FileManager};
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MemoryFileManager {
     path_ids: PathIds,
     files: Arc<Mutex<HashMap<u64, MemoryFile>>>,

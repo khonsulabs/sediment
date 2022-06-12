@@ -1,6 +1,6 @@
 use crate::{
-    database::log::CommitLog,
-    format::{Basin, GrainMap, Header, PAGE_SIZE, PAGE_SIZE_U64},
+    database::{allocations::FileAllocations, log::CommitLog},
+    format::{Allocation, Basin, GrainMap, Header, PAGE_SIZE, PAGE_SIZE_U64},
     io,
 };
 
@@ -24,7 +24,7 @@ impl DiskState {
     pub fn recover<File: io::File>(
         file: &mut File,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<(Self, CommitLog)> {
+    ) -> io::Result<(Self, CommitLog, FileAllocations)> {
         let (first_header, second_header) = if file.is_empty()? {
             // Initialize the an empty database.
             let header = Header::default();
@@ -89,9 +89,18 @@ impl DiskState {
         is_first_header: bool,
         file: &mut File,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<(Self, CommitLog)> {
+    ) -> io::Result<(Self, CommitLog, FileAllocations)> {
+        let file_allocations = FileAllocations::new(file.len()?);
+        // Allocate the file header
+        file_allocations.set(0..PAGE_SIZE_U64 * 2, Allocation::Allocated);
+
         let mut basins = Vec::new();
         for basin in &header.basins {
+            file_allocations.set(
+                basin.file_offset..basin.file_offset + PAGE_SIZE_U64 * 2,
+                Allocation::Allocated,
+            );
+
             let mut buffer = std::mem::take(scratch);
             buffer.resize(PAGE_SIZE * 2, 0);
             let (result, buffer) = file.read_exact(buffer, basin.file_offset);
@@ -122,6 +131,11 @@ impl DiskState {
             let mut strata = Vec::with_capacity(header.strata.len());
             for stratum in &header.strata {
                 assert_eq!(stratum.grain_map_count, 1, "need to support multiple maps");
+                file_allocations.set(
+                    stratum.grain_map_location
+                        ..stratum.grain_map_location + stratum.grain_map_length(),
+                    Allocation::Allocated,
+                );
 
                 let header_length =
                     GrainMap::header_length_for_grain_count(stratum.grains_per_map());
@@ -173,7 +187,13 @@ impl DiskState {
         }
 
         let log = if header.log_offset > 0 {
-            CommitLog::read_from(header.log_offset, file, scratch, header.checkpoint)?
+            CommitLog::read_from(
+                header.log_offset,
+                file,
+                scratch,
+                header.checkpoint,
+                &file_allocations,
+            )?
         } else {
             CommitLog::default()
         };
@@ -185,6 +205,7 @@ impl DiskState {
                 basins,
             },
             log,
+            file_allocations,
         ))
     }
 }

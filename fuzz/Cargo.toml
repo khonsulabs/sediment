@@ -10,10 +10,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-
-[dependencies.sediment]
-path = ".."
-features = ["test-util"]
+sediment = { path = "../sediment", features = ["test-util"] }
 
 # Prevent this from interfering with workspaces
 # [workspace]

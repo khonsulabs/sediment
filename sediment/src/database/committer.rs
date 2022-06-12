@@ -8,11 +8,12 @@ use crate::{
         DatabaseState, GrainReservation,
     },
     format::{
-        BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMapPage, GrainOperation,
-        LogEntryIndex, StratumIndex, PAGE_SIZE_U64,
+        crc, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMapPage, GrainOperation,
+        LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
     io::{self, ext::ToIoResult},
     todo_if,
+    utils::Multiples,
 };
 
 #[derive(Debug, Default)]
@@ -226,6 +227,10 @@ impl Committer {
         // Write the commit log for these changes.
         let log_entry = CommitLogEntry { grain_changes };
         log_entry.serialize_into(scratch);
+        let log_entry_crc = crc(scratch);
+        let log_entry_len = u32::try_from(scratch.len()).to_io()?;
+        // pad the entry to the next page size
+        scratch.resize(scratch.len().round_to_multiple_of(PAGE_SIZE).unwrap(), 0);
         let log_entry_offset = database
             .file_allocations
             .allocate(u64::try_from(scratch.len()).to_io()?, file)?;
@@ -236,11 +241,15 @@ impl Committer {
 
         // Point to the new entry from the commit log.
         let mut log = database.log.write();
-        log.push(LogEntryIndex {
-            position: log_entry_offset,
-            batch: committing_batch,
-            embedded_header: None,
-        });
+        log.push(
+            committing_batch,
+            LogEntryIndex {
+                position: log_entry_offset,
+                length: log_entry_len,
+                crc: log_entry_crc,
+                embedded_header: None,
+            },
+        );
         log.write_to(&database.file_allocations, file, scratch)?;
         disk_state.header.log_offset = log.position().unwrap();
         drop(log);

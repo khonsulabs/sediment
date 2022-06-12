@@ -5,7 +5,7 @@ use std::{
 
 use crate::io::{self, paths::PathIds, BufferResult, File, FileManager};
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct StdFileManager {
     path_ids: PathIds,
 }
@@ -30,6 +30,7 @@ impl FileManager for StdFileManager {
     }
 }
 
+#[derive(Debug)]
 pub struct StdFile {
     file: std::fs::File,
     location: u64,

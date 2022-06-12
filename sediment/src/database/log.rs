@@ -24,12 +24,14 @@ impl CommitLog {
         file: &mut File,
         scratch: &mut Vec<u8>,
         checkpoint: BatchId,
+        file_allocations: &FileAllocations,
     ) -> io::Result<Self> {
         let mut pages = VecDeque::new();
         let mut reached_checkpoint = false;
         scratch.resize(PAGE_SIZE, 0);
         while offset != 0 && !reached_checkpoint {
             // TODO add a sanity check that offset is page-aligned
+            file_allocations.set(offset..offset + PAGE_SIZE_U64, Allocation::Allocated);
 
             let buffer = std::mem::take(scratch);
             let (result, buffer) = file.read_exact(buffer, offset);
@@ -37,8 +39,18 @@ impl CommitLog {
             result?;
 
             let page = LogPage::deserialize_from(scratch)?;
+            for entry in &page.entries {
+                if entry.position > 0 {
+                    file_allocations.set(
+                        entry.position..entry.position + u64::from(entry.length),
+                        Allocation::Allocated,
+                    );
+                } else {
+                    break;
+                }
+            }
             let next_offset = page.previous_offset;
-            reached_checkpoint = page.entries[0].batch <= checkpoint;
+            reached_checkpoint = page.first_batch_id <= checkpoint;
             pages.push_front(CommitLogPage {
                 offset: Some(offset),
                 page,
@@ -49,12 +61,14 @@ impl CommitLog {
         let tail_checkpoint_index = pages
             .front()
             .and_then(|commit_page| {
-                commit_page
-                    .page
-                    .entries
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, entry)| (entry.batch > checkpoint).then(|| index))
+                if let Some(commits_after_first) =
+                    checkpoint.0.checked_sub(commit_page.page.first_batch_id.0)
+                {
+                    assert!(commits_after_first < 170);
+                    Some(usize::try_from(commits_after_first).unwrap())
+                } else {
+                    None
+                }
             })
             .unwrap_or_default();
 
@@ -66,7 +80,7 @@ impl CommitLog {
                     .entries
                     .iter()
                     .enumerate()
-                    .find_map(|(index, entry)| (entry.batch.0 == 0).then(|| index))
+                    .find_map(|(index, entry)| (entry.position != 0).then(|| index))
             })
             .unwrap_or_default();
 
@@ -109,7 +123,8 @@ impl CommitLog {
         Ok(())
     }
 
-    pub fn push(&mut self, entry: LogEntryIndex) {
+    pub fn push(&mut self, batch: BatchId, entry: LogEntryIndex) {
+        // TODO assert batch
         if self.pages.is_empty() || self.head_insert_index == 170 {
             // Create a new empty log page for this entry.
             let previous_offset = self
@@ -120,6 +135,7 @@ impl CommitLog {
             self.pages.push_back(CommitLogPage {
                 page: LogPage {
                     previous_offset,
+                    first_batch_id: batch,
                     ..LogPage::default()
                 },
                 offset: None,
@@ -132,33 +148,33 @@ impl CommitLog {
         self.head_insert_index += 1;
     }
 
-    pub fn checkpoint(&mut self, last_committed: BatchId, allocations: &mut FileAllocations) {
-        while let Some(page_state) = self.pages.front() {
-            match page_state
-                .page
-                .entries
-                .iter()
-                .enumerate()
-                .find(|(_, entry)| entry.batch > last_committed)
-            {
-                Some((keep_index, _)) => {
-                    self.tail_checkpoint_index = keep_index;
-                    break;
-                }
-                None => {
-                    // No IDs found that should be kept, remove the page.
-                    if let Some(removed_offset) =
-                        self.pages.pop_front().and_then(|removed| removed.offset)
-                    {
-                        allocations.set(
-                            removed_offset..removed_offset + PAGE_SIZE_U64,
-                            Allocation::Free,
-                        );
-                    }
-                }
-            }
-        }
-    }
+    // pub fn checkpoint(&mut self, last_committed: BatchId, allocations: &mut FileAllocations) {
+    //     while let Some(page_state) = self.pages.front() {
+    //         match page_state
+    //             .page
+    //             .entries
+    //             .iter()
+    //             .enumerate()
+    //             .find(|(_, entry)| entry.batch > last_committed)
+    //         {
+    //             Some((keep_index, _)) => {
+    //                 self.tail_checkpoint_index = keep_index;
+    //                 break;
+    //             }
+    //             None => {
+    //                 // No IDs found that should be kept, remove the page.
+    //                 if let Some(removed_offset) =
+    //                     self.pages.pop_front().and_then(|removed| removed.offset)
+    //                 {
+    //                     allocations.set(
+    //                         removed_offset..removed_offset + PAGE_SIZE_U64,
+    //                         Allocation::Free,
+    //                     );
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 #[derive(Debug, Default)]

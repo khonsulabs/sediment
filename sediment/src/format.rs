@@ -1,6 +1,8 @@
 use std::{
     cmp::Ordering,
     fmt::{Debug, Display},
+    num::ParseIntError,
+    str::FromStr,
 };
 
 use bitvec::prelude::BitVec;
@@ -263,6 +265,7 @@ impl StratumIndex {
 
     pub fn grain_map_length(&self) -> u64 {
         self.header_length()
+            + u64::from(self.grain_map_count) * PAGE_SIZE_U64
             + (self.grains_per_map() * u64::from(self.grain_length()))
                 .round_to_multiple_of(PAGE_SIZE_U64)
                 .unwrap()
@@ -554,6 +557,38 @@ impl Display for GrainId {
     }
 }
 
+impl FromStr for GrainId {
+    type Err = InvalidGrainId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (basin_and_stratum, grain) = s.split_once('-').ok_or(InvalidGrainId)?;
+        if basin_and_stratum.len() != 4 {
+            return Err(InvalidGrainId);
+        }
+        let basin = u8::from_str_radix(&basin_and_stratum[..2], 16)?;
+        let stratum = u8::from_str_radix(&basin_and_stratum[2..4], 16)?;
+        let grain = u64::from_str_radix(grain, 16)?;
+        GrainId::new(basin, stratum, grain)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct InvalidGrainId;
+
+impl From<ParseIntError> for InvalidGrainId {
+    fn from(_: ParseIntError) -> Self {
+        Self
+    }
+}
+
+impl Display for InvalidGrainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid grain id")
+    }
+}
+
+impl std::error::Error for InvalidGrainId {}
+
 impl GrainId {
     pub const fn basin_index(&self) -> u8 {
         (self.0 >> 56) as u8
@@ -567,16 +602,29 @@ impl GrainId {
         self.0 & 0xFFFF_FFFF_FFFF
     }
 
+    pub fn new(
+        basin_index: u8,
+        stratum_index: u8,
+        grain_index: u64,
+    ) -> Result<GrainId, InvalidGrainId> {
+        let basin_index = u64::from(basin_index);
+        let stratum_index = u64::from(stratum_index);
+
+        if basin_index < 255 && stratum_index < 255 && grain_index < 0x1_0000_0000_0000 {
+            Ok(Self(basin_index << 56 | stratum_index << 48 | grain_index))
+        } else {
+            Err(InvalidGrainId)
+        }
+    }
+
     pub fn from_parts(
         basin_index: usize,
         stratum_index: usize,
         grain_index: u64,
     ) -> io::Result<Self> {
-        match (u64::try_from(basin_index), u64::try_from(stratum_index)) {
-            (Ok(basin_index), Ok(stratum_index))
-                if basin_index < 255 && stratum_index < 255 && grain_index < 0x1_0000_0000_0000 =>
-            {
-                Ok(Self(basin_index << 56 | stratum_index << 48 | grain_index))
+        match (u8::try_from(basin_index), u8::try_from(stratum_index)) {
+            (Ok(basin_index), Ok(stratum_index)) => {
+                Self::new(basin_index, stratum_index, grain_index).map_err(io::invalid_data_error)
             }
             (_, _) => Err(io::invalid_data_error(format!(
                 "argument of range ({basin_index}, {stratum_index}, {grain_index}"
@@ -616,6 +664,9 @@ pub struct LogPage {
     /// if the first entry of this page is greater than the current checkpoint
     /// plus 1.
     pub previous_offset: u64,
+    /// The batch id of entry 0. Each entry after is the next number. No batch
+    /// id will be skipped.
+    pub first_batch_id: BatchId,
     /// The log entry indexes.
     pub entries: [LogEntryIndex; 170],
 }
@@ -625,7 +676,8 @@ impl LogPage {
         buffer.resize(PAGE_SIZE, 0);
 
         buffer[..8].copy_from_slice(&self.previous_offset.to_le_bytes());
-        let mut offset = 8;
+        buffer[8..16].copy_from_slice(&self.first_batch_id.to_le_bytes());
+        let mut offset = 16;
         for entry in &self.entries {
             // No need to write any more data
             if entry.position == 0 {
@@ -633,8 +685,10 @@ impl LogPage {
             }
             buffer[offset..offset + 8].copy_from_slice(&entry.position.to_le_bytes());
             offset += 8;
-            buffer[offset..offset + 8].copy_from_slice(&entry.batch.to_le_bytes());
-            offset += 8;
+            buffer[offset..offset + 4].copy_from_slice(&entry.crc.to_le_bytes());
+            offset += 4;
+            buffer[offset..offset + 4].copy_from_slice(&entry.length.to_le_bytes());
+            offset += 4;
             buffer[offset..offset + 8].copy_from_slice(
                 &entry
                     .embedded_header
@@ -650,22 +704,25 @@ impl LogPage {
     }
 
     pub fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
-        if serialized.len() < 8 {
+        if serialized.len() < 16 {
             return Err(io::invalid_data_error("page not long enough"));
         }
 
         let previous_offset = u64::from_le_bytes(serialized[..8].try_into().unwrap());
-        serialized = &serialized[8..];
+        let first_batch_id = BatchId::from_le_bytes_slice(&serialized[8..16]);
+        serialized = &serialized[16..];
         let mut entries = [LogEntryIndex::default(); 170];
 
         let mut index = 0;
         while serialized.len() >= 24 {
-            let data = u64::from_le_bytes(serialized[..8].try_into().unwrap());
-            let batch = BatchId::from_le_bytes_slice(&serialized[8..16]);
+            let position = u64::from_le_bytes(serialized[..8].try_into().unwrap());
+            let crc = u32::from_le_bytes(serialized[8..12].try_into().unwrap());
+            let length = u32::from_le_bytes(serialized[12..16].try_into().unwrap());
             let embedded_header = u64::from_le_bytes(serialized[16..24].try_into().unwrap());
             entries[index] = LogEntryIndex {
-                position: data,
-                batch,
+                position,
+                length,
+                crc,
                 embedded_header: if embedded_header == 0 {
                     None
                 } else {
@@ -679,6 +736,7 @@ impl LogPage {
             Err(io::invalid_data_error("extra trailing bytes"))
         } else {
             Ok(Self {
+                first_batch_id,
                 previous_offset,
                 entries,
             })
@@ -690,6 +748,7 @@ impl Default for LogPage {
     fn default() -> Self {
         Self {
             previous_offset: 0,
+            first_batch_id: BatchId(0),
             entries: [LogEntryIndex::default(); 170],
         }
     }
@@ -700,8 +759,8 @@ impl Default for LogPage {
 pub struct LogEntryIndex {
     /// The location of the data containing a [`CommitLog`].
     pub position: u64,
-    /// The batch of this entry.
-    pub batch: BatchId,
+    pub length: u32,
+    pub crc: u32,
     /// The embedded header at the time of this batch.
     pub embedded_header: Option<GrainId>,
 }
@@ -723,13 +782,6 @@ pub struct CommitLogEntry {
 impl CommitLogEntry {
     pub fn serialize_into(&self, buffer: &mut Vec<u8>) {
         buffer.clear();
-        // Reserve space for the CRC
-        buffer.extend([0; 4]);
-        buffer.extend(
-            u32::try_from(self.grain_changes.len())
-                .unwrap()
-                .to_le_bytes(),
-        );
         for change in &self.grain_changes {
             buffer.extend(change.start.0.to_le_bytes());
             // Top 2 bits are the operation.
@@ -737,52 +789,41 @@ impl CommitLogEntry {
             let op_and_count = (change.operation as u32) << 30 | change.count;
             buffer.extend(op_and_count.to_le_bytes());
         }
-        let crc = crc(&buffer[4..]);
-        buffer[..4].copy_from_slice(&crc.to_le_bytes());
-
-        // Pad the structure to the next page size.
-        buffer.resize(buffer.len().round_to_multiple_of(PAGE_SIZE).unwrap(), 0);
     }
 
-    pub fn read_from<File: io::File>(
-        offset: u64,
-        verify_crc: bool,
-        file: &mut File,
-        scratch: &mut Vec<u8>,
-    ) -> io::Result<Self> {
+    pub fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
         // This structure is always at least one page long. We'll start there to
         // get the length.
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(PAGE_SIZE, 0);
-        let (result, mut buffer) = file.read_exact(buffer, offset);
-        result?;
+        // let mut buffer = std::mem::take(scratch);
+        // buffer.resize(PAGE_SIZE, 0);
+        // let (result, mut buffer) = file.read_exact(buffer, offset);
+        // result?;
 
-        let grain_count =
-            usize::try_from(u32::from_le_bytes(buffer[4..8].try_into().unwrap())).unwrap();
-        let total_length = grain_count
-            .checked_mul(12)
-            .and_then(|l| l.checked_add(8))
-            .unwrap();
-        if total_length > PAGE_SIZE {
-            // Read the remaining amount of data
-            buffer.resize(total_length, 0);
-            let (result, returned_buffer) =
-                file.read_exact(buffer.io_slice(PAGE_SIZE..), offset + PAGE_SIZE_U64);
-            buffer = returned_buffer;
-            result?;
-        }
-        *scratch = buffer;
+        // let grain_count =
+        //     usize::try_from(u32::from_le_bytes(serialized[4..8].try_into().unwrap())).unwrap();
+        // let total_length = grain_count
+        //     .checked_mul(12)
+        //     .and_then(|l| l.checked_add(8))
+        //     .unwrap();
+        // if total_length > PAGE_SIZE {
+        //     // Read the remaining amount of data
+        //     buffer.resize(total_length, 0);
+        //     let (result, returned_buffer) =
+        //         file.read_exact(buffer.io_slice(PAGE_SIZE..), offset + PAGE_SIZE_U64);
+        //     buffer = returned_buffer;
+        //     result?;
+        // }
+        // *scratch = buffer;
 
-        if verify_crc {
-            let calculated_crc = crc(&scratch[4..]);
-            let stored_crc = u32::from_le_bytes(scratch[0..4].try_into().unwrap());
-            if calculated_crc != stored_crc {
-                return Err(io::invalid_data_error(format!("Commit Log Entry CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
-            }
-        }
+        // if verify_crc {
+        //     let calculated_crc = crc(&scratch[4..]);
+        //     let stored_crc = u32::from_le_bytes(scratch[0..4].try_into().unwrap());
+        //     if calculated_crc != stored_crc {
+        //         return Err(io::invalid_data_error(format!("Commit Log Entry CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
+        //     }
+        // }
 
         let mut log = Self::default();
-        let mut serialized = &scratch[8..];
         while serialized.len() >= 12 {
             let start = GrainId(u64::from_le_bytes(serialized[..8].try_into().unwrap()));
             let op_and_count = u32::from_le_bytes(serialized[8..12].try_into().unwrap());

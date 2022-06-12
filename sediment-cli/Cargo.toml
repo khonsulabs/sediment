@@ -1,0 +1,12 @@
+[package]
+name = "sediment-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sediment = { path = "../sediment" }
+clap = { version = "3.0.18", features = ["derive"] }
+reedline = "0.6"
+pretty-hex = "0.3.0"

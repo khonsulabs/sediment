@@ -3,7 +3,7 @@ use std::{cmp::Ordering, ops::Range};
 use parking_lot::Mutex;
 
 use crate::{
-    format::{Allocation, PAGE_SIZE_U64},
+    format::{Allocation, PAGE_SIZE, PAGE_SIZE_U64},
     io,
     ranges::{Ranges, Span},
     utils::Multiples,
@@ -39,9 +39,10 @@ impl FileAllocations {
         }
 
         if let Some((_, range)) = best_allocation {
+            // TODO don't take the whole range if it's not needed
             let location = *range.start();
             allocations.set(range, Allocation::Allocated);
-            return Ok(location);
+            return Ok(location * PAGE_SIZE_U64);
         }
 
         let current_length = allocations.maximum().unwrap() + 1;

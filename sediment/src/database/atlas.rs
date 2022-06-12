@@ -19,16 +19,9 @@ pub struct Atlas {
 }
 
 impl Atlas {
-    pub fn from_state(state: &DiskState, file_allocations: &FileAllocations) -> io::Result<Self> {
-        // Allocate the file header
-        file_allocations.set(0..PAGE_SIZE_U64 * 2, Allocation::Allocated);
-
+    pub fn from_state(state: &DiskState) -> io::Result<Self> {
         let mut basins = Vec::new();
         for (basin_index, basin) in state.header.basins.iter().enumerate() {
-            file_allocations.set(
-                basin.file_offset..basin.file_offset + PAGE_SIZE_U64 * 2,
-                Allocation::Allocated,
-            );
             let basin_state = &state.basins[basin_index];
 
             let mut strata = Vec::with_capacity(basin_state.strata.len());
@@ -41,29 +34,21 @@ impl Atlas {
                 let grain_maps = stratum_state
                     .grain_maps
                     .iter()
-                    .map(|grain_map| {
-                        file_allocations.set(
-                            stratum_index.grain_map_location
-                                ..stratum_index.grain_map_location
-                                    + stratum_index.grain_map_length(),
-                            Allocation::Allocated,
-                        );
-                        GrainMapAtlas {
-                            new: false,
-                            offset: stratum_index.grain_map_location,
-                            allocations: grain_map
-                                .map
-                                .allocation_state
-                                .iter()
-                                .map(|bit| {
-                                    if *bit {
-                                        Allocation::Allocated
-                                    } else {
-                                        Allocation::Free
-                                    }
-                                })
-                                .collect(),
-                        }
+                    .map(|grain_map| GrainMapAtlas {
+                        new: false,
+                        offset: stratum_index.grain_map_location,
+                        allocations: grain_map
+                            .map
+                            .allocation_state
+                            .iter()
+                            .map(|bit| {
+                                if *bit {
+                                    Allocation::Allocated
+                                } else {
+                                    Allocation::Free
+                                }
+                            })
+                            .collect(),
                     })
                     .collect::<Vec<_>>();
 
@@ -178,8 +163,8 @@ impl Atlas {
             match self.map_stratum_for_grain(grain_id, |stratum| -> io::Result<(u64, usize, u64)> {
                 let (offset, grain_map_index) =
                     stratum.offset_and_index_of_grain_data(grain_id.grain_index())?;
-                let page = u64::try_from(grain_map_index / 170).unwrap();
-                let page_local_index = grain_map_index % 170;
+                let page = grain_id.grain_index() / 170;
+                let page_local_index = usize::try_from(grain_id.grain_index() % 170).unwrap();
 
                 let grain_map_offset = stratum.grain_maps[grain_map_index].offset;
                 let page_offset =
@@ -240,9 +225,8 @@ impl Atlas {
                 grain_length_exp,
                 grain_map_location: 0,
             };
-            let grain_map_header_length = stratum.header_length();
-            stratum.grain_map_location = file_allocations
-                .allocate(grain_map_header_length + stratum.grain_map_length(), file)?;
+            stratum.grain_map_location =
+                file_allocations.allocate(stratum.grain_map_length(), file)?;
 
             let allocations = Ranges::new(Allocation::Free, Some(stratum.grains_per_map()));
 
@@ -259,7 +243,7 @@ impl Atlas {
                     offset: stratum.grain_map_location,
                     allocations,
                 }],
-                grain_map_header_length,
+                grain_map_header_length: stratum.header_length(),
             });
             basin.header.strata.push(stratum);
             return Ok(grain_id);

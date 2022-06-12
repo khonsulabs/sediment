@@ -45,9 +45,8 @@ where
 
         let mut scratch = Vec::new();
 
-        let (disk_state, log) = DiskState::recover(&mut file, &mut scratch)?;
-        let file_allocations = FileAllocations::new(file.len()?);
-        let atlas = Atlas::from_state(&disk_state, &file_allocations)?;
+        let (disk_state, log, file_allocations) = DiskState::recover(&mut file, &mut scratch)?;
+        let atlas = Atlas::from_state(&disk_state)?;
 
         Ok(Self {
             file,
@@ -195,6 +194,24 @@ crate::io_test!(basic_op, {
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(grain_data.data, b"hello world");
 
+    // Add another grain
+    let mut session = db.new_session();
+    let second_grain_id = session.write(b"hello again").unwrap();
+    println!("Wrote to {second_grain_id}");
+    let committed_sequence = session.commit().unwrap();
+    println!("Batch sequence: {committed_sequence}");
+
+    // Reopen the database.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+    let grain_data = db.read(grain_id).unwrap().unwrap();
+    assert_eq!(grain_data.data, b"hello world");
+
+    let second_grain_data = db.read(second_grain_id).unwrap().unwrap();
+    assert_eq!(second_grain_data.data, b"hello again");
+
+    drop(db);
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
