@@ -303,3 +303,38 @@ crate::io_test!(basic_abort_reuse, {
         std::fs::remove_file(&path).unwrap();
     }
 });
+
+#[cfg(test)]
+crate::io_test!(multiple_strata, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    let manager = Manager::default();
+    // Create the database.
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut session = db.new_session();
+    let first_grain_id = session.write(b"test").unwrap();
+    session.commit().unwrap();
+    let mut session = db.new_session();
+    let second_grain_id = session.write(b"at least 17 bytes").unwrap();
+    session.commit().unwrap();
+    assert_ne!(
+        first_grain_id.stratum_index(),
+        second_grain_id.stratum_index()
+    );
+
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+    let first_grain_data = db.read(first_grain_id).unwrap().unwrap();
+    assert_eq!(first_grain_data.data, b"test");
+
+    let second_grain_data = db.read(second_grain_id).unwrap().unwrap();
+    assert_eq!(second_grain_data.data, b"at least 17 bytes");
+
+    drop(db);
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+});

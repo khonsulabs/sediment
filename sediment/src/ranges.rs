@@ -75,7 +75,7 @@ where
             self.spans[0].start = 0;
             self.spans[0].tag = tag;
             return;
-        } else if start == end {
+        } else if start > end {
             // No-op
             return;
         }
@@ -330,6 +330,15 @@ where
         }
         collected
     }
+}
+
+#[test]
+fn simple_overwrite_test() {
+    let mut ranges = Ranges::new(0, Some(2));
+    ranges.set(1..2, 1);
+    assert_eq!(ranges.get(0), &0);
+    assert_eq!(ranges.get(1), &1);
+    assert_eq!(ranges.get(0), &0);
 }
 
 #[test]

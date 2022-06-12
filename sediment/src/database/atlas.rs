@@ -93,9 +93,10 @@ impl Atlas {
 
         for (basin_index, basin) in self.basins.iter_mut().enumerate() {
             for (stratum_index, stratum) in basin.strata.iter_mut().enumerate() {
-                let grains_needed = length
-                    .round_to_multiple_of(stratum.grain_length)
-                    .expect("value too large");
+                let grains_needed = length.ceil_div_by(stratum.grain_length);
+                if grains_needed > 4 {
+                    continue;
+                }
 
                 if let Some(grain_index) = stratum.grain_maps.iter().enumerate().find_map(
                     |(grain_map_index, grain_map)| {

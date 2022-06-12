@@ -33,7 +33,8 @@ impl CommitLog {
             // TODO add a sanity check that offset is page-aligned
             file_allocations.set(offset..offset + PAGE_SIZE_U64, Allocation::Allocated);
 
-            let buffer = std::mem::take(scratch);
+            let mut buffer = std::mem::take(scratch);
+            buffer.resize(PAGE_SIZE, 0);
             let (result, buffer) = file.read_exact(buffer, offset);
             *scratch = buffer;
             result?;
@@ -75,12 +76,14 @@ impl CommitLog {
         let head_insert_index = pages
             .back()
             .and_then(|commit_page| {
-                commit_page
-                    .page
-                    .entries
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, entry)| (entry.position != 0).then(|| index))
+                if commit_page.page.entries[0].position > 0 {
+                    commit_page.page.entries[1..]
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, entry)| (entry.position == 0).then(|| index + 1))
+                } else {
+                    None
+                }
             })
             .unwrap_or_default();
 
@@ -97,27 +100,34 @@ impl CommitLog {
         scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
         let last_index = self.pages.len() - 1;
-        for (_, page_state) in self
-            .pages
-            .iter_mut()
-            .enumerate()
+        let mut last_page_offset = 0;
+
+        for (page_index, page_state) in self.pages.iter_mut().enumerate() {
             // If the page has no offset or is the last page, we need to write
             // it.
-            .filter(|(index, page_state)| index == &last_index || page_state.offset.is_none())
-        {
-            let offset = if let Some(offset) = page_state.offset {
-                offset
-            } else {
-                let offset = allocations.allocate(PAGE_SIZE_U64, file)?;
-                page_state.offset = Some(offset);
-                offset
-            };
+            if page_index == last_index
+                || page_state.offset.is_none()
+                || page_state.page.previous_offset != last_page_offset
+            {
+                let offset = if let Some(offset) = page_state.offset {
+                    offset
+                } else {
+                    let offset = allocations.allocate(PAGE_SIZE_U64, file)?;
+                    page_state.offset = Some(offset);
+                    offset
+                };
 
-            page_state.page.serialize_into(scratch);
-            let buffer = std::mem::take(scratch);
-            let (result, buffer) = file.write_all(buffer, offset);
-            *scratch = buffer;
-            result?;
+                page_state.page.previous_offset = dbg!(last_page_offset);
+                page_state.page.serialize_into(scratch);
+                let buffer = std::mem::take(scratch);
+                let (result, buffer) = file.write_all(buffer, offset);
+                *scratch = buffer;
+                result?;
+
+                last_page_offset = offset;
+            } else {
+                last_page_offset = page_state.offset.unwrap();
+            }
         }
 
         Ok(())

@@ -268,6 +268,7 @@ impl Committer {
         }
 
         for basin_index in modified_basins {
+            disk_state.header.basins[basin_index].sequence_id = committing_batch;
             let mut offset = disk_state.header.basins[basin_index].file_offset;
 
             let basin = &mut disk_state.basins[basin_index];
