@@ -110,7 +110,7 @@ impl DiskState {
             let first_basin = Basin::deserialize_from(&scratch[..PAGE_SIZE], true);
             let second_basin = Basin::deserialize_from(&scratch[PAGE_SIZE..], true);
 
-            let (header, first_is_current) = match (first_basin, second_basin) {
+            let (basin_header, first_is_current) = match (first_basin, second_basin) {
                 (Ok(first_basin), _) if first_basin.sequence == basin.sequence_id => {
                     (first_basin, true)
                 }
@@ -128,8 +128,8 @@ impl DiskState {
                 }
             };
 
-            let mut strata = Vec::with_capacity(header.strata.len());
-            for stratum in &header.strata {
+            let mut strata = Vec::with_capacity(basin_header.strata.len());
+            for stratum in &basin_header.strata {
                 assert_eq!(stratum.grain_map_count, 1, "need to support multiple maps");
                 file_allocations.set(
                     stratum.grain_map_location
@@ -156,19 +156,29 @@ impl DiskState {
                 );
 
                 let (map, first_is_current) = match (first_map, second_map) {
-                        (Ok(first_map), _) if first_map.sequence == basin.sequence_id => {
+                    (Ok(first_map), Ok(second_map)) => {
+                        if first_map.sequence > second_map.sequence
+                            && first_map.sequence <= header.sequence
+                        {
                             (first_map, true)
-                        },
-                        (_, Ok(second_map)) if second_map.sequence == basin.sequence_id => {
+                        } else if second_map.sequence <= header.sequence {
                             (second_map, false)
-                        },
-                        (Ok(first_map), Ok(second_basin)) => {
-                            return Err(io::invalid_data_error(format!("neither grain map matches expected batch. First: {}, Second: {}, Expected: {}", first_map.sequence, second_basin.sequence, basin.sequence_id)))
+                        } else {
+                            return Err(io::invalid_data_error(
+                                "GrainMap error: neither batch is valid",
+                            ));
                         }
-                        (Err(err), _) | (_, Err(err)) => {
-                            return Err(err);
-                        }
-                    };
+                    }
+                    (Ok(first_map), _) if first_map.sequence <= header.sequence => {
+                        (first_map, true)
+                    }
+                    (_, Ok(second_map)) if second_map.sequence <= header.sequence => {
+                        (second_map, false)
+                    }
+                    (Err(err), _) | (_, Err(err)) => {
+                        return Err(err);
+                    }
+                };
 
                 strata.push(StratumState {
                     grain_maps: vec![GrainMapState {
@@ -181,7 +191,7 @@ impl DiskState {
             }
             basins.push(BasinState {
                 first_is_current,
-                header,
+                header: basin_header,
                 strata,
             });
         }
