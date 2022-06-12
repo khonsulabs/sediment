@@ -3,10 +3,10 @@ use std::{cmp::Ordering, ops::Range};
 use parking_lot::Mutex;
 
 use crate::{
-    format::{Allocation, PAGE_SIZE, PAGE_SIZE_U64},
+    format::{Allocation, PAGE_SIZE_U64},
     io,
     ranges::{Ranges, Span},
-    utils::Multiples,
+    utils::{Multiples, RangeLength},
 };
 
 #[derive(Debug)]
@@ -76,5 +76,17 @@ impl FileAllocations {
         assert_eq!(range.start % PAGE_SIZE_U64, 0);
         let start = range.start / PAGE_SIZE_U64;
         allocations.set(start..range.end.ceil_div_by(PAGE_SIZE_U64), allocation);
+    }
+
+    pub fn statistics(&self) -> (u64, u64) {
+        let allocations = self.0.lock();
+        let free_space = allocations
+            .iter()
+            .filter_map(|(range, tag)| (tag == &Allocation::Free).then(|| range.len()))
+            .sum::<u64>();
+        (
+            free_space * PAGE_SIZE_U64,
+            allocations.maximum().unwrap() * PAGE_SIZE_U64,
+        )
     }
 }

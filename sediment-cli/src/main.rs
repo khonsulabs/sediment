@@ -1,7 +1,9 @@
 use std::{path::PathBuf, process::exit};
 
-use clap::{Parser, Subcommand};
-use reedline::{ColumnarMenu, Completer, DefaultPrompt, Reedline, Signal};
+use bytesize::ByteSize;
+use clap::{Command, FromArgMatches, Parser, Subcommand};
+use cli_table::{Cell, Style, Table};
+use rustyline::Editor;
 use sediment::{
     database::Database,
     format::GrainId,
@@ -22,7 +24,6 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Action {
     Open,
-    Stats,
     #[clap(flatten)]
     SingleCommand(SingleCommand),
 }
@@ -36,6 +37,7 @@ enum SingleCommand {
         value: Option<String>,
         value_path: Option<PathBuf>,
     },
+    Stats,
 }
 
 fn main() {
@@ -50,30 +52,25 @@ fn main() {
     match args.command {
         Action::Open => repl(db),
         Action::SingleCommand(command) => command.execute_on(&mut db).unwrap(),
-        Action::Stats => todo!(),
     }
 }
 
-fn repl(db: Database<AnyFile>) {
-    let completer = Box::new(CommandCompleter);
-    let menu = Box::new(ColumnarMenu::default().with_name("test-menu"));
-    let prompt = DefaultPrompt::default();
+fn repl(mut db: Database<AnyFile>) {
+    let mut rl = Editor::<()>::new();
 
-    let mut line_editor = Reedline::create()
-        .with_completer(completer)
-        .with_menu(reedline::ReedlineMenu::EngineCompleter(menu));
-    while let Signal::Success(line) = line_editor.read_line(&prompt).unwrap() {
-        println!("{line}")
-    }
-}
-
-struct CommandCompleter;
-
-impl Completer for CommandCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<reedline::Suggestion> {
-        let word_start = line[..pos].rfind(' ').unwrap_or_default();
-        let partial_word = dbg!(&line[word_start..pos]);
-        vec![]
+    while let Ok(line) = rl.readline("> ") {
+        let command = SingleCommand::augment_subcommands(Command::new("sediment"));
+        let mut words = shell_words::split(&line).unwrap();
+        words.insert(0, String::from("sediment"));
+        match command.try_get_matches_from(words) {
+            Ok(matches) => {
+                let command = SingleCommand::from_arg_matches(&matches).unwrap();
+                command.execute_on(&mut db).unwrap();
+            }
+            Err(err) => {
+                eprintln!("{err}");
+            }
+        }
     }
 }
 
@@ -104,6 +101,50 @@ impl SingleCommand {
                     eprintln!("Either a value or a path must be provided");
                     exit(1)
                 }
+            }
+            SingleCommand::Stats => {
+                let stats = database.statistics();
+                println!(
+                    "Total database size: {} ({} bytes).",
+                    ByteSize(stats.file_size).to_string_as(true),
+                    stats.file_size
+                );
+                println!(
+                    "Unallocated disk space: {} ({} bytes).",
+                    ByteSize(stats.unallocated_bytes).to_string_as(true),
+                    stats.unallocated_bytes
+                );
+                let total_grain_space = stats
+                    .grains_by_length
+                    .iter()
+                    .map(|(bytes, stats)| u64::from(*bytes) * (stats.free + stats.allocated))
+                    .sum();
+                println!(
+                    "Total Grain Capacity: {} ({} bytes)",
+                    ByteSize(total_grain_space).to_string_as(true),
+                    total_grain_space
+                );
+                let mut rows = Vec::new();
+                for (grain_length, grain_stats) in &stats.grains_by_length {
+                    rows.push(vec![
+                        grain_length.cell(),
+                        grain_stats.free.cell(),
+                        grain_stats.allocated.cell(),
+                        (grain_stats.free + grain_stats.allocated).cell(),
+                    ]);
+                }
+                let table = rows
+                    .table()
+                    .title(vec![
+                        "Grain Size".cell().bold(true),
+                        "Free".cell().bold(true),
+                        "Allocated".cell().bold(true),
+                        "Total".cell().bold(true),
+                    ])
+                    .display()
+                    .unwrap();
+                println!("{table}");
+                Ok(())
             }
         }
     }

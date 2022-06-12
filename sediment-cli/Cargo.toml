@@ -8,5 +8,8 @@ edition = "2021"
 [dependencies]
 sediment = { path = "../sediment" }
 clap = { version = "3.0.18", features = ["derive"] }
-reedline = "0.6"
+shell-words = "1.1.0"
+rustyline = "9.1.2"
 pretty-hex = "0.3.0"
+bytesize = "1.1.0"
+cli-table = "0.4.7"

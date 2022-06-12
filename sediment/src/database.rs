@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use parking_lot::{Mutex, RwLock};
 
@@ -60,6 +60,35 @@ where
                 file_allocations,
             }),
         })
+    }
+
+    pub fn statistics(&self) -> Statistics {
+        let (unallocated_bytes, file_size) = self.state.file_allocations.statistics();
+        let disk_state = self.state.disk_state.lock();
+        let mut grains_by_length = HashMap::new();
+        for basin in &disk_state.basins {
+            for (stratum, stratum_index) in basin.strata.iter().zip(basin.header.strata.iter()) {
+                for grain_map in &stratum.grain_maps {
+                    let grain_stats = grains_by_length
+                        .entry(stratum_index.grain_length())
+                        .or_insert_with(GrainStatistics::default);
+
+                    for allocated in &grain_map.map.allocation_state {
+                        if *allocated {
+                            grain_stats.allocated += 1;
+                        } else {
+                            grain_stats.free += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        Statistics {
+            file_size,
+            unallocated_bytes,
+            grains_by_length,
+        }
     }
 
     /// Create a new session for writing data to this database.
@@ -151,6 +180,19 @@ impl GrainData {
     pub fn is_crc_valid(&self) -> bool {
         format::crc(&self.data) == self.info.crc
     }
+}
+
+#[derive(Debug)]
+pub struct Statistics {
+    pub file_size: u64,
+    pub unallocated_bytes: u64,
+    pub grains_by_length: HashMap<u32, GrainStatistics>,
+}
+
+#[derive(Default, Debug)]
+pub struct GrainStatistics {
+    pub free: u64,
+    pub allocated: u64,
 }
 
 #[cfg(test)]

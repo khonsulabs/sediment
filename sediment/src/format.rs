@@ -326,7 +326,10 @@ impl GrainMap {
             }
         }
         let sequence = BatchId::from_le_bytes_slice(&buffer[4..12]);
-        let allocation_state = BitVec::from_vec(buffer[12..].to_vec());
+        let mut allocation_state = BitVec::from_vec(buffer[12..].to_vec());
+        // Because we always encode in chunks of 8, we may have additional bits
+        // after restoring from the file.
+        allocation_state.truncate(usize::try_from(grain_count).unwrap());
         *scratch = buffer;
         Ok(Self {
             sequence,
