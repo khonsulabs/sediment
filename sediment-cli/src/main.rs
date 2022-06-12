@@ -65,7 +65,14 @@ fn repl(mut db: Database<AnyFile>) {
         match command.try_get_matches_from(words) {
             Ok(matches) => {
                 let command = SingleCommand::from_arg_matches(&matches).unwrap();
-                command.execute_on(&mut db).unwrap();
+                match command.execute_on(&mut db) {
+                    Ok(_) => {
+                        rl.add_history_entry(line);
+                    }
+                    Err(err) => {
+                        eprintln!("Error executing command: {err}");
+                    }
+                }
             }
             Err(err) => {
                 eprintln!("{err}");
