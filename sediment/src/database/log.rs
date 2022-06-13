@@ -77,10 +77,16 @@ impl CommitLog {
             .back()
             .and_then(|commit_page| {
                 if commit_page.page.entries[0].position > 0 {
-                    commit_page.page.entries[1..]
-                        .iter()
-                        .enumerate()
-                        .find_map(|(index, entry)| (entry.position == 0).then(|| index + 1))
+                    // This page has at least one entry. If the page is full, we
+                    // should return 170 so that the next push generates a new
+                    // page.
+                    Some(
+                        commit_page.page.entries[1..]
+                            .iter()
+                            .enumerate()
+                            .find_map(|(index, entry)| (entry.position == 0).then(|| index + 1))
+                            .unwrap_or(170),
+                    )
                 } else {
                     None
                 }
@@ -105,7 +111,7 @@ impl CommitLog {
         for (page_index, page_state) in self.pages.iter_mut().enumerate() {
             // If the page has no offset or is the last page, we need to write
             // it.
-            if page_index == last_index
+            last_page_offset = if page_index == last_index
                 || page_state.offset.is_none()
                 || page_state.page.previous_offset != last_page_offset
             {
@@ -117,16 +123,16 @@ impl CommitLog {
                     offset
                 };
 
-                page_state.page.previous_offset = dbg!(last_page_offset);
+                page_state.page.previous_offset = last_page_offset;
                 page_state.page.serialize_into(scratch);
                 let buffer = std::mem::take(scratch);
                 let (result, buffer) = file.write_all(buffer, offset);
                 *scratch = buffer;
                 result?;
 
-                last_page_offset = offset;
+                offset
             } else {
-                last_page_offset = page_state.offset.unwrap();
+                page_state.offset.unwrap()
             }
         }
 
