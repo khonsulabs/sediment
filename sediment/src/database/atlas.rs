@@ -61,7 +61,7 @@ impl Atlas {
                         })
                 });
 
-                todo_if!(grain_maps.len() > 1, "need to handle multiple map offsets");
+                todo_if!(grain_maps.len() > 1, "need to handle multiple map offsets https://github.com/khonsulabs/sediment/issues/11");
 
                 strata.push(StratumAtlas {
                     free_grains,
@@ -261,7 +261,7 @@ impl Atlas {
             return self.allocate_new_grain_map(length, file, file_allocations);
         }
 
-        todo!("grow an existing grain map or add an additional grain map to a stratum")
+        todo!("grow an existing grain map or add an additional grain map to a stratum https://github.com/khonsulabs/sediment/issues/11")
     }
 
     pub fn forget_reservations(

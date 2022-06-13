@@ -106,7 +106,7 @@ impl Committer {
             let basin = if basin_index < disk_state.basins.len() {
                 todo_if!(
                     disk_state.header.basins[basin_index].file_offset != basin_atlas.location,
-                    "need to handle relocation"
+                    "need to handle relocation https://github.com/khonsulabs/sediment/issues/12"
                 );
 
                 &mut disk_state.basins[basin_index]
@@ -121,7 +121,7 @@ impl Committer {
             };
 
             for (stratum_index, stratum_atlas) in basin_atlas.strata.iter().enumerate() {
-                todo_if!(stratum_atlas.grain_maps.len() > 1);
+                todo_if!(stratum_atlas.grain_maps.len() > 1, "need to support multiple grain maps https://github.com/khonsulabs/sediment/issues/11");
 
                 let stratum = if stratum_index < basin.strata.len() {
                     &mut basin.strata[stratum_index]
@@ -148,7 +148,7 @@ impl Committer {
 
                 todo_if!(
                     stratum_atlas.grain_maps[0].offset != stratum.grain_maps[0].offset,
-                    "need to handle relocation"
+                    "need to handle relocation https://github.com/khonsulabs/sediment/issues/12"
                 );
             }
 
@@ -181,7 +181,7 @@ impl Committer {
             )
             .to_io()?;
 
-            todo_if!(local_grain_index >= 170);
+            todo_if!(local_grain_index >= 170, "need to handle multiple grain map pages https://github.com/khonsulabs/sediment/issues/11");
             let grain_map_page_offset =
                 stratum.grain_maps[grain_map_index].offset + stratum_info.header_length();
             let grain_map_page = match modified_pages.last_mut() {
