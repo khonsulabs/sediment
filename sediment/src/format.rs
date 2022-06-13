@@ -725,7 +725,7 @@ fn grain_id_format_tests() {
 /// after the checkpoint, the previous page will have been freed and should not
 /// be loaded. This allows minimal writes to maintain the log: checkpointing
 /// does not require changing any log entries, just updating the header.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LogPage {
     /// The location on-disk of the previous `LogPage`. This page is only valid
     /// if the first entry of this page is greater than the current checkpoint
@@ -858,7 +858,29 @@ impl CommitLogEntry {
         }
     }
 
-    pub fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
+    pub fn load_from<File: io::File>(
+        entry: &LogEntryIndex,
+        verify_crc: bool,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<Self> {
+        let mut buffer = std::mem::take(scratch);
+        buffer.resize(usize::try_from(entry.length).to_io()?, 0);
+        let (result, buffer) = file.read_exact(buffer, entry.position);
+        *scratch = buffer;
+        result?;
+
+        if verify_crc {
+            let calculated_crc = crc(scratch);
+            if calculated_crc != entry.crc {
+                return Err(io::invalid_data_error(format!("Commit Log Entry CRC Check Failed (Stored: {:x} != Calculated: {calculated_crc:x}", entry.crc)));
+            }
+        }
+
+        Self::deserialize_from(scratch)
+    }
+
+    fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
         // This structure is always at least one page long. We'll start there to
         // get the length.
         // let mut buffer = std::mem::take(scratch);

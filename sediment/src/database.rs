@@ -14,7 +14,7 @@ use crate::{
         allocations::FileAllocations, atlas::Atlas, committer::Committer, disk::DiskState,
         log::CommitLog, page_cache::PageCache,
     },
-    format::{self, BatchId, GrainId, GrainInfo},
+    format::{self, BatchId, CommitLogEntry, GrainId, GrainInfo, LogEntryIndex},
     io::{self, ext::ToIoResult, FileManager},
 };
 
@@ -26,7 +26,7 @@ mod log;
 mod page_cache;
 mod session;
 
-pub use self::session::WriteSession;
+pub use self::{log::CommitLogSnapshot, session::WriteSession};
 
 #[derive(Debug)]
 pub struct Database<File> {
@@ -60,6 +60,7 @@ where
             scratch,
             state: Arc::new(DatabaseState {
                 current_batch: AtomicU64::new(disk_state.header.batch.0),
+                checkpoint: AtomicU64::new(disk_state.header.checkpoint.0),
                 atlas: Mutex::new(atlas),
                 log: RwLock::new(log),
                 disk_state: Mutex::new(disk_state),
@@ -73,6 +74,11 @@ where
     pub fn current_batch(&self) -> BatchId {
         // TODO does this need SeqCst?
         BatchId(self.state.current_batch.load(Ordering::SeqCst))
+    }
+
+    pub fn checkpoint(&self) -> BatchId {
+        // TODO does this need SeqCst?
+        BatchId(self.state.checkpoint.load(Ordering::SeqCst))
     }
 
     pub fn statistics(&self) -> Statistics {
@@ -135,11 +141,20 @@ where
         Ok(Some(GrainData { info, data }))
     }
 
-    pub fn write(&mut self, data: &[u8]) -> io::Result<GrainId> {
+    pub fn write(&mut self, data: &[u8]) -> io::Result<GrainRecord> {
         let mut session = self.new_session();
-        let grain = dbg!(session.write(data))?;
-        session.commit()?;
-        Ok(grain)
+        let id = session.write(data)?;
+        let batch = session.commit()?;
+        Ok(GrainRecord { id, batch })
+    }
+
+    pub fn commit_log(&self) -> CommitLogSnapshot {
+        let log = self.state.log.read();
+        log.snapshot(self)
+    }
+
+    pub fn read_commit_log_entry(&mut self, entry: &LogEntryIndex) -> io::Result<CommitLogEntry> {
+        CommitLogEntry::load_from(entry, true, &mut self.file, &mut self.scratch)
     }
 
     /// Reserve space within the database. This may allocate additional disk
@@ -189,6 +204,7 @@ pub struct GrainReservation {
 #[derive(Debug)]
 struct DatabaseState {
     current_batch: AtomicU64,
+    checkpoint: AtomicU64,
     atlas: Mutex<Atlas>,
     disk_state: Mutex<DiskState>,
     log: RwLock<CommitLog>,
@@ -201,6 +217,12 @@ struct DatabaseState {
 pub struct GrainData {
     pub info: GrainInfo,
     pub data: Vec<u8>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub struct GrainRecord {
+    pub id: GrainId,
+    pub batch: BatchId,
 }
 
 impl GrainData {
@@ -381,17 +403,17 @@ crate::io_test!(multi_commits, {
         }
         let manager = Manager::default();
         let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
-        let mut grain_ids = Vec::new();
+        let mut grains = Vec::new();
         for value in 0..count {
-            grain_ids.push(db.write(&value.to_be_bytes()).unwrap());
+            grains.push(db.write(&value.to_be_bytes()).unwrap());
         }
         drop(db);
 
         let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
 
         // Verify all written data exists
-        for (index, grain_id) in grain_ids.into_iter().enumerate() {
-            let data = db.read(grain_id).unwrap().expect("grain not found");
+        for (index, grain) in grains.into_iter().enumerate() {
+            let data = db.read(grain.id).unwrap().expect("grain not found");
             let value = u32::from_be_bytes(data.data.try_into().unwrap());
             assert_eq!(value, u32::try_from(index).unwrap());
         }
@@ -403,5 +425,46 @@ crate::io_test!(multi_commits, {
         if path.exists() {
             std::fs::remove_file(&path).unwrap();
         }
+    }
+});
+
+#[cfg(test)]
+crate::io_test!(commit_log, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    let manager = Manager::default();
+    // Create the database.
+    // Each commit log page can hold 170 entries. Insert 170 (filling the page)
+    // and then try to reload the database and insert again.
+    let mut grains = Vec::new();
+    for _ in 0..170 {
+        let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+        grains.push(db.write(b"test").unwrap());
+        drop(db);
+    }
+
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let snapshot_before_write = db.commit_log();
+    assert_eq!(snapshot_before_write.len(), 170);
+    grains.push(db.write(b"test").unwrap());
+    let snapshot_after_write = db.commit_log();
+    assert_eq!(snapshot_after_write.len(), 171);
+
+    for ((_batch, entry_index), grain) in snapshot_after_write.iter().zip(&grains) {
+        let entry = db.read_commit_log_entry(&entry_index).unwrap();
+        assert_eq!(entry.grain_changes.len(), 1);
+        assert_eq!(entry.grain_changes[0].start, grain.id);
+        assert_eq!(entry.grain_changes[0].count, 1);
+        assert_eq!(
+            entry.grain_changes[0].operation,
+            format::GrainOperation::Allocate
+        );
+    }
+
+    drop(db);
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
     }
 });

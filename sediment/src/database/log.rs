@@ -1,7 +1,10 @@
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    ops::{Deref, RangeInclusive},
+};
 
 use crate::{
-    database::allocations::FileAllocations,
+    database::{allocations::FileAllocations, Database},
     format::{Allocation, BatchId, LogEntryIndex, LogPage, PAGE_SIZE, PAGE_SIZE_U64},
     io,
 };
@@ -164,6 +167,13 @@ impl CommitLog {
         self.head_insert_index += 1;
     }
 
+    pub fn snapshot<File: io::File>(&self, database: &Database<File>) -> CommitLogSnapshot {
+        CommitLogSnapshot::new(
+            database.checkpoint().next()..=database.current_batch(),
+            self.pages.iter().map(|page| &page.page),
+        )
+    }
+
     // pub fn checkpoint(&mut self, last_committed: BatchId, allocations: &mut FileAllocations) {
     //     while let Some(page_state) = self.pages.front() {
     //         match page_state
@@ -197,4 +207,97 @@ impl CommitLog {
 pub struct CommitLogPage {
     pub page: LogPage,
     pub offset: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommitLogSnapshot {
+    starting_batch_id: BatchId,
+    entries: Vec<LogEntryIndex>,
+}
+
+impl CommitLogSnapshot {
+    fn new<'a, Pages: Iterator<Item = &'a LogPage> + ExactSizeIterator>(
+        range: RangeInclusive<BatchId>,
+        pages: Pages,
+    ) -> Self {
+        // This allocates more space than is probably needed, but it avoids
+        // extra allocations.
+        let mut entries = Vec::with_capacity(pages.len() * 170);
+        for page in pages {
+            let mut batch = page.first_batch_id;
+            for entry in &page.entries {
+                if entry.position > 0 {
+                    if range.contains(&batch) {
+                        entries.push(*entry);
+                    }
+                } else {
+                    // Once we hit an empty entry, we can assume the rest are blank.
+                    break;
+                }
+                batch = batch.next();
+            }
+        }
+        Self {
+            starting_batch_id: *range.start(),
+            entries,
+        }
+    }
+
+    pub const fn earliest_batch_id(&self) -> BatchId {
+        self.starting_batch_id
+    }
+
+    pub fn latest_batch_id(&self) -> BatchId {
+        BatchId(self.starting_batch_id.0 + u64::try_from(self.entries.len()).unwrap())
+    }
+
+    pub fn iter(&self) -> CommitLogIter<'_> {
+        self.into_iter()
+    }
+}
+
+impl Deref for CommitLogSnapshot {
+    type Target = [LogEntryIndex];
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl<'a> IntoIterator for &'a CommitLogSnapshot {
+    type Item = (BatchId, LogEntryIndex);
+
+    type IntoIter = CommitLogIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        CommitLogIter {
+            snapshot: self,
+            index: Some(0),
+            batch: self.starting_batch_id,
+        }
+    }
+}
+
+pub struct CommitLogIter<'a> {
+    snapshot: &'a CommitLogSnapshot,
+    index: Option<usize>,
+    batch: BatchId,
+}
+
+impl<'a> Iterator for CommitLogIter<'a> {
+    type Item = (BatchId, LogEntryIndex);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(index) = self.index {
+            let entry = *self.snapshot.entries.get(index)?;
+            let batch = self.batch;
+
+            self.index = index.checked_add(1);
+            self.batch = self.batch.next();
+
+            Some((batch, entry))
+        } else {
+            None
+        }
+    }
 }
