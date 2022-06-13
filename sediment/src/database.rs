@@ -1,4 +1,11 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use parking_lot::{Mutex, RwLock};
 
@@ -52,6 +59,7 @@ where
             file,
             scratch,
             state: Arc::new(DatabaseState {
+                current_batch: AtomicU64::new(disk_state.header.batch.0),
                 atlas: Mutex::new(atlas),
                 log: RwLock::new(log),
                 disk_state: Mutex::new(disk_state),
@@ -60,6 +68,11 @@ where
                 file_allocations,
             }),
         })
+    }
+
+    pub fn current_batch(&self) -> BatchId {
+        // TODO does this need SeqCst?
+        BatchId(self.state.current_batch.load(Ordering::SeqCst))
     }
 
     pub fn statistics(&self) -> Statistics {
@@ -109,6 +122,12 @@ where
             None => return Ok(None),
         };
         drop(atlas);
+
+        let allocated_at = info.allocated_at.unwrap();
+        if allocated_at > self.current_batch() {
+            // The grain is allocated but hasn't been committed yet.
+            return Ok(None);
+        }
 
         let data = vec![0; usize::try_from(info.length).to_io()?];
         let (result, data) = self.file.read_exact(data, offset);
@@ -169,6 +188,7 @@ pub struct GrainReservation {
 
 #[derive(Debug)]
 struct DatabaseState {
+    current_batch: AtomicU64,
     atlas: Mutex<Atlas>,
     disk_state: Mutex<DiskState>,
     log: RwLock<CommitLog>,

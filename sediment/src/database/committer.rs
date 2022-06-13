@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::Ordering,
+};
 
 use parking_lot::{Condvar, Mutex};
 
@@ -292,12 +295,20 @@ impl Committer {
             file,
             scratch,
         )?;
+        file.synchronize()?;
+
         disk_state.first_header_is_current = !disk_state.first_header_is_current;
 
         // Publish the updated grain maps
         database
             .grain_map_page_cache
             .update_pages(modified_pages.into_iter());
+
+        // Publish the batch id
+        // TODO does this need to be SeqCst?
+        database
+            .current_batch
+            .store(committing_batch.0, Ordering::SeqCst);
 
         Ok(committing_batch)
     }
