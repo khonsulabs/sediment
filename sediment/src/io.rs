@@ -3,12 +3,12 @@ use std::{
     path::Path,
 };
 
+pub use io::Result;
+
 use crate::io::{
     iobuffer::{IoBuffer, IoBufferExt},
     paths::PathId,
 };
-
-pub use io::Result;
 
 pub mod fs;
 pub mod iobuffer;
@@ -97,12 +97,14 @@ macro_rules! io_test {
         #[cfg(test)]
         #[allow(unused_imports)]
         mod $name {
-            use super::*;
             use std::path::PathBuf;
+
             use $crate::io::{
                 fs::StdFileManager, iobuffer::IoBufferExt, memory::MemoryFileManager, File,
                 FileManager,
             };
+
+            use super::*;
 
             #[allow(dead_code)]
             fn unique_file_path<Manager>() -> PathBuf {

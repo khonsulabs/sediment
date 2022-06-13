@@ -95,10 +95,12 @@ impl io::FileManager for AnyFileManager {
 }
 
 impl AnyFileManager {
+    #[must_use]
     pub fn new_file() -> Self {
         Self::Std(StdFileManager::default())
     }
 
+    #[must_use]
     pub fn new_memory() -> Self {
         Self::Memory(MemoryFileManager::default())
     }

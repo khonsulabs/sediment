@@ -78,12 +78,15 @@ impl PathIds {
         }
     }
 
+    #[must_use]
     pub fn get(&self, path: &Path) -> Option<PathId> {
         self.file_id_for_path(path, false)
     }
 
+    #[must_use]
     pub fn get_or_insert(&self, path: &Path) -> PathId {
-        self.file_id_for_path(path, true).unwrap()
+        self.file_id_for_path(path, true)
+            .expect("should always return a path")
     }
 
     // fn remove_file_id_for_path(&self, path: impl IntoPathId) -> Option<PathId> {

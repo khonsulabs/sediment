@@ -7,7 +7,7 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::{
     database::{
-        disk::{BasinState, GrainMapState, StratumState},
+        disk::{BasinState, DiskState, GrainMapState, StratumState},
         DatabaseState, GrainReservation,
     },
     format::{
@@ -49,8 +49,6 @@ impl Committer {
                 // Check if our batch has been written.
                 if let Some(committed_batch_id) = state.committed_batches.remove(&batch_id) {
                     return Ok(committed_batch_id);
-                } else {
-                    continue;
                 }
             } else {
                 // No other thread has taken over committing, so this thread
@@ -60,7 +58,7 @@ impl Committer {
                 // while we write and sync the file.
                 drop(state);
 
-                let new_batch_id = self.commit_batches(grains, database, file, scratch)?;
+                let new_batch_id = Self::commit_batches(grains, database, file, scratch)?;
 
                 // Re-acquire the state to update the knowledge of committed batches
                 let mut state = self.state.lock();
@@ -82,7 +80,6 @@ impl Committer {
     }
 
     fn commit_batches<File: io::File>(
-        &self,
         mut grains: Vec<GrainReservation>,
         database: &DatabaseState,
         file: &mut File,
@@ -97,6 +94,85 @@ impl Committer {
         let committing_batch = disk_state.header.batch.next();
 
         // Gather info about new basins and strata that the atlas has allocated.
+        let mut modifications =
+            Self::gather_modifications(committing_batch, database, &mut disk_state)?;
+
+        let (modified_pages, log_entry) = Self::update_grain_map_pages(
+            &grains,
+            &mut modifications,
+            committing_batch,
+            database,
+            &mut disk_state,
+            file,
+            scratch,
+        )?;
+
+        // TODO These writes should be able to be parallelized
+
+        disk_state.header.log_offset =
+            Self::write_commit_log(&log_entry, committing_batch, database, file, scratch)?;
+
+        for (offset, grain_map_page) in &modified_pages {
+            grain_map_page.write_to(*offset, file, scratch)?;
+        }
+
+        for (basin_index, stratum_index, grain_map_index) in modifications.grain_maps.drain() {
+            let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
+                [grain_map_index];
+            grain_map.map.written_at = committing_batch;
+            let offset = grain_map.offset_to_write_at();
+            grain_map.map.write_to(offset, file, scratch)?;
+            grain_map.first_is_current = !grain_map.first_is_current;
+        }
+
+        for basin_index in modifications.modified_basins.drain(..) {
+            disk_state.header.basins[basin_index].last_written_at = committing_batch;
+            let mut offset = disk_state.header.basins[basin_index].file_offset;
+
+            let basin = &mut disk_state.basins[basin_index];
+            if basin.first_is_current {
+                offset += PAGE_SIZE_U64;
+            }
+
+            basin.header.written_at = committing_batch;
+            basin.header.write_to(offset, file, false, scratch)?;
+            basin.first_is_current = !basin.first_is_current;
+        }
+
+        disk_state.header.batch = committing_batch;
+        disk_state.header.write_to(
+            if disk_state.first_header_is_current {
+                PAGE_SIZE_U64
+            } else {
+                0
+            },
+            false,
+            file,
+            scratch,
+        )?;
+        file.synchronize()?;
+
+        disk_state.first_header_is_current = !disk_state.first_header_is_current;
+
+        // Publish the updated grain maps
+        database
+            .grain_map_page_cache
+            .update_pages(modified_pages.into_iter());
+
+        // Publish the batch id
+        // TODO does this need to be SeqCst?
+        database
+            .current_batch
+            .store(committing_batch.0, Ordering::SeqCst);
+
+        Ok(committing_batch)
+    }
+
+    fn gather_modifications(
+        committing_batch: BatchId,
+        database: &DatabaseState,
+        disk_state: &mut DiskState,
+    ) -> io::Result<CommitModifications> {
         let atlas = database.atlas.lock();
         let mut modified_basins = Vec::<usize>::new();
         let mut modified_grain_maps = HashSet::<(usize, usize, usize)>::new();
@@ -140,7 +216,7 @@ impl Committer {
                         grain_maps: vec![GrainMapState::new(
                             stratum_atlas.grain_maps[0].offset,
                             stratum_atlas.grains_per_map,
-                        )],
+                        )?],
                     });
                     modified_grain_maps.insert((basin_index, stratum_index, 0));
                     basin.strata.last_mut().unwrap()
@@ -159,6 +235,22 @@ impl Committer {
         // Free the atlas, allowing writes to the database resume.
         drop(atlas);
 
+        Ok(CommitModifications {
+            modified_basins,
+            grain_maps: modified_grain_maps,
+            new_pages,
+        })
+    }
+
+    fn update_grain_map_pages<File: io::File>(
+        grains: &[GrainReservation],
+        modifications: &mut CommitModifications,
+        committing_batch: BatchId,
+        database: &DatabaseState,
+        disk_state: &mut DiskState,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<(Vec<(u64, GrainMapPage)>, CommitLogEntry)> {
         let mut modified_pages = Vec::<(u64, GrainMapPage)>::new();
         let mut grain_changes = Vec::with_capacity(grains.len());
         for reservation in grains {
@@ -189,7 +281,7 @@ impl Committer {
                     grain_map_page
                 }
                 _ => {
-                    let page = if new_pages.remove(&grain_map_page_offset) {
+                    let page = if modifications.new_pages.remove(&grain_map_page_offset) {
                         // A new page, no need to load from disk.
                         GrainMapPage::default()
                     } else {
@@ -217,7 +309,9 @@ impl Committer {
                 grain.length = reservation.length;
                 grain.archived_at = None;
             }
-            modified_grain_maps.insert((basin_index, stratum_index, grain_map_index));
+            modifications
+                .grain_maps
+                .insert((basin_index, stratum_index, grain_map_index));
             grain_changes.push(GrainChange {
                 operation: GrainOperation::Allocate,
                 start: reservation.grain_id,
@@ -225,11 +319,18 @@ impl Committer {
             });
         }
 
-        // TODO These writes should be able to be parallelized
+        Ok((modified_pages, CommitLogEntry { grain_changes }))
+    }
 
+    fn write_commit_log<File: io::File>(
+        log_entry: &CommitLogEntry,
+        committing_batch: BatchId,
+        database: &DatabaseState,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<u64> {
         // Write the commit log for these changes.
-        let log_entry = CommitLogEntry { grain_changes };
-        log_entry.serialize_into(scratch);
+        log_entry.serialize_into(scratch)?;
         let log_entry_crc = crc(scratch);
         let log_entry_len = u32::try_from(scratch.len()).to_io()?;
         // pad the entry to the next page size
@@ -254,63 +355,9 @@ impl Committer {
             },
         );
         log.write_to(&database.file_allocations, file, scratch)?;
-        disk_state.header.log_offset = log.position().unwrap();
+        let offset = log.position().unwrap();
         drop(log);
-
-        for (offset, grain_map_page) in &modified_pages {
-            grain_map_page.write_to(*offset, file, scratch)?;
-        }
-
-        for (basin_index, stratum_index, grain_map_index) in modified_grain_maps {
-            let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
-                [grain_map_index];
-            grain_map.map.written_at = committing_batch;
-            let offset = grain_map.offset_to_write_at();
-            grain_map.map.write_to(offset, file, scratch)?;
-            grain_map.first_is_current = !grain_map.first_is_current;
-        }
-
-        for basin_index in modified_basins {
-            disk_state.header.basins[basin_index].last_written_at = committing_batch;
-            let mut offset = disk_state.header.basins[basin_index].file_offset;
-
-            let basin = &mut disk_state.basins[basin_index];
-            if basin.first_is_current {
-                offset += PAGE_SIZE_U64
-            }
-
-            basin.header.written_at = committing_batch;
-            basin.header.write_to(offset, file, false, scratch)?;
-            basin.first_is_current = !basin.first_is_current;
-        }
-
-        disk_state.header.batch = committing_batch;
-        disk_state.header.write_to(
-            if disk_state.first_header_is_current {
-                PAGE_SIZE_U64
-            } else {
-                0
-            },
-            false,
-            file,
-            scratch,
-        )?;
-        file.synchronize()?;
-
-        disk_state.first_header_is_current = !disk_state.first_header_is_current;
-
-        // Publish the updated grain maps
-        database
-            .grain_map_page_cache
-            .update_pages(modified_pages.into_iter());
-
-        // Publish the batch id
-        // TODO does this need to be SeqCst?
-        database
-            .current_batch
-            .store(committing_batch.0, Ordering::SeqCst);
-
-        Ok(committing_batch)
+        Ok(offset)
     }
 }
 
@@ -356,4 +403,10 @@ impl Default for CommitBatches {
             committed_batches: HashMap::new(),
         }
     }
+}
+
+struct CommitModifications {
+    modified_basins: Vec<usize>,
+    grain_maps: HashSet<(usize, usize, usize)>,
+    new_pages: HashSet<u64>,
 }

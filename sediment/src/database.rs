@@ -53,7 +53,7 @@ where
         let mut scratch = Vec::new();
 
         let (disk_state, log, file_allocations) = DiskState::recover(&mut file, &mut scratch)?;
-        let atlas = Atlas::from_state(&disk_state)?;
+        let atlas = Atlas::from_state(&disk_state);
 
         Ok(Self {
             file,
@@ -129,7 +129,7 @@ where
         };
         drop(atlas);
 
-        let allocated_at = info.allocated_at.unwrap();
+        let allocated_at = info.allocated_at.expect("precondition checked above");
         if allocated_at > self.current_batch() {
             // The grain is allocated but hasn't been committed yet.
             return Ok(None);
@@ -226,6 +226,7 @@ pub struct GrainRecord {
 }
 
 impl GrainData {
+    #[must_use]
     pub fn is_crc_valid(&self) -> bool {
         format::crc(&self.data) == self.info.crc
     }

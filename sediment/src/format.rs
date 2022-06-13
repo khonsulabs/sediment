@@ -20,6 +20,7 @@ pub const PAGE_SIZE_U64: u64 = PAGE_SIZE as u64;
 
 const CRC: Crc<u32> = Crc::<u32>::new(&CRC_32_MPEG_2);
 
+#[must_use]
 pub fn crc(data: &[u8]) -> u32 {
     let mut digest = CRC.digest();
     digest.update(data);
@@ -69,9 +70,11 @@ impl Header {
         std::mem::swap(&mut buffer, scratch);
         buffer.resize(PAGE_SIZE, 0);
 
-        assert!(self.basins.len() <= 254, "too many basins");
+        if self.basins.len() > 254 {
+            return Err(io::invalid_data_error("too many basins"));
+        }
 
-        buffer[4] = self.basins.len().try_into().unwrap();
+        buffer[4] = self.basins.len().try_into().expect("asserted above");
         buffer[8..16].copy_from_slice(&self.batch.to_le_bytes());
         buffer[16..24].copy_from_slice(&self.checkpoint.to_le_bytes());
         buffer[24..32].copy_from_slice(&self.log_offset.to_le_bytes());
@@ -98,16 +101,20 @@ impl Header {
     }
 
     pub fn deserialize_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
-        assert!(bytes.len() == PAGE_SIZE);
+        if bytes.len() != PAGE_SIZE {
+            return Err(io::invalid_data_error("bytes should be 4,096 bytes"));
+        }
 
         let basin_count = usize::from(bytes[4]);
 
-        assert!(basin_count <= 254, "too many basins");
+        if basin_count > 254 {
+            return Err(io::invalid_data_error("too many basins"));
+        }
 
         if verify_crc {
             let total_bytes = basin_count * 16 + 32;
             let calculated_crc = crc(&bytes[4..total_bytes]);
-            let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+            let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().expect("u32 is 4 bytes"));
             if calculated_crc != stored_crc {
                 return Err(io::invalid_data_error(format!("Basin CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
@@ -115,13 +122,17 @@ impl Header {
 
         let batch = BatchId::from_le_bytes_slice(&bytes[8..16]);
         let checkpoint = BatchId::from_le_bytes_slice(&bytes[16..24]);
-        let log_offset = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+        let log_offset = u64::from_le_bytes(bytes[24..32].try_into().expect("u64 is 8 bytes"));
         let mut offset = 32;
         let mut basins = Vec::with_capacity(256);
         for _ in 0..basin_count {
             let last_updated_at = BatchId::from_le_bytes_slice(&bytes[offset..offset + 8]);
             offset += 8;
-            let file_offset = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            let file_offset = u64::from_le_bytes(
+                bytes[offset..offset + 8]
+                    .try_into()
+                    .expect("u64 is 8 bytes"),
+            );
             offset += 8;
             basins.push(BasinIndex {
                 last_written_at: last_updated_at,
@@ -147,8 +158,9 @@ pub struct BasinIndex {
     pub file_offset: u64,
 }
 
-/// A Basin manages a list of [`Stratum`]. Basins are purely used for a level of
-/// hierarchy. On-disk, this structure will be serialized to a single page.
+/// A Basin manages a list of [`StratumIndex`]es. Basins are purely used for a
+/// level of hierarchy. On-disk, this structure will be serialized to a single
+/// page.
 ///
 /// This structure has two copies stored sequentially in the file. The copy that
 /// is used is the one whose `written_at` matches the corresponding
@@ -174,8 +186,11 @@ impl Basin {
         std::mem::swap(&mut buffer, scratch);
         buffer.resize(PAGE_SIZE, 0);
 
-        assert!(self.strata.len() <= 254, "too many strata");
-        buffer[4] = self.strata.len().try_into().unwrap();
+        if self.strata.len() > 254 {
+            return Err(io::invalid_data_error("too many strata"));
+        }
+
+        buffer[4] = self.strata.len().try_into().expect("checked above");
         buffer[8..16].copy_from_slice(&self.written_at.to_le_bytes());
         let mut length = 32;
         for stratum in &self.strata {
@@ -206,17 +221,19 @@ impl Basin {
     }
 
     pub fn deserialize_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
-        assert!(bytes.len() == PAGE_SIZE);
+        if bytes.len() != PAGE_SIZE {
+            return Err(io::invalid_data_error("bytes should be 4,096 bytes"));
+        }
 
         let strata_count = usize::from(bytes[4]);
-        if strata_count == 255 {
+        if strata_count > 254 {
             return Err(io::invalid_data_error("too many strata"));
         }
 
         if verify_crc {
             let total_bytes = strata_count * 16 + 32;
             let calculated_crc = crc(&bytes[4..total_bytes]);
-            let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+            let stored_crc = u32::from_le_bytes(bytes[0..4].try_into().expect("u32 is 4 bytes"));
             if calculated_crc != stored_crc {
                 return Err(io::invalid_data_error(format!("Stratum CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
@@ -237,8 +254,11 @@ impl Basin {
 
             // Padding
             offset += 2;
-            let grain_map_location =
-                u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+            let grain_map_location = u64::from_le_bytes(
+                bytes[offset..offset + 8]
+                    .try_into()
+                    .expect("u64 is 8 bytes"),
+            );
             offset += 8;
             strata.push(StratumIndex {
                 grain_map_count,
@@ -288,30 +308,35 @@ pub struct StratumIndex {
 }
 
 impl StratumIndex {
+    #[must_use]
     pub const fn grains_per_map(&self) -> u64 {
         2_u64.pow(self.grain_count_exp as u32) * 170
     }
 
+    #[must_use]
     pub const fn grain_length(&self) -> u32 {
         2_u32.pow(self.grain_length_exp as u32)
     }
 
+    #[must_use]
     pub fn grain_location(&self, index: u32) -> u64 {
         self.grain_map_location
             + GrainMap::header_length_for_grain_count(self.grains_per_map()) * 2
-            + u64::from(self.grain_length()) * index as u64
+            + u64::from(self.grain_length()) * u64::from(index)
     }
 
+    #[must_use]
     pub fn header_length(&self) -> u64 {
         GrainMap::header_length_for_grain_count(self.grains_per_map()) * 2
     }
 
+    #[must_use]
     pub fn grain_map_length(&self) -> u64 {
         self.header_length()
             + u64::from(self.grain_map_count) * PAGE_SIZE_U64
             + (self.grains_per_map() * u64::from(self.grain_length()))
                 .round_to_multiple_of(PAGE_SIZE_U64)
-                .unwrap()
+                .expect("too many grains")
     }
 }
 
@@ -337,13 +362,13 @@ pub struct GrainMap {
 }
 
 impl GrainMap {
-    pub fn new(grain_count: u64) -> Self {
+    pub fn new(grain_count: u64) -> io::Result<Self> {
         let mut allocation_state = BitVec::new();
-        allocation_state.resize(usize::try_from(grain_count).unwrap(), false);
-        Self {
+        allocation_state.resize(usize::try_from(grain_count).to_io()?, false);
+        Ok(Self {
             written_at: BatchId::default(),
             allocation_state,
-        }
+        })
     }
 
     fn unaligned_header_length_for_grain_count(grain_count: u64) -> u64 {
@@ -351,6 +376,7 @@ impl GrainMap {
         (grain_count + 7) / 8 + 12
     }
 
+    #[must_use]
     pub fn header_length_for_grain_count(grain_count: u64) -> u64 {
         Self::unaligned_header_length_for_grain_count(grain_count)
             .round_to_multiple_of(PAGE_SIZE_U64)
@@ -374,7 +400,7 @@ impl GrainMap {
 
         if validate {
             let calculated_crc = crc(&buffer[4..]);
-            let stored_crc = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
+            let stored_crc = u32::from_le_bytes(buffer[0..4].try_into().expect("u32 is 4 bytes"));
             if calculated_crc != stored_crc {
                 return Err(io::invalid_data_error(format!("Grain Map CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
@@ -383,7 +409,7 @@ impl GrainMap {
         let mut allocation_state = BitVec::from_vec(buffer[12..].to_vec());
         // Because we always encode in chunks of 8, we may have additional bits
         // after restoring from the file.
-        allocation_state.truncate(usize::try_from(grain_count).unwrap());
+        allocation_state.truncate(usize::try_from(grain_count).to_io()?);
         *scratch = buffer;
         Ok(Self {
             written_at,
@@ -450,7 +476,10 @@ impl Default for GrainMapPage {
 
 impl GrainMapPage {
     pub fn deserialize(buffer: &[u8], verify_crc: bool) -> io::Result<Self> {
-        assert!(buffer.len() >= 170 * 24 + 4);
+        if buffer.len() < 170 * 24 + 4 {
+            return Err(io::invalid_data_error("GrainMapPage not long enough"));
+        }
+
         let mut offset = 0;
         let mut page = GrainMapPage::default();
         for grain in 0..170 {
@@ -460,16 +489,26 @@ impl GrainMapPage {
             page.grains[grain].archived_at =
                 BatchId::from_le_bytes_slice(&buffer[offset..offset + 8]).validate();
             offset += 8;
-            page.grains[grain].length =
-                u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
+            page.grains[grain].length = u32::from_le_bytes(
+                buffer[offset..offset + 4]
+                    .try_into()
+                    .expect("u32 is 4 bytes"),
+            );
             offset += 4;
-            page.grains[grain].crc =
-                u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
+            page.grains[grain].crc = u32::from_le_bytes(
+                buffer[offset..offset + 4]
+                    .try_into()
+                    .expect("u32 is 4 bytes"),
+            );
             offset += 4;
         }
         if verify_crc {
             let computed_crc = crc(&buffer[..offset]);
-            let stored_crc = u32::from_le_bytes(buffer[offset..offset + 4].try_into().unwrap());
+            let stored_crc = u32::from_le_bytes(
+                buffer[offset..offset + 4]
+                    .try_into()
+                    .expect("u32 is 4 bytes"),
+            );
             if stored_crc != computed_crc {
                 return Err(io::invalid_data_error("grain map page crc check failed"));
             }
@@ -540,34 +579,42 @@ impl BatchId {
     const INACTIVE_MASK: u64 = 0x8000_0000_0000_0000;
     const ID_MASK: u64 = 0x7FFF_FFFF_FFFF_FFFF;
 
+    #[must_use]
     pub const fn first() -> Self {
         Self(1)
     }
 
+    #[must_use]
     pub const fn active(&self) -> bool {
         self.0 & Self::INACTIVE_MASK == 0
     }
 
+    #[must_use]
     pub const fn sequence(&self) -> u64 {
         self.0 & Self::ID_MASK
     }
 
+    #[must_use]
     pub fn to_le_bytes(&self) -> [u8; 8] {
         self.0.to_le_bytes()
     }
 
+    #[must_use]
     pub fn from_le_bytes_slice(bytes: &[u8]) -> Self {
         Self::from_le_bytes(bytes.try_into().expect("incorrect byte length"))
     }
 
+    #[must_use]
     pub fn from_le_bytes(bytes: [u8; 8]) -> Self {
         Self(u64::from_le_bytes(bytes))
     }
 
+    #[must_use]
     pub fn next(&self) -> Self {
         Self(self.0.checked_add(1).expect("u64 wrapped"))
     }
 
+    #[must_use]
     pub const fn validate(self) -> Option<Self> {
         if self.0 > 0 {
             Some(self)
@@ -655,14 +702,17 @@ impl Display for InvalidGrainId {
 impl std::error::Error for InvalidGrainId {}
 
 impl GrainId {
+    #[must_use]
     pub const fn basin_index(&self) -> u8 {
         (self.0 >> 56) as u8
     }
 
+    #[must_use]
     pub const fn stratum_index(&self) -> u8 {
         ((self.0 >> 48) & 0xFF) as u8
     }
 
+    #[must_use]
     pub const fn grain_index(&self) -> u64 {
         self.0 & 0xFFFF_FFFF_FFFF
     }
@@ -775,17 +825,19 @@ impl LogPage {
             return Err(io::invalid_data_error("page not long enough"));
         }
 
-        let previous_offset = u64::from_le_bytes(serialized[..8].try_into().unwrap());
+        let previous_offset =
+            u64::from_le_bytes(serialized[..8].try_into().expect("u64 is 8 bytes"));
         let first_batch_id = BatchId::from_le_bytes_slice(&serialized[8..16]);
         serialized = &serialized[16..];
         let mut entries = [LogEntryIndex::default(); 170];
 
         let mut index = 0;
         while serialized.len() >= 24 {
-            let position = u64::from_le_bytes(serialized[..8].try_into().unwrap());
-            let crc = u32::from_le_bytes(serialized[8..12].try_into().unwrap());
-            let length = u32::from_le_bytes(serialized[12..16].try_into().unwrap());
-            let embedded_header = u64::from_le_bytes(serialized[16..24].try_into().unwrap());
+            let position = u64::from_le_bytes(serialized[..8].try_into().expect("u64 is 8 bytes"));
+            let crc = u32::from_le_bytes(serialized[8..12].try_into().expect("u32 is 4 bytes"));
+            let length = u32::from_le_bytes(serialized[12..16].try_into().expect("u32 is 4 bytes"));
+            let embedded_header =
+                u64::from_le_bytes(serialized[16..24].try_into().expect("u64 is 8 bytes"));
             entries[index] = LogEntryIndex {
                 position,
                 length,
@@ -797,14 +849,14 @@ impl LogPage {
                 },
             };
             index += 1;
-            serialized = &serialized[24..]
+            serialized = &serialized[24..];
         }
         if !serialized.is_empty() && index < 170 {
             Err(io::invalid_data_error("extra trailing bytes"))
         } else {
             Ok(Self {
-                first_batch_id,
                 previous_offset,
+                first_batch_id,
                 entries,
             })
         }
@@ -824,7 +876,7 @@ impl Default for LogPage {
 /// Metadata about a single entry in the commit log.
 #[derive(Debug, Default, Copy, Clone)]
 pub struct LogEntryIndex {
-    /// The location of the data containing a [`CommitLog`].
+    /// The location of the data containing a [`CommitLogEntry`].
     pub position: u64,
     pub length: u32,
     pub crc: u32,
@@ -847,15 +899,18 @@ pub struct CommitLogEntry {
 }
 
 impl CommitLogEntry {
-    pub fn serialize_into(&self, buffer: &mut Vec<u8>) {
+    pub fn serialize_into(&self, buffer: &mut Vec<u8>) -> io::Result<()> {
         buffer.clear();
         for change in &self.grain_changes {
             buffer.extend(change.start.0.to_le_bytes());
             // Top 2 bits are the operation.
-            assert!(change.count < 2_u32.pow(30));
+            if change.count >= 2_u32.pow(30) {
+                return Err(io::invalid_data_error("too many changes in entry"));
+            }
             let op_and_count = (change.operation as u32) << 30 | change.count;
             buffer.extend(op_and_count.to_le_bytes());
         }
+        Ok(())
     }
 
     pub fn load_from<File: io::File>(
@@ -924,10 +979,10 @@ impl CommitLogEntry {
             serialized = &serialized[12..];
         }
 
-        if !serialized.is_empty() {
-            Err(io::invalid_data_error("extra trailing bytes"))
-        } else {
+        if serialized.is_empty() {
             Ok(log)
+        } else {
+            Err(io::invalid_data_error("extra trailing bytes"))
         }
     }
 }

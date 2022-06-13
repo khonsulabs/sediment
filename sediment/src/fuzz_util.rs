@@ -1,5 +1,8 @@
-use arbitrary::{Arbitrary, Unstructured};
+#![allow(clippy::missing_panics_doc)]
+
 use std::collections::BTreeMap;
+
+use arbitrary::{Arbitrary, Unstructured};
 
 use crate::ranges::Ranges;
 
@@ -59,9 +62,7 @@ pub fn test_sets(sets: Vec<SetRange>) {
     for (key, value) in &oracle {
         let min = ranges.get(extend_u8(*key, false));
         let max = ranges.get(extend_u8(*key, true));
-        if min != value || max != value {
-            panic!("Error: {key} returned {min}/{max} instead of {value}. Oracle: {oracle:#?}; Ranges: {ranges:#?}")
-        }
+        assert!(!(min != value || max != value), "Error: {key} returned {min}/{max} instead of {value}. Oracle: {oracle:#?}; Ranges: {ranges:#?}");
     }
 }
 
@@ -145,7 +146,7 @@ fn test_remove_middle_touching_last() {
             end: 250,
             value: 0,
         },
-    ])
+    ]);
 }
 
 #[test]
@@ -167,5 +168,5 @@ fn test_remove_from_start_exact_end() {
             end: 64,
             value: 231,
         },
-    ])
+    ]);
 }

@@ -19,7 +19,7 @@ pub struct Atlas {
 }
 
 impl Atlas {
-    pub fn from_state(state: &DiskState) -> io::Result<Self> {
+    pub fn from_state(state: &DiskState) -> Self {
         let mut basins = Vec::new();
         for (basin_index, basin) in state.header.basins.iter().enumerate() {
             let basin_state = &state.basins[basin_index];
@@ -80,7 +80,7 @@ impl Atlas {
             });
         }
 
-        Ok(Self { basins })
+        Self { basins }
     }
 
     pub fn reserve_grain<File: io::File>(

@@ -243,12 +243,17 @@ impl CommitLogSnapshot {
         }
     }
 
+    #[must_use]
     pub const fn earliest_batch_id(&self) -> BatchId {
         self.starting_batch_id
     }
 
+    #[must_use]
     pub fn latest_batch_id(&self) -> BatchId {
-        BatchId(self.starting_batch_id.0 + u64::try_from(self.entries.len()).unwrap())
+        BatchId(
+            self.starting_batch_id.0
+                + u64::try_from(self.entries.len()).expect("u64 will never be too small"),
+        )
     }
 
     pub fn iter(&self) -> CommitLogIter<'_> {
@@ -278,6 +283,8 @@ impl<'a> IntoIterator for &'a CommitLogSnapshot {
     }
 }
 
+#[derive(Debug)]
+#[must_use]
 pub struct CommitLogIter<'a> {
     snapshot: &'a CommitLogSnapshot,
     index: Option<usize>,

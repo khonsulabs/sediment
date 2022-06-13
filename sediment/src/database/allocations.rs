@@ -46,24 +46,22 @@ impl FileAllocations {
         }
 
         let current_length = allocations.maximum().unwrap() + 1;
-        let start = match allocations.last() {
-            Some(Span {
-                tag: Allocation::Free,
-                start,
-            }) => {
-                // Reuse the free space already at the tail of the file
-                let start = *start;
-                let space_to_use = current_length - start;
-                allocations.set(start.., Allocation::Allocated);
-                // Allocate whatever we still need
-                let new_amount = pages - space_to_use;
-                allocations.extend_by(new_amount, Allocation::Allocated);
-                start
-            }
-            _ => {
-                allocations.extend_by(pages, Allocation::Allocated);
-                current_length
-            }
+        let start = if let Some(Span {
+            tag: Allocation::Free,
+            start,
+        }) = allocations.last()
+        {
+            // Reuse the free space already at the tail of the file
+            let start = *start;
+            let space_to_use = current_length - start;
+            allocations.set(start.., Allocation::Allocated);
+            // Allocate whatever we still need
+            let new_amount = pages - space_to_use;
+            allocations.extend_by(new_amount, Allocation::Allocated);
+            start
+        } else {
+            allocations.extend_by(pages, Allocation::Allocated);
+            current_length
         };
 
         file.set_length((start + pages) * PAGE_SIZE_U64)?;

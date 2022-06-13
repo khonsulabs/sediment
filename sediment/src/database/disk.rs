@@ -1,6 +1,8 @@
 use crate::{
     database::{allocations::FileAllocations, log::CommitLog},
-    format::{Allocation, Basin, GrainMap, Header, PAGE_SIZE, PAGE_SIZE_U64},
+    format::{
+        Allocation, Basin, BasinIndex, GrainMap, Header, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
+    },
     io,
 };
 
@@ -50,13 +52,12 @@ impl DiskState {
             (Some(first_batch_id), Some(seond_batch_id)) if first_batch_id > seond_batch_id => {
                 (first_header, second_header, true)
             }
-            (Some(_), Some(_)) => (second_header, first_header, false),
             // When either header has an error, put the error header first. This
             // ensures the error messages below will report the failure in
             // loading the header before attempting to restore from the header
             // that did parse.
-            (Some(_), None) => (second_header, first_header, false),
-            (None, Some(_)) | (None, None) => (first_header, second_header, true),
+            (Some(_), Some(_) | None) => (second_header, first_header, false),
+            (None, Some(_) | None) => (first_header, second_header, true),
         };
 
         match current
@@ -96,102 +97,13 @@ impl DiskState {
 
         let mut basins = Vec::new();
         for basin in &header.basins {
-            file_allocations.set(
-                basin.file_offset..basin.file_offset + PAGE_SIZE_U64 * 2,
-                Allocation::Allocated,
-            );
-
-            let mut buffer = std::mem::take(scratch);
-            buffer.resize(PAGE_SIZE * 2, 0);
-            let (result, buffer) = file.read_exact(buffer, basin.file_offset);
-            *scratch = buffer;
-            result?;
-
-            let first_basin = Basin::deserialize_from(&scratch[..PAGE_SIZE], true);
-            let second_basin = Basin::deserialize_from(&scratch[PAGE_SIZE..], true);
-
-            let (basin_header, first_is_current) = match (first_basin, second_basin) {
-                (Ok(first_basin), _) if first_basin.written_at == basin.last_written_at => {
-                    (first_basin, true)
-                }
-                (_, Ok(second_basin)) if second_basin.written_at == basin.last_written_at => {
-                    (second_basin, false)
-                }
-                (Ok(first_basin), Ok(second_basin)) => {
-                    return Err(io::invalid_data_error(format!(
-                        "neither basin matches expected batch. First: {}, Second: {}, Expected: {}",
-                        first_basin.written_at, second_basin.written_at, basin.last_written_at
-                    )))
-                }
-                (Err(err), _) | (_, Err(err)) => {
-                    return Err(err);
-                }
-            };
-
-            let mut strata = Vec::with_capacity(basin_header.strata.len());
-            for stratum in &basin_header.strata {
-                assert_eq!(stratum.grain_map_count, 1, "need to support multiple maps");
-                file_allocations.set(
-                    stratum.grain_map_location
-                        ..stratum.grain_map_location + stratum.grain_map_length(),
-                    Allocation::Allocated,
-                );
-
-                let header_length =
-                    GrainMap::header_length_for_grain_count(stratum.grains_per_map());
-
-                let first_map = GrainMap::read_from(
-                    file,
-                    stratum.grain_map_location,
-                    stratum.grains_per_map(),
-                    scratch,
-                    true,
-                );
-                let second_map = GrainMap::read_from(
-                    file,
-                    stratum.grain_map_location + header_length,
-                    stratum.grains_per_map(),
-                    scratch,
-                    true,
-                );
-
-                let (map, first_is_current) = match (first_map, second_map) {
-                    (Ok(first_map), Ok(second_map)) => {
-                        if first_map.written_at > second_map.written_at
-                            && first_map.written_at <= header.batch
-                        {
-                            (first_map, true)
-                        } else if second_map.written_at <= header.batch {
-                            (second_map, false)
-                        } else {
-                            return Err(io::invalid_data_error(
-                                "GrainMap error: neither batch is valid",
-                            ));
-                        }
-                    }
-                    (Ok(first_map), _) if first_map.written_at <= header.batch => (first_map, true),
-                    (_, Ok(second_map)) if second_map.written_at <= header.batch => {
-                        (second_map, false)
-                    }
-                    (Err(err), _) | (_, Err(err)) => {
-                        return Err(err);
-                    }
-                };
-
-                strata.push(StratumState {
-                    grain_maps: vec![GrainMapState {
-                        first_is_current,
-                        offset: stratum.grain_map_location,
-                        header_length,
-                        map,
-                    }],
-                });
-            }
-            basins.push(BasinState {
-                first_is_current,
-                header: basin_header,
-                strata,
-            });
+            basins.push(Self::load_basin_state(
+                basin,
+                &header,
+                &file_allocations,
+                file,
+                scratch,
+            )?);
         }
 
         let log = if header.log_offset > 0 {
@@ -216,6 +128,123 @@ impl DiskState {
             file_allocations,
         ))
     }
+
+    fn load_stratum_state<File: io::File>(
+        stratum: &StratumIndex,
+        header: &Header,
+        file_allocations: &FileAllocations,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<StratumState> {
+        assert_eq!(stratum.grain_map_count, 1, "need to support multiple maps");
+        file_allocations.set(
+            stratum.grain_map_location..stratum.grain_map_location + stratum.grain_map_length(),
+            Allocation::Allocated,
+        );
+
+        let header_length = GrainMap::header_length_for_grain_count(stratum.grains_per_map());
+
+        let first_map = GrainMap::read_from(
+            file,
+            stratum.grain_map_location,
+            stratum.grains_per_map(),
+            scratch,
+            true,
+        );
+        let second_map = GrainMap::read_from(
+            file,
+            stratum.grain_map_location + header_length,
+            stratum.grains_per_map(),
+            scratch,
+            true,
+        );
+
+        let (map, first_is_current) = match (first_map, second_map) {
+            (Ok(first_map), Ok(second_map)) => {
+                if first_map.written_at > second_map.written_at
+                    && first_map.written_at <= header.batch
+                {
+                    (first_map, true)
+                } else if second_map.written_at <= header.batch {
+                    (second_map, false)
+                } else {
+                    return Err(io::invalid_data_error(
+                        "GrainMap error: neither batch is valid",
+                    ));
+                }
+            }
+            (Ok(first_map), _) if first_map.written_at <= header.batch => (first_map, true),
+            (_, Ok(second_map)) if second_map.written_at <= header.batch => (second_map, false),
+            (Err(err), _) | (_, Err(err)) => {
+                return Err(err);
+            }
+        };
+
+        Ok(StratumState {
+            grain_maps: vec![GrainMapState {
+                first_is_current,
+                offset: stratum.grain_map_location,
+                header_length,
+                map,
+            }],
+        })
+    }
+
+    fn load_basin_state<File: io::File>(
+        basin: &BasinIndex,
+        header: &Header,
+        file_allocations: &FileAllocations,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<BasinState> {
+        file_allocations.set(
+            basin.file_offset..basin.file_offset + PAGE_SIZE_U64 * 2,
+            Allocation::Allocated,
+        );
+
+        let mut buffer = std::mem::take(scratch);
+        buffer.resize(PAGE_SIZE * 2, 0);
+        let (result, buffer) = file.read_exact(buffer, basin.file_offset);
+        *scratch = buffer;
+        result?;
+
+        let first_basin = Basin::deserialize_from(&scratch[..PAGE_SIZE], true);
+        let second_basin = Basin::deserialize_from(&scratch[PAGE_SIZE..], true);
+
+        let (basin_header, first_is_current) = match (first_basin, second_basin) {
+            (Ok(first_basin), _) if first_basin.written_at == basin.last_written_at => {
+                (first_basin, true)
+            }
+            (_, Ok(second_basin)) if second_basin.written_at == basin.last_written_at => {
+                (second_basin, false)
+            }
+            (Ok(first_basin), Ok(second_basin)) => {
+                return Err(io::invalid_data_error(format!(
+                    "neither basin matches expected batch. First: {}, Second: {}, Expected: {}",
+                    first_basin.written_at, second_basin.written_at, basin.last_written_at
+                )))
+            }
+            (Err(err), _) | (_, Err(err)) => {
+                return Err(err);
+            }
+        };
+
+        let mut strata = Vec::with_capacity(basin_header.strata.len());
+        for stratum in &basin_header.strata {
+            strata.push(Self::load_stratum_state(
+                stratum,
+                header,
+                file_allocations,
+                file,
+                scratch,
+            )?);
+        }
+        Ok(BasinState {
+            first_is_current,
+            header: basin_header,
+            strata,
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -238,13 +267,13 @@ pub struct GrainMapState {
     pub map: GrainMap,
 }
 impl GrainMapState {
-    pub fn new(offset: u64, grain_count: u64) -> Self {
-        Self {
+    pub fn new(offset: u64, grain_count: u64) -> io::Result<Self> {
+        Ok(Self {
             offset,
             first_is_current: false,
             header_length: GrainMap::header_length_for_grain_count(grain_count),
-            map: GrainMap::new(grain_count),
-        }
+            map: GrainMap::new(grain_count)?,
+        })
     }
 
     pub fn offset_to_write_at(&self) -> u64 {

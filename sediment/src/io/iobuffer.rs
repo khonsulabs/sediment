@@ -44,6 +44,7 @@ pub trait IoBufferExt: Sized {
 }
 
 impl IoBufferExt for Vec<u8> {
+    #[allow(clippy::range_plus_one)] // a type requirement for the underlying structure
     fn io_slice(self, range: impl RangeBounds<usize>) -> IoBuffer {
         IoBuffer {
             range: match (range.start_bound(), range.end_bound()) {

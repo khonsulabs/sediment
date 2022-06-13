@@ -37,17 +37,20 @@ where
         }
     }
 
+    #[must_use]
     pub fn get(&self, offset: u64) -> &Tag {
-        let index = match self.binary_search_by(|span| span.start.cmp(&offset)) {
-            Ok(index) => index,
+        let span = match self.binary_search_by(|span| span.start.cmp(&offset)) {
+            Ok(index) => self.spans.get(index),
             Err(index) => {
                 // This offset is contained by the previous span than `offset`
-                index
-                    .checked_sub(1)
-                    .expect("first entry should always have start of 0")
+                self.spans.get(
+                    index
+                        .checked_sub(1)
+                        .expect("first entry should always have start of 0"),
+                )
             }
         };
-        self.spans.get(index).map(|span| &span.tag).unwrap()
+        span.map(|span| &span.tag).expect("index is checked above")
     }
 
     pub fn set(&mut self, range: impl RangeBounds<u64>, tag: Tag) {
@@ -80,6 +83,10 @@ where
             return;
         }
 
+        self.set_between(start, end, maximum, tag);
+    }
+
+    fn set_between(&mut self, start: u64, end: u64, maximum: u64, tag: Tag) {
         let first_span_index = match self.binary_search_by(|span| span.start.cmp(&start)) {
             Ok(index) => {
                 if index > 0 && self.spans[index - 1].tag == tag {
@@ -187,7 +194,12 @@ where
             }
         } else {
             let tail_span = end.checked_add(1).map(|start| Span {
-                tag: self.spans.last().map(|span| &span.tag).cloned().unwrap(),
+                tag: self
+                    .spans
+                    .last()
+                    .map(|span| &span.tag)
+                    .cloned()
+                    .expect("spans can't be empty here"),
                 start,
             });
             self.spans.push(Span { tag, start });
@@ -200,10 +212,12 @@ where
         }
     }
 
+    #[must_use]
     pub fn iter(&self) -> Iter<'_, Tag> {
         self.into_iter()
     }
 
+    #[must_use]
     pub fn maximum(&self) -> Option<u64> {
         self.maximum
     }
