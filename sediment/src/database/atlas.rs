@@ -137,10 +137,12 @@ impl Atlas {
 
                 let (offset, grain_map_index) =
                     stratum.offset_and_index_of_grain_data(grain_id.grain_index())?;
+                let local_grain_index = grain_id.grain_index() % stratum.grains_per_map;
 
-                stratum.grain_maps[grain_map_index]
-                    .allocations
-                    .set(..u64::from(grains_needed), Allocation::Allocated);
+                stratum.grain_maps[grain_map_index].allocations.set(
+                    local_grain_index..local_grain_index + u64::from(grains_needed),
+                    Allocation::Allocated,
+                );
                 Ok(offset)
             })
             .expect("reserved bad grain")?;

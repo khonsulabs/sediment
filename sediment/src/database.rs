@@ -116,6 +116,13 @@ where
         Ok(Some(GrainData { info, data }))
     }
 
+    pub fn write(&mut self, data: &[u8]) -> io::Result<GrainId> {
+        let mut session = self.new_session();
+        let grain = dbg!(session.write(data))?;
+        session.commit()?;
+        Ok(grain)
+    }
+
     /// Reserve space within the database. This may allocate additional disk
     /// space.
     ///
@@ -336,5 +343,45 @@ crate::io_test!(multiple_strata, {
     drop(db);
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
+    }
+});
+
+// This test is aimed at testing the in-memory state tracking by issuing
+// multiple commits between opening and closing the file. Many other tests use
+// limited tests which close and reopen the database with only one transaction
+// per session. This test supplements those tests by testing larger numbers of
+// writes.
+#[cfg(test)]
+crate::io_test!(multi_commits, {
+    let path = unique_file_path::<Manager>();
+    for count in [2_u32, 3, 170, 171] {
+        println!("Testing {count} commits");
+        if path.exists() {
+            std::fs::remove_file(&path).unwrap();
+        }
+        let manager = Manager::default();
+        let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+        let mut grain_ids = Vec::new();
+        for value in 0..count {
+            grain_ids.push(db.write(&value.to_be_bytes()).unwrap());
+        }
+        drop(db);
+
+        let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+        // Verify all written data exists
+        for (index, grain_id) in grain_ids.into_iter().enumerate() {
+            let data = db.read(grain_id).unwrap().expect("grain not found");
+            let value = u32::from_be_bytes(data.data.try_into().unwrap());
+            assert_eq!(value, u32::try_from(index).unwrap());
+        }
+
+        // Verify writing again still succeeds.
+        db.write(b"test").unwrap();
+
+        drop(db);
+        if path.exists() {
+            std::fs::remove_file(&path).unwrap();
+        }
     }
 });
