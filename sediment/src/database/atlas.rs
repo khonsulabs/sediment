@@ -217,7 +217,7 @@ impl Atlas {
             .basins
             .iter_mut()
             .enumerate()
-            .find_map(|(index, basin)| (basin.strata.len() < 255).then(|| index))
+            .find_map(|(index, basin)| (basin.strata.len() < 254).then(|| index))
         {
             let grain_count_exp = 0; // TODO change this. it should increment until the maximum each time we create a new map for a specific size.
             let mut stratum = StratumIndex {
