@@ -26,17 +26,34 @@ pub fn crc(data: &[u8]) -> u32 {
     digest.finalize()
 }
 
-/// A header contains a sequence ID and a list of segment indexes. On-disk, this
-/// structure will never be longer than [`PAGE_SIZE`].
+/// The root header for a Sediment file. On-disk, this structure fits in one
+/// page (4,096 bytes).
+///
+/// The header determines the last batch that was committed, the last batch that
+/// was checkpointed, a pointer to the most recent [`LogPage`], and list of
+/// pointers to allocated [`Basin`]s.
+///
+/// This structure has two versions stored sequentially at the beginning of the
+/// file. When loading an existing database, the instance of the header with the
+/// larger `batch` should have its most recent commit completely validated. If
+/// any inconsistencies are found, the other header should be used to load the
+/// database. After successfully recovering a failed commit, the failed header
+/// and all copies of data touched by the failed commit need to be cleared or
+/// reverted.
+///
+/// The current header should never be overwritten by a new commit. The
+/// alternate header should always be written to and only after a successful
+/// fsync should the alternate header become the current header.
 #[derive(Default, Clone, Debug)]
 pub struct Header {
-    /// The [`SequenceId`] of the batch that wrote this header.
-    pub sequence: BatchId,
-    /// The [`SequenceId`] of the last batch checkpointed.
+    /// The unique id of the batch that wrote this header.
+    pub batch: BatchId,
+    /// The [`BatchId`] of the last commit that has been checkpointed. All
+    /// grains archived on or before this [`BatchId`] will be able to be reused.
     pub checkpoint: BatchId,
     /// The location on disk of the most recent [`LogPage`].
     pub log_offset: u64,
-    /// The list of basins. Cannot exceed 255.
+    /// The list of basins. Cannot exceed 254.
     pub basins: Vec<BasinIndex>,
 }
 
@@ -55,12 +72,12 @@ impl Header {
         assert!(self.basins.len() <= 254, "too many basins");
 
         buffer[4] = self.basins.len().try_into().unwrap();
-        buffer[8..16].copy_from_slice(&self.sequence.to_le_bytes());
+        buffer[8..16].copy_from_slice(&self.batch.to_le_bytes());
         buffer[16..24].copy_from_slice(&self.checkpoint.to_le_bytes());
         buffer[24..32].copy_from_slice(&self.log_offset.to_le_bytes());
         let mut length = 32;
         for basin in &self.basins {
-            buffer[length..length + 8].copy_from_slice(&basin.sequence_id.to_le_bytes());
+            buffer[length..length + 8].copy_from_slice(&basin.last_written_at.to_le_bytes());
             length += 8;
             buffer[length..length + 8].copy_from_slice(&basin.file_offset.to_le_bytes());
             length += 8;
@@ -96,24 +113,24 @@ impl Header {
             }
         }
 
-        let sequence = BatchId::from_le_bytes_slice(&bytes[8..16]);
+        let batch = BatchId::from_le_bytes_slice(&bytes[8..16]);
         let checkpoint = BatchId::from_le_bytes_slice(&bytes[16..24]);
         let log_offset = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
         let mut offset = 32;
         let mut basins = Vec::with_capacity(256);
         for _ in 0..basin_count {
-            let sequence_id = BatchId::from_le_bytes_slice(&bytes[offset..offset + 8]);
+            let last_updated_at = BatchId::from_le_bytes_slice(&bytes[offset..offset + 8]);
             offset += 8;
             let file_offset = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
             offset += 8;
             basins.push(BasinIndex {
-                sequence_id,
+                last_written_at: last_updated_at,
                 file_offset,
             });
         }
 
         Ok(Self {
-            sequence,
+            batch,
             checkpoint,
             log_offset,
             basins,
@@ -124,16 +141,24 @@ impl Header {
 /// A pointer to a [`Basin`]. Stored as 16 bytes on disk.
 #[derive(Clone, Debug)]
 pub struct BasinIndex {
-    pub sequence_id: BatchId,
+    /// The [`BatchId`] corresponding to when this basin was last modified.
+    pub last_written_at: BatchId,
+    /// The offset of the [`Basin`] in the file.
     pub file_offset: u64,
 }
 
-/// A header contains a sequence ID and a list of segment indexes. A header is
-/// 4,096 bytes on-disk, and the sequence ID in little endian format is the
-/// first 8 bytes. Each 8 bytes after
+/// A Basin manages a list of [`Stratum`]. Basins are purely used for a level of
+/// hierarchy. On-disk, this structure will be serialized to a single page.
+///
+/// This structure has two copies stored sequentially in the file. The copy that
+/// is used is the one whose `written_at` matches the corresponding
+/// [`BasinIndex::last_written_at`] value.
+///
+/// Writing should always be done to the copy that is not referred to by the
+/// current [`Header`]'s [`BasinIndex`].
 #[derive(Default, Clone, Debug)]
 pub struct Basin {
-    pub sequence: BatchId,
+    pub written_at: BatchId,
     pub strata: Vec<StratumIndex>,
 }
 
@@ -151,7 +176,7 @@ impl Basin {
 
         assert!(self.strata.len() <= 254, "too many strata");
         buffer[4] = self.strata.len().try_into().unwrap();
-        buffer[8..16].copy_from_slice(&self.sequence.to_le_bytes());
+        buffer[8..16].copy_from_slice(&self.written_at.to_le_bytes());
         let mut length = 32;
         for stratum in &self.strata {
             buffer[length..length + 4].copy_from_slice(&stratum.grain_map_count.to_le_bytes());
@@ -197,7 +222,7 @@ impl Basin {
             }
         }
 
-        let sequence = BatchId::from_le_bytes_slice(&bytes[8..16]);
+        let written_at = BatchId::from_le_bytes_slice(&bytes[8..16]);
         let mut offset = 32;
         let mut strata = Vec::with_capacity(255);
         for _ in 0..strata_count {
@@ -223,24 +248,42 @@ impl Basin {
             });
         }
 
-        Ok(Self { sequence, strata })
+        Ok(Self { written_at, strata })
     }
 }
-// Stored on-disk as 16 bytes.
+/// Information about a collection of grains. Stored on-disk as 16 bytes.
+///
+/// A stratum is subdivided into a list of [`GrainMap`]s. Each grain is able to
+/// store a fixed number of bytes, and the length is dictated by this structure.
+/// To accommodate large databases, each stratum can contain more than one
+/// [`GrainMap`]. Each [`GrainMap`] contains the same number of grains, dictated
+/// by this structure.
 #[derive(Clone, Debug)]
 pub struct StratumIndex {
     // The number of grain maps allocated.
     pub grain_map_count: u32,
-    /// 2^`grain_count_exp` is the number of pages of grains each map contains.
-    /// Each page of grains contains 170 grains.
+    /// Controls the number of grains each [`GrainMap`] contains in this
+    /// stratum.
+    ///
+    /// The value is interpretted using  2^`grain_count_exp` as the number of
+    /// pages of grains each map contains. Each page of grains contains 170
+    /// grains, which means that the number of grains in each [`GrainMap`] is
+    /// `2^grain_count_exp * 170`.
+    ///
+    /// For example, a `grain_count_exp` of `2` is 2^2 (4) pages. 4 pages of 170
+    /// grains each can store 680 grains per [`GrainMap`].
     pub grain_count_exp: u8,
-    /// 2^`grain_length_exp` - 32 is the number of bytes each grain has
-    /// allocated. The limit is 32. In practice, this value will never be below
-    /// 7 (96-byte grains), and will grow as-needed based on the file's needs.
+    /// 2^`grain_length_exp` is the number of bytes each grain has allocated.
+    /// The limit is 32. The length of data stored in a single grain cannot
+    /// exceed the capacity of a u32, so this field has a hard limit of 32.
+    ///
+    /// Practically speaking, it is unlikely to be optimal to allocate 4GB-size
+    /// grains as storing such large blobs would introduce severe file space
+    /// overhead.
     pub grain_length_exp: u8,
     /// If `grain_map_count` is 1, this points directly to a [`GrainMap`]. If
     /// `grain_map_count` is greater than 0, this points to a list of
-    /// [`GrainMap`] offsets.
+    /// [`GrainMap`] offsets (to be implemented).
     pub grain_map_location: u64,
 }
 
@@ -272,14 +315,25 @@ impl StratumIndex {
     }
 }
 
-/// Written in duplicate.
+/// A header for a map of grains. The header contains an overview of the grain
+/// allocation states, allowing the database load process to not require
+/// scanning every page of grains to evaluate their allocation states.
+///
+/// This header is dynamically sized and written in duplicate. Its length is
+/// padded to the next page size, but a single page currently can represent up
+/// to 32,656 grains in a single page.
+///
+/// The list of [`GrainMapPage`] headers follows both copies of this header.
+///
+/// After all of the [`GrainMapPage`] headers is a contiguous region of the file
+/// for all grains contained within this map.
 #[derive(Debug, Default)]
 pub struct GrainMap {
-    /// The sequence of the batch this grain map
-    pub sequence: BatchId,
-    /// Ranges of grain allocations.
+    /// The batch this header was written during.
+    pub written_at: BatchId,
+    /// A collection of bits representing whether each grain is allocated or
+    /// not.
     pub allocation_state: BitVec<u8>,
-    // // A list of grains, where each entry has an active an inactive version.
 }
 
 impl GrainMap {
@@ -287,13 +341,13 @@ impl GrainMap {
         let mut allocation_state = BitVec::new();
         allocation_state.resize(usize::try_from(grain_count).unwrap(), false);
         Self {
-            sequence: BatchId::default(),
+            written_at: BatchId::default(),
             allocation_state,
         }
     }
 
     fn unaligned_header_length_for_grain_count(grain_count: u64) -> u64 {
-        // 8 bits per 8 grains, plus 12 bytes of header overhead (crc + sequence ID)
+        // 8 bits per 8 grains, plus 12 bytes of header overhead (crc + BatchId)
         (grain_count + 7) / 8 + 12
     }
 
@@ -325,14 +379,14 @@ impl GrainMap {
                 return Err(io::invalid_data_error(format!("Grain Map CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
             }
         }
-        let sequence = BatchId::from_le_bytes_slice(&buffer[4..12]);
+        let written_at = BatchId::from_le_bytes_slice(&buffer[4..12]);
         let mut allocation_state = BitVec::from_vec(buffer[12..].to_vec());
         // Because we always encode in chunks of 8, we may have additional bits
         // after restoring from the file.
         allocation_state.truncate(usize::try_from(grain_count).unwrap());
         *scratch = buffer;
         Ok(Self {
-            sequence,
+            written_at,
             allocation_state,
         })
     }
@@ -347,7 +401,7 @@ impl GrainMap {
         buffer.clear();
 
         buffer.extend(&[0; 4]); // Reserve space for CRC
-        buffer.extend(self.sequence.to_le_bytes());
+        buffer.extend(self.written_at.to_le_bytes());
         buffer.extend_from_slice(self.allocation_state.as_raw_slice());
 
         // Calculate the CRC of everything after the CRC
@@ -362,6 +416,7 @@ impl GrainMap {
     }
 }
 
+/// Whether a location is considered allocated or free to use.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Allocation {
     Free,
@@ -374,7 +429,12 @@ impl Default for Allocation {
     }
 }
 
-/// Each GrainMapPage is a collection of 256 [`GrainInfo`] structures.
+/// A collection of 170 [`GrainInfo`] structures.
+///
+/// This data structure fits in a single on-disk page. This header is only
+/// written once and assumes [Powersafe Overwrite][psow].
+///
+/// [psow]: https://www.sqlite.org/psow.html
 #[derive(Clone, Debug)]
 pub struct GrainMapPage {
     pub grains: [GrainInfo; 170],
@@ -449,9 +509,10 @@ impl GrainMapPage {
     }
 }
 
-/// Information about a single grain. A grain's lifecycle looks like this:
+/// Information about a single grain. A grain's lifecycle can be seen through
+/// the `allocated_at` and `archive_at` values:
 ///
-/// | Step           | `allocated_at` | `archived_at`         | Grain State |
+/// | Stage          | `allocated_at` | `archived_at`         | Grain State |
 /// |----------------|----------------|-----------------------|-------------|
 /// | initial        | None           | None                  | free        |
 /// | allocate       | Some(Active)   | None                  | allocated   |
@@ -459,10 +520,10 @@ impl GrainMapPage {
 /// | free for reuse | Some(Inactive) | Some(Active)          | free        |
 /// | allocate       | Some(Active)   | None                  | allocated   |
 ///
-/// The highest bit of the SequenceId is used to store whether the sequence ID
-/// information is considered active or not. This sequence of a lifecycle allows
-/// reverting to the previous step at any given stage in the lifecycle without
-/// losing any data.
+/// The highest bit of the [`BatchId`] is used to store whether the data stored
+/// is considered active or not. This lifecycle sequence allows reverting to the
+/// previous step at any given stage in the lifecycle without losing any data,
+/// and without needing to store the data in duplicate.
 #[derive(Debug, Default, Copy, Clone)]
 pub struct GrainInfo {
     pub allocated_at: Option<BatchId>,
@@ -471,11 +532,12 @@ pub struct GrainInfo {
     pub crc: u32,
 }
 
+/// The unique id of an ACID-compliant batch write operation.
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub struct BatchId(pub(crate) u64);
 
 impl BatchId {
-    const ARCHIVED_MASK: u64 = 0x8000_0000_0000_0000;
+    const INACTIVE_MASK: u64 = 0x8000_0000_0000_0000;
     const ID_MASK: u64 = 0x7FFF_FFFF_FFFF_FFFF;
 
     pub const fn first() -> Self {
@@ -483,7 +545,7 @@ impl BatchId {
     }
 
     pub const fn active(&self) -> bool {
-        self.0 & Self::ARCHIVED_MASK == 0
+        self.0 & Self::INACTIVE_MASK == 0
     }
 
     pub const fn sequence(&self) -> u64 {
@@ -640,6 +702,8 @@ impl GrainId {
 fn grain_id_format_tests() {
     let test = GrainId::from_parts(1, 2, 3).unwrap();
     assert_eq!(format!("{test}"), "0102-3");
+    let parsed = GrainId::from_str(&test.to_string()).unwrap();
+    assert_eq!(test, parsed);
     assert_eq!(
         format!("{test:?}"),
         "GrainId { basin: 1, stratum: 2, grain: 3 }"
@@ -774,8 +838,8 @@ pub struct CommitLogEntry {
     /// The list of all changed grains.
     ///
     /// To verify that this log entry is valid, all GrainHeaders of affected
-    /// GrainIds must be inspected to ensure they all reflect the same sequence
-    /// as this entry.
+    /// GrainIds must be inspected to ensure they all reflect the same batch as
+    /// this entry.
     ///
     /// A full validation will require checksumming the stored values of those
     /// grains.

@@ -44,8 +44,8 @@ impl Committer {
                 // Wait for a commit to notify that a batch has been committed.
                 self.commit_sync.wait(&mut state);
                 // Check if our batch has been written.
-                if let Some(commit_sequence) = state.committed_batches.remove(&batch_id) {
-                    return Ok(commit_sequence);
+                if let Some(committed_batch_id) = state.committed_batches.remove(&batch_id) {
+                    return Ok(committed_batch_id);
                 } else {
                     continue;
                 }
@@ -91,7 +91,7 @@ impl Committer {
 
         let mut disk_state = database.disk_state.lock();
 
-        let committing_batch = disk_state.header.sequence.next();
+        let committing_batch = disk_state.header.batch.next();
 
         // Gather info about new basins and strata that the atlas has allocated.
         let atlas = database.atlas.lock();
@@ -111,7 +111,7 @@ impl Committer {
                 changed = true;
                 disk_state.basins.push(BasinState::default());
                 disk_state.header.basins.push(BasinIndex {
-                    sequence_id: committing_batch,
+                    last_written_at: committing_batch,
                     file_offset: basin_atlas.location,
                 });
                 disk_state.basins.last_mut().unwrap()
@@ -261,14 +261,14 @@ impl Committer {
         for (basin_index, stratum_index, grain_map_index) in modified_grain_maps {
             let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
                 [grain_map_index];
-            grain_map.map.sequence = committing_batch;
+            grain_map.map.written_at = committing_batch;
             let offset = grain_map.offset_to_write_at();
             grain_map.map.write_to(offset, file, scratch)?;
             grain_map.first_is_current = !grain_map.first_is_current;
         }
 
         for basin_index in modified_basins {
-            disk_state.header.basins[basin_index].sequence_id = committing_batch;
+            disk_state.header.basins[basin_index].last_written_at = committing_batch;
             let mut offset = disk_state.header.basins[basin_index].file_offset;
 
             let basin = &mut disk_state.basins[basin_index];
@@ -276,12 +276,12 @@ impl Committer {
                 offset += PAGE_SIZE_U64
             }
 
-            basin.header.sequence = committing_batch;
+            basin.header.written_at = committing_batch;
             basin.header.write_to(offset, file, false, scratch)?;
             basin.first_is_current = !basin.first_is_current;
         }
 
-        disk_state.header.sequence = committing_batch;
+        disk_state.header.batch = committing_batch;
         disk_state.header.write_to(
             if disk_state.first_header_is_current {
                 PAGE_SIZE_U64

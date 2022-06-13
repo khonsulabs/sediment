@@ -223,8 +223,8 @@ crate::io_test!(basic_op, {
     let mut session = db.new_session();
     let grain_id = session.write(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
-    let committed_sequence = session.commit().unwrap();
-    println!("Batch sequence: {committed_sequence}");
+    let committed_batch = session.commit().unwrap();
+    println!("Batch: {committed_batch}");
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(grain_data.data, b"hello world");
@@ -240,8 +240,8 @@ crate::io_test!(basic_op, {
     let mut session = db.new_session();
     let second_grain_id = session.write(b"hello again").unwrap();
     println!("Wrote to {second_grain_id}");
-    let committed_sequence = session.commit().unwrap();
-    println!("Batch sequence: {committed_sequence}");
+    let committed_batch = session.commit().unwrap();
+    println!("Batch: {committed_batch}");
 
     // Reopen the database.
     drop(db);
@@ -257,8 +257,8 @@ crate::io_test!(basic_op, {
     let mut session = db.new_session();
     let third_grain_id = session.write(b"bye for now").unwrap();
     println!("Wrote to {third_grain_id}");
-    let committed_sequence = session.commit().unwrap();
-    println!("Batch sequence: {committed_sequence}");
+    let committed_batch = session.commit().unwrap();
+    println!("Batch: {committed_batch}");
 
     // Reopen the database.
     drop(db);

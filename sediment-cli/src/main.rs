@@ -35,6 +35,7 @@ enum SingleCommand {
     },
     Push {
         value: Option<String>,
+        #[clap(short = 'f')]
         value_path: Option<PathBuf>,
     },
     Stats,
@@ -82,10 +83,10 @@ fn repl(mut db: Database<AnyFile>) {
 }
 
 impl SingleCommand {
-    fn execute_on(&self, database: &mut Database<AnyFile>) -> io::Result<()> {
+    fn execute_on(self, database: &mut Database<AnyFile>) -> io::Result<()> {
         match self {
             SingleCommand::Get { grain_id } => {
-                let data = database.read(*grain_id)?;
+                let data = database.read(grain_id)?;
                 if let Some(data) = data {
                     println!("{}", pretty_hex::pretty_hex(&data.data));
                     Ok(())
@@ -95,19 +96,21 @@ impl SingleCommand {
                 }
             }
             SingleCommand::Push { value, value_path } => {
-                if let Some(value) = value {
-                    let mut session = database.new_session();
-                    let grain = session.write(value.as_bytes())?;
-                    let batch = session.commit()?;
-                    println!("New grain id: {}", grain);
-                    println!("Committed in batch: {}", batch);
-                    Ok(())
+                let data = if let Some(value) = value {
+                    value.into_bytes()
                 } else if let Some(path) = value_path {
-                    todo!()
+                    std::fs::read(path)?
                 } else {
                     eprintln!("Either a value or a path must be provided");
                     exit(1)
-                }
+                };
+
+                let mut session = database.new_session();
+                let grain = session.write(&data)?;
+                let batch = session.commit()?;
+                println!("New grain id: {}", grain);
+                println!("Committed in batch: {}", batch);
+                Ok(())
             }
             SingleCommand::Stats => {
                 let stats = database.statistics();

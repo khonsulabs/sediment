@@ -9,7 +9,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct CommitLog {
     pub pages: VecDeque<CommitLogPage>,
-    tail_checkpoint_index: usize,
+    _tail_checkpoint_index: usize,
     head_insert_index: usize,
 }
 
@@ -89,7 +89,7 @@ impl CommitLog {
 
         Ok(Self {
             pages,
-            tail_checkpoint_index,
+            _tail_checkpoint_index: tail_checkpoint_index,
             head_insert_index,
         })
     }

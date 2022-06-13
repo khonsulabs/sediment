@@ -44,10 +44,10 @@ impl DiskState {
             (first_header, second_header)
         };
 
-        let first_sequence = first_header.as_ref().map(|header| header.sequence).ok();
-        let second_sequence = second_header.as_ref().map(|header| header.sequence).ok();
-        let (current, previous, current_is_first) = match (first_sequence, second_sequence) {
-            (Some(first_sequence), Some(second_sequence)) if first_sequence > second_sequence => {
+        let first_batch_id = first_header.as_ref().map(|header| header.batch).ok();
+        let seond_batch_id = second_header.as_ref().map(|header| header.batch).ok();
+        let (current, previous, current_is_first) = match (first_batch_id, seond_batch_id) {
+            (Some(first_batch_id), Some(seond_batch_id)) if first_batch_id > seond_batch_id => {
                 (first_header, second_header, true)
             }
             (Some(_), Some(_)) => (second_header, first_header, false),
@@ -111,16 +111,16 @@ impl DiskState {
             let second_basin = Basin::deserialize_from(&scratch[PAGE_SIZE..], true);
 
             let (basin_header, first_is_current) = match (first_basin, second_basin) {
-                (Ok(first_basin), _) if first_basin.sequence == basin.sequence_id => {
+                (Ok(first_basin), _) if first_basin.written_at == basin.last_written_at => {
                     (first_basin, true)
                 }
-                (_, Ok(second_basin)) if second_basin.sequence == basin.sequence_id => {
+                (_, Ok(second_basin)) if second_basin.written_at == basin.last_written_at => {
                     (second_basin, false)
                 }
                 (Ok(first_basin), Ok(second_basin)) => {
                     return Err(io::invalid_data_error(format!(
                         "neither basin matches expected batch. First: {}, Second: {}, Expected: {}",
-                        first_basin.sequence, second_basin.sequence, basin.sequence_id
+                        first_basin.written_at, second_basin.written_at, basin.last_written_at
                     )))
                 }
                 (Err(err), _) | (_, Err(err)) => {
@@ -157,11 +157,11 @@ impl DiskState {
 
                 let (map, first_is_current) = match (first_map, second_map) {
                     (Ok(first_map), Ok(second_map)) => {
-                        if first_map.sequence > second_map.sequence
-                            && first_map.sequence <= header.sequence
+                        if first_map.written_at > second_map.written_at
+                            && first_map.written_at <= header.batch
                         {
                             (first_map, true)
-                        } else if second_map.sequence <= header.sequence {
+                        } else if second_map.written_at <= header.batch {
                             (second_map, false)
                         } else {
                             return Err(io::invalid_data_error(
@@ -169,10 +169,8 @@ impl DiskState {
                             ));
                         }
                     }
-                    (Ok(first_map), _) if first_map.sequence <= header.sequence => {
-                        (first_map, true)
-                    }
-                    (_, Ok(second_map)) if second_map.sequence <= header.sequence => {
+                    (Ok(first_map), _) if first_map.written_at <= header.batch => (first_map, true),
+                    (_, Ok(second_map)) if second_map.written_at <= header.batch => {
                         (second_map, false)
                     }
                     (Err(err), _) | (_, Err(err)) => {
