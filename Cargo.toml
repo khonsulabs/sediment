@@ -1,2 +1,2 @@
 [workspace]
-members = ["sediment", "fuzz", "sediment-cli"]
+members = ["sediment", "fuzz", "sediment-cli", "benchmarks"]

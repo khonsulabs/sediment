@@ -7,6 +7,18 @@ edition = "2021"
 
 [features]
 test-util = ["arbitrary"]
+
+# This feature only affects Apple OSes.
+#
+# On Apple OSes, ACID compliance can only be achieved through using `fcntl(_,
+# F_FULLFSYNC, _)` instead of `fsync()`. Unfortunately, using `F_FULLFSYNC` can
+# be incredibly slow.
+#
+# Apple introduced another mechanism to allow background flushing while still
+# guaranteeing write ordering: `fcntl(_, F_BARRIERFSYNC, _)`.
+#
+# Enabling this feature will switch Sediment from using `F_FULLFSYNC` to
+# `F_BARRIERFSYNC`.
 fbarrier-fsync = ["libc"]
 
 [dependencies]
