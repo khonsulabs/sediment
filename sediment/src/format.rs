@@ -311,24 +311,21 @@ impl StratumIndex {
     }
 
     #[must_use]
-    pub fn grain_location(&self, index: u32) -> u64 {
-        self.grain_map_location
-            + GrainMap::header_length_for_grain_count(self.grains_per_map()) * 2
-            + u64::from(self.grain_length()) * u64::from(index)
-    }
-
-    #[must_use]
     pub fn header_length(&self) -> u64 {
         GrainMap::header_length_for_grain_count(self.grains_per_map()) * 2
     }
 
     #[must_use]
     pub fn grain_map_length(&self) -> u64 {
-        self.header_length()
-            + u64::from(self.grain_map_count) * PAGE_SIZE_U64
+        self.grain_map_data_offset()
             + (self.grains_per_map() * u64::from(self.grain_length()))
                 .round_to_multiple_of(PAGE_SIZE_U64)
                 .expect("too many grains")
+    }
+
+    #[must_use]
+    pub fn grain_map_data_offset(&self) -> u64 {
+        self.header_length() + u64::from(self.grain_map_count) * PAGE_SIZE_U64
     }
 }
 
@@ -568,6 +565,20 @@ pub struct GrainInfo {
     pub archived_at: Option<BatchId>,
     pub length: u32,
     pub crc: u32,
+}
+
+impl GrainInfo {
+    #[must_use]
+    pub fn checked_allocated_at(&self) -> Option<BatchId> {
+        self.allocated_at
+            .and_then(|allocated| allocated.active().then(|| allocated))
+    }
+
+    #[must_use]
+    pub fn checked_archived_at(&self) -> Option<BatchId> {
+        self.archived_at
+            .and_then(|archived| archived.active().then(|| archived))
+    }
 }
 
 /// The unique id of an ACID-compliant batch write operation.

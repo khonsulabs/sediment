@@ -1,9 +1,10 @@
 use crate::{
-    database::{allocations::FileAllocations, log::CommitLog},
+    database::{allocations::FileAllocations, log::CommitLog, page_cache::PageCache},
     format::{
-        Allocation, Basin, BasinIndex, GrainMap, Header, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
+        crc, Allocation, Basin, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMap,
+        GrainMapPage, GrainOperation, Header, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
-    io,
+    io::{self, ext::ToIoResult},
 };
 
 /// Manages the current disk state.
@@ -26,6 +27,7 @@ impl DiskState {
     pub fn recover<File: io::File>(
         file: &mut File,
         scratch: &mut Vec<u8>,
+        page_cache: &PageCache,
     ) -> io::Result<(Self, CommitLog, FileAllocations)> {
         let (first_header, second_header) = if file.is_empty()? {
             // Initialize the an empty database.
@@ -60,16 +62,16 @@ impl DiskState {
             (None, Some(_) | None) => (first_header, second_header, true),
         };
 
-        match current
-            .and_then(|header| Self::load_from_header(header, current_is_first, file, scratch))
-        {
+        match current.and_then(|header| {
+            Self::load_from_header(header, current_is_first, file, scratch, page_cache)
+        }) {
             Ok(loaded) => Ok(loaded),
             Err(current_header_error) => {
                 eprintln!(
                     "Error loading current header: {current_header_error}. Attempting rollback."
                 );
                 match previous
-                .and_then(|header| Self::load_from_header(header, !current_is_first, file, scratch)) {
+                .and_then(|header| Self::load_from_header(header, !current_is_first, file, scratch, page_cache)) {
                     Ok(loaded) => {
                         // TODO Zero out all data from the next header
 
@@ -90,6 +92,7 @@ impl DiskState {
         is_first_header: bool,
         file: &mut File,
         scratch: &mut Vec<u8>,
+        page_cache: &PageCache,
     ) -> io::Result<(Self, CommitLog, FileAllocations)> {
         let file_allocations = FileAllocations::new(file.len()?);
         // Allocate the file header
@@ -118,15 +121,14 @@ impl DiskState {
             CommitLog::default()
         };
 
-        Ok((
-            DiskState {
-                first_header_is_current: is_first_header,
-                header,
-                basins,
-            },
-            log,
-            file_allocations,
-        ))
+        let state = DiskState {
+            first_header_is_current: is_first_header,
+            header,
+            basins,
+        };
+        Self::validate_last_log_entry(&log, &state, file, scratch, page_cache)?;
+
+        Ok((state, log, file_allocations))
     }
 
     fn load_stratum_state<File: io::File>(
@@ -244,6 +246,161 @@ impl DiskState {
             header: basin_header,
             strata,
         })
+    }
+
+    fn validate_last_log_entry<File: io::File>(
+        log: &CommitLog,
+        state: &DiskState,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+        page_cache: &PageCache,
+    ) -> io::Result<()> {
+        let (batch_id, entry_index) = if let Some(entry) = log.most_recent_entry() {
+            entry
+        } else {
+            // No commit log entries, nothing to validate.
+            return Ok(());
+        };
+
+        let entry = CommitLogEntry::load_from(entry_index, true, file, scratch)?;
+
+        for change in &entry.grain_changes {
+            Self::validate_grain_change(change, batch_id, state, file, scratch, page_cache)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_grain_change<File: io::File>(
+        change: &GrainChange,
+        batch_id: BatchId,
+        state: &DiskState,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+        page_cache: &PageCache,
+    ) -> io::Result<()> {
+        let basin = state
+            .basins
+            .get(usize::from(change.start.basin_index()))
+            .ok_or_else(|| io::invalid_data_error("log validation failed: invalid basin index"))?;
+        let stratum_info = basin
+            .header
+            .strata
+            .get(usize::from(change.start.stratum_index()))
+            .ok_or_else(|| {
+                io::invalid_data_error("log validation failed: invalid stratum index")
+            })?;
+        let stratum = basin
+            .strata
+            .get(usize::from(change.start.stratum_index()))
+            .ok_or_else(|| {
+                io::invalid_data_error("log validation failed: invalid stratum index")
+            })?;
+        let grain_map_index = change.start.grain_index() / stratum_info.grains_per_map();
+        let grain_map_local_index = change.start.grain_index() % stratum_info.grains_per_map();
+        let grain_map = stratum
+            .grain_maps
+            .get(usize::try_from(grain_map_index).to_io()?)
+            .ok_or_else(|| io::invalid_data_error("log validation failed: grain map not found"))?;
+        if grain_map.map.written_at != batch_id {
+            return Err(io::invalid_data_error(
+                "log validation failed: grain map not updated",
+            ));
+        }
+
+        // Verify the grain map is updated. This is a consistency check, and can
+        // only fail from faulty logic.
+        let should_be_allocated = match change.operation {
+            GrainOperation::Allocate | GrainOperation::Archive => true,
+            GrainOperation::Free => false,
+        };
+        for index in grain_map_local_index..grain_map_local_index + u64::from(change.count) {
+            let allocated = grain_map.map.allocation_state[usize::try_from(index).to_io()?];
+            if allocated != should_be_allocated {
+                return Err(io::invalid_data_error(
+                    "log validation failed: grain map allocation state inconsistency",
+                ));
+            }
+        }
+
+        let grain_map_page_index = grain_map_local_index / 170;
+        let local_grain_index = grain_map_local_index % 170;
+        let grain_map_offset = grain_map.offset;
+        let page_offset =
+            grain_map_offset + stratum_info.header_length() + PAGE_SIZE_U64 * grain_map_page_index;
+        let grain_data_offset = grain_map_offset
+            + stratum_info.grain_map_data_offset()
+            + local_grain_index * u64::from(stratum_info.grain_length());
+        let grain_map_page = page_cache.fetch(page_offset, true, file, scratch)?;
+
+        let local_grain_index = usize::try_from(local_grain_index).to_io()?;
+        for index in local_grain_index..local_grain_index + usize::try_from(change.count).to_io()? {
+            Self::validate_grain_info_state(change, index, batch_id, &grain_map_page)?;
+        }
+
+        // Verify the data's CRC to ensure the data is fully present.
+        let mut buffer = std::mem::take(scratch);
+        buffer.resize(
+            usize::try_from(grain_map_page.grains[local_grain_index].length).to_io()?,
+            0,
+        );
+        let (result, buffer) = file.read_exact(buffer, grain_data_offset);
+        *scratch = buffer;
+        result?;
+
+        if grain_map_page.grains[local_grain_index].crc != crc(scratch) {
+            return Err(io::invalid_data_error(
+                "log validation failed: grain crc check failed",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn validate_grain_info_state(
+        change: &GrainChange,
+        local_index: usize,
+        batch_id: BatchId,
+        grain_map_page: &GrainMapPage,
+    ) -> io::Result<()> {
+        match change.operation {
+            GrainOperation::Allocate => {
+                if grain_map_page.grains[local_index].checked_allocated_at() != Some(batch_id)
+                    || grain_map_page.grains[local_index]
+                        .checked_archived_at()
+                        .is_some()
+                {
+                    return Err(io::invalid_data_error(
+                        "log validation failed: grain not allocated",
+                    ));
+                }
+            }
+            GrainOperation::Archive => {
+                if grain_map_page.grains[local_index].checked_archived_at() != Some(batch_id)
+                    || grain_map_page.grains[local_index]
+                        .checked_allocated_at()
+                        .is_none()
+                {
+                    return Err(io::invalid_data_error(
+                        "log validation failed: grain not archived",
+                    ));
+                }
+            }
+            GrainOperation::Free => {
+                if grain_map_page.grains[local_index]
+                    .checked_allocated_at()
+                    .is_some()
+                    || grain_map_page.grains[local_index]
+                        .checked_archived_at()
+                        .is_some()
+                {
+                    return Err(io::invalid_data_error(
+                        "log validation failed: grain not freed",
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 

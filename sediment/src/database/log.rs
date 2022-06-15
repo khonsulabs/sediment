@@ -21,6 +21,35 @@ impl CommitLog {
         self.pages.back().and_then(|state| state.offset)
     }
 
+    pub fn most_recent_page(&self) -> Option<&CommitLogPage> {
+        self.pages.back()
+    }
+
+    pub fn most_recent_entry(&self) -> Option<(BatchId, &LogEntryIndex)> {
+        if self.pages.is_empty() {
+            None
+        } else if self.head_insert_index == 0 {
+            // The most recent entry is on the second-to-last page.
+            if let Some(index) = self.pages.get(self.pages.len() - 1) {
+                index
+                    .page
+                    .entries
+                    .last()
+                    .map(|entry| (BatchId(index.page.first_batch_id.0 + 169), entry))
+            } else {
+                None
+            }
+        } else {
+            let entry_index = self.head_insert_index - 1;
+            self.most_recent_page().map(|index| {
+                (
+                    BatchId(index.page.first_batch_id.0 + u64::try_from(entry_index).unwrap()),
+                    &index.page.entries[entry_index],
+                )
+            })
+        }
+    }
+
     // TODO this structure needs to be able to inform file allocations
     pub fn read_from<File: io::File>(
         mut offset: u64,

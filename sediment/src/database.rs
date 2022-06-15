@@ -51,8 +51,10 @@ where
         let mut file = manager.write(&path_id)?;
 
         let mut scratch = Vec::new();
+        let grain_map_page_cache = PageCache::default();
 
-        let (disk_state, log, file_allocations) = DiskState::recover(&mut file, &mut scratch)?;
+        let (disk_state, log, file_allocations) =
+            DiskState::recover(&mut file, &mut scratch, &grain_map_page_cache)?;
         let atlas = Atlas::from_state(&disk_state);
 
         Ok(Self {
@@ -65,7 +67,7 @@ where
                 log: RwLock::new(log),
                 disk_state: Mutex::new(disk_state),
                 committer: Committer::default(),
-                grain_map_page_cache: PageCache::default(),
+                grain_map_page_cache,
                 file_allocations,
             }),
         })
