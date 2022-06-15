@@ -109,7 +109,7 @@ macro_rules! io_test {
             #[allow(dead_code)]
             fn unique_file_path<Manager>() -> PathBuf {
                 PathBuf::from(format!(
-                    ".test-{}-{}",
+                    ".test-{}-{}.sediment",
                     stringify!($name),
                     std::any::type_name::<Manager>()
                         .rsplit_once("::")

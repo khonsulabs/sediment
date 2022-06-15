@@ -99,13 +99,13 @@ impl File for StdFile {
         // SAFETY: As long as the underlying File has a valid descriptor, this
         // should always be safe to call.
         let result = unsafe { libc::fcntl(self.file.as_raw_fd(), F_BARRIERFSYNC) };
-        if result != 0 {
+        if result == 0 {
+            Ok(())
+        } else {
             // It is unsafe to try to resume from a failed fsync call, because
             // the OS may have an inconsistent state with regards to what the
             // disk has flushed and what it hasn't.
             Err(std::io::Error::last_os_error())
-        } else {
-            Ok(())
         }
     }
 

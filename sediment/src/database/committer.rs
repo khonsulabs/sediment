@@ -135,7 +135,7 @@ impl Committer {
             }
 
             basin.header.written_at = committing_batch;
-            basin.header.write_to(offset, file, false, scratch)?;
+            basin.header.write_to(offset, file, scratch)?;
             basin.first_is_current = !basin.first_is_current;
         }
 

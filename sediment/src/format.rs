@@ -179,7 +179,6 @@ impl Basin {
         &self,
         offset: u64,
         file: &mut File,
-        write_full_page: bool,
         scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
         let mut buffer = Vec::new();
@@ -208,14 +207,7 @@ impl Basin {
         let crc = crc(&buffer[4..length]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
 
-        let (result, buffer) = file.write_all(
-            if write_full_page {
-                buffer.io()
-            } else {
-                buffer.io_slice(..length)
-            },
-            offset,
-        );
+        let (result, buffer) = file.write_all(buffer, offset);
         *scratch = buffer;
         result
     }
@@ -433,6 +425,13 @@ impl GrainMap {
         // Calculate the CRC of everything after the CRC
         let crc = crc(&buffer[4..]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
+        scratch.resize(
+            scratch
+                .len()
+                .round_to_multiple_of(PAGE_SIZE)
+                .expect("too large"),
+            0,
+        );
 
         let (result, returned_buffer) = file.write_all(buffer, offset);
         *scratch = returned_buffer;
