@@ -28,7 +28,7 @@ impl DiskState {
         file: &mut File,
         scratch: &mut Vec<u8>,
         page_cache: &PageCache,
-    ) -> io::Result<(Self, CommitLog, FileAllocations)> {
+    ) -> io::Result<RecoveredState> {
         let (first_header, second_header) = if file.is_empty()? {
             // Initialize the an empty database.
             let header = Header::default();
@@ -65,23 +65,25 @@ impl DiskState {
         match current.and_then(|header| {
             Self::load_from_header(header, current_is_first, file, scratch, page_cache)
         }) {
-            Ok(loaded) => Ok(loaded),
-            Err(current_header_error) => {
-                eprintln!(
-                    "Error loading current header: {current_header_error}. Attempting rollback."
-                );
-                match previous
-                .and_then(|header| Self::load_from_header(header, !current_is_first, file, scratch, page_cache)) {
-                    Ok(loaded) => {
-                        // TODO Zero out all data from the next header
-
-                        // TODO offer callback to allow custom rollback logic.
-                        eprintln!("Successfully recovered previous state.");
-                        Ok(loaded)
-                    }
-                    Err(previous_header_error) => {
-                        Err(io::invalid_data_error(format!("Unrecoverable database. Error loading previous header: {previous_header_error}.")))
-                    }
+            Ok((state, log, file_allocations)) => Ok(RecoveredState {
+                recovered: false,
+                disk_state: state,
+                log,
+                file_allocations,
+            }),
+            Err(first_header_error) => {
+                match previous.and_then(|header| {
+                    Self::load_from_header(header, !current_is_first, file, scratch, page_cache)
+                }) {
+                    Ok((state, log, file_allocations)) => Ok(RecoveredState {
+                        recovered: true,
+                        disk_state: state,
+                        log,
+                        file_allocations,
+                    }),
+                    Err(error) => Err(io::invalid_data_error(format!(
+                        "Unrecoverable database. Error loading first header: {first_header_error}. Error loading previous header: {error}."
+                    ))),
                 }
             }
         }
@@ -126,6 +128,7 @@ impl DiskState {
             header,
             basins,
         };
+
         Self::validate_last_log_entry(&log, &state, file, scratch, page_cache)?;
 
         Ok((state, log, file_allocations))
@@ -255,17 +258,12 @@ impl DiskState {
         scratch: &mut Vec<u8>,
         page_cache: &PageCache,
     ) -> io::Result<()> {
-        let (batch_id, entry_index) = if let Some(entry) = log.most_recent_entry() {
-            entry
-        } else {
-            // No commit log entries, nothing to validate.
-            return Ok(());
-        };
+        if let Some((batch_id, entry_index)) = log.most_recent_entry() {
+            let entry = CommitLogEntry::load_from(entry_index, true, file, scratch)?;
 
-        let entry = CommitLogEntry::load_from(entry_index, true, file, scratch)?;
-
-        for change in &entry.grain_changes {
-            Self::validate_grain_change(change, batch_id, state, file, scratch, page_cache)?;
+            for change in &entry.grain_changes {
+                Self::validate_grain_change(change, batch_id, state, file, scratch, page_cache)?;
+            }
         }
 
         Ok(())
@@ -440,4 +438,12 @@ impl GrainMapState {
             self.offset
         }
     }
+}
+
+#[derive(Debug)]
+pub struct RecoveredState {
+    pub recovered: bool,
+    pub disk_state: DiskState,
+    pub log: CommitLog,
+    pub file_allocations: FileAllocations,
 }

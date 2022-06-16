@@ -21,12 +21,17 @@ use crate::{
 mod allocations;
 mod atlas;
 mod committer;
+mod config;
 mod disk;
 mod log;
 mod page_cache;
 mod session;
 
-pub use self::{log::CommitLogSnapshot, session::WriteSession};
+pub use self::{
+    config::{Configuration, RecoveryCallback},
+    log::CommitLogSnapshot,
+    session::WriteSession,
+};
 
 #[derive(Debug)]
 pub struct Database<File> {
@@ -39,6 +44,44 @@ impl<File> Database<File>
 where
     File: io::File,
 {
+    fn new<Recovered>(
+        path: impl AsRef<Path>,
+        manager: &File::Manager,
+        recovered_callback: Recovered,
+    ) -> io::Result<Self>
+    where
+        Recovered: RecoveryCallback<File>,
+    {
+        let path_id = manager.resolve_path(path);
+        let mut file = manager.write(&path_id)?;
+
+        let mut scratch = Vec::new();
+        let grain_map_page_cache = PageCache::default();
+
+        let state = DiskState::recover(&mut file, &mut scratch, &grain_map_page_cache)?;
+        let atlas = Atlas::from_state(&state.disk_state);
+        let mut database = Self {
+            file,
+            scratch,
+            state: Arc::new(DatabaseState {
+                current_batch: AtomicU64::new(state.disk_state.header.batch.0),
+                checkpoint: AtomicU64::new(state.disk_state.header.checkpoint.0),
+                atlas: Mutex::new(atlas),
+                log: RwLock::new(state.log),
+                disk_state: Mutex::new(state.disk_state),
+                committer: Committer::default(),
+                grain_map_page_cache,
+                file_allocations: state.file_allocations,
+            }),
+        };
+
+        if state.recovered {
+            recovered_callback.recovered(&mut database)?;
+        }
+
+        Ok(database)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self>
     where
         File::Manager: Default,
@@ -47,30 +90,7 @@ where
     }
 
     pub fn open_with_manager(path: impl AsRef<Path>, manager: &File::Manager) -> io::Result<Self> {
-        let path_id = manager.resolve_path(path);
-        let mut file = manager.write(&path_id)?;
-
-        let mut scratch = Vec::new();
-        let grain_map_page_cache = PageCache::default();
-
-        let (disk_state, log, file_allocations) =
-            DiskState::recover(&mut file, &mut scratch, &grain_map_page_cache)?;
-        let atlas = Atlas::from_state(&disk_state);
-
-        Ok(Self {
-            file,
-            scratch,
-            state: Arc::new(DatabaseState {
-                current_batch: AtomicU64::new(disk_state.header.batch.0),
-                checkpoint: AtomicU64::new(disk_state.header.checkpoint.0),
-                atlas: Mutex::new(atlas),
-                log: RwLock::new(log),
-                disk_state: Mutex::new(disk_state),
-                committer: Committer::default(),
-                grain_map_page_cache,
-                file_allocations,
-            }),
-        })
+        Self::new(path, manager, ())
     }
 
     pub fn current_batch(&self) -> BatchId {
@@ -470,4 +490,43 @@ crate::io_test!(commit_log, {
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
+});
+
+#[cfg(test)]
+crate::io_test!(basic_rollback, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    let manager = Manager::default();
+    // Create the database.
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut session = db.new_session();
+    let grain_id = session.write(b"hello world").unwrap();
+    println!("Wrote to {grain_id}");
+    let committed_batch = session.commit().unwrap();
+    println!("Batch: {committed_batch}");
+
+    // Close the database
+    drop(db);
+
+    // Break the file header for the new commit by overwriting a byte in the
+    // first header.
+    let mut file = manager.write(&manager.resolve_path(&path)).unwrap();
+    let buffer = vec![0xFE; 1];
+    let (result, _buffer) = file.write_all(buffer, 10);
+    result.unwrap();
+
+    let mut was_recovered = false;
+    let mut db = Configuration::new(manager, &path)
+        .when_recovered(|_db: &mut Database<Manager::File>| {
+            was_recovered = true;
+            Ok(())
+        })
+        .open()
+        .unwrap();
+    assert!(was_recovered);
+    assert_ne!(db.current_batch(), committed_batch);
+
+    assert!(db.read(grain_id).unwrap().is_none());
 });
