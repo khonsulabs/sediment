@@ -87,20 +87,21 @@ where
 }
 
 pub trait RecoveryCallback<File> {
-    fn recovered(self, database: &mut Database<File>) -> io::Result<()>;
+    fn recovered(self, database: &mut Database<File>, error: std::io::Error) -> io::Result<()>;
 }
 
 impl<File> RecoveryCallback<File> for () {
-    fn recovered(self, _database: &mut Database<File>) -> io::Result<()> {
+    fn recovered(self, _database: &mut Database<File>, error: std::io::Error) -> io::Result<()> {
+        eprintln!("Database recovered from a failure to read the most recent commit: {error}");
         Ok(())
     }
 }
 
 impl<T, File> RecoveryCallback<File> for T
 where
-    T: FnOnce(&mut Database<File>) -> io::Result<()>,
+    T: FnOnce(&mut Database<File>, std::io::Error) -> io::Result<()>,
 {
-    fn recovered(self, database: &mut Database<File>) -> io::Result<()> {
-        self(database)
+    fn recovered(self, database: &mut Database<File>, error: std::io::Error) -> io::Result<()> {
+        self(database, error)
     }
 }

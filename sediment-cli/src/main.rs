@@ -88,7 +88,7 @@ impl SingleCommand {
             SingleCommand::Get { grain_id } => {
                 let data = database.read(grain_id)?;
                 if let Some(data) = data {
-                    println!("{}", pretty_hex::pretty_hex(&data.data));
+                    println!("{}", pretty_hex::pretty_hex(&data));
                     Ok(())
                 } else {
                     eprintln!("No data stored at that grain id.");

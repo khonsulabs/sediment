@@ -2,7 +2,7 @@ use crate::{
     database::{
         allocations::FileAllocations, disk::DiskState, page_cache::PageCache, GrainReservation,
     },
-    format::{Allocation, Basin, GrainId, GrainInfo, StratumIndex, PAGE_SIZE_U64},
+    format::{Allocation, Basin, BatchId, GrainId, GrainMapPage, StratumIndex, PAGE_SIZE_U64},
     io::{self, ext::ToIoResult},
     ranges::Ranges,
     todo_if,
@@ -93,7 +93,7 @@ impl Atlas {
 
         for (basin_index, basin) in self.basins.iter_mut().enumerate() {
             for (stratum_index, stratum) in basin.strata.iter_mut().enumerate() {
-                let grains_needed = length.ceil_div_by(stratum.grain_length);
+                let grains_needed = (length + 8).ceil_div_by(stratum.grain_length);
                 if grains_needed > 4 {
                     continue;
                 }
@@ -131,7 +131,7 @@ impl Atlas {
 
         let offset = self
             .map_stratum_for_grain(grain_id, |stratum| -> io::Result<u64> {
-                let grains_needed = length
+                let grains_needed = (length + 8)
                     .round_to_multiple_of(stratum.grain_length)
                     .expect("practically impossible to overflow");
 
@@ -151,44 +151,48 @@ impl Atlas {
             grain_id,
             offset,
             length,
-            crc: 0,
         })
     }
 
-    pub fn info_of_grain<File: io::File>(
+    pub fn length_of_grain<File: io::File>(
         &mut self,
         grain_id: GrainId,
+        current_batch: BatchId,
         page_cache: &PageCache,
         file: &mut File,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<Option<(u64, GrainInfo)>> {
-        let (offset, page_local_index, grain_map_page_offset) =
-            match self.map_stratum_for_grain(grain_id, |stratum| -> io::Result<(u64, usize, u64)> {
+    ) -> io::Result<Option<(u64, u64)>> {
+        let (offset, page_local_index, grain_map_page_offset, grain_length) = match self
+            .map_stratum_for_grain(grain_id, |stratum| -> io::Result<(u64, usize, u64, u32)> {
                 let (offset, grain_map_index) =
                     stratum.offset_and_index_of_grain_data(grain_id.grain_index())?;
-                let page = grain_id.grain_index() / 170;
-                let page_local_index = usize::try_from(grain_id.grain_index() % 170).unwrap();
+                let page = grain_id.grain_index() / GrainMapPage::GRAINS_U64;
+                let page_local_index =
+                    usize::try_from(grain_id.grain_index() % GrainMapPage::GRAINS_U64).unwrap();
 
                 let grain_map_offset = stratum.grain_maps[grain_map_index].offset;
                 let page_offset =
                     grain_map_offset + stratum.grain_map_header_length + PAGE_SIZE_U64 * page;
 
-                Ok((offset, page_local_index, page_offset))
+                Ok((offset, page_local_index, page_offset, stratum.grain_length))
             }) {
-                Some(Ok(result)) => result,
-                Some(Err(err)) => return Err(err),
-                None => return Ok(None),
-            };
+            Some(Ok(result)) => result,
+            Some(Err(err)) => return Err(err),
+            None => return Ok(None),
+        };
 
-        let info = page_cache.fetch_grain_info(
+        let consecutive_grains = page_cache.fetch_grain_length(
             grain_map_page_offset,
             page_local_index,
-            true,
+            current_batch,
             file,
             scratch,
         )?;
 
-        Ok(Some((offset, info)))
+        Ok(Some((
+            offset,
+            u64::from(consecutive_grains) * u64::from(grain_length),
+        )))
     }
 
     fn map_stratum_for_grain<F: FnOnce(&mut StratumAtlas) -> R, R>(
@@ -211,7 +215,7 @@ impl Atlas {
     ) -> io::Result<GrainId> {
         // TODO we shouldn't always pick the largest size. We should support
         // using multiple grains on an initial allocation.
-        let ideal_grain_length = length.min(2_u32.pow(24)).next_power_of_two();
+        let ideal_grain_length = (length + 8).min(2_u32.pow(24)).next_power_of_two();
         let grain_length_exp = u8::try_from(ideal_grain_length.trailing_zeros()).unwrap();
 
         // Attempt to allocate a new stratum in an existing basin
@@ -321,7 +325,7 @@ pub struct StratumAtlas {
 
 impl StratumAtlas {
     pub fn grain_count_exp(&self) -> u8 {
-        u8::try_from((self.grains_per_map / 170).trailing_zeros()).unwrap()
+        u8::try_from((self.grains_per_map / GrainMapPage::GRAINS_U64).trailing_zeros()).unwrap()
     }
 
     pub fn grain_length_exp(&self) -> u8 {
@@ -346,7 +350,7 @@ impl StratumAtlas {
             .expect("bad grain")
             .offset
             + self.grain_map_header_length
-            + u64::try_from(self.grain_maps.len()).unwrap() * PAGE_SIZE_U64
+            + u64::try_from(self.grain_maps.len()).unwrap() * PAGE_SIZE_U64 * 2
             + u64::from(self.grain_length) * local_grain_index;
 
         Ok((offset, grain_map_index))

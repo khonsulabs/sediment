@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    ops::Deref,
     path::Path,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -14,7 +15,7 @@ use crate::{
         allocations::FileAllocations, atlas::Atlas, committer::Committer, disk::DiskState,
         log::CommitLog, page_cache::PageCache,
     },
-    format::{self, BatchId, CommitLogEntry, GrainId, GrainInfo, LogEntryIndex},
+    format::{crc, BatchId, CommitLogEntry, GrainId, LogEntryIndex},
     io::{self, ext::ToIoResult, FileManager},
 };
 
@@ -75,8 +76,8 @@ where
             }),
         };
 
-        if state.recovered {
-            recovered_callback.recovered(&mut database)?;
+        if let Some(error) = state.recovered_from_error {
+            recovered_callback.recovered(&mut database, error)?;
         }
 
         Ok(database)
@@ -139,28 +140,23 @@ where
 
     pub fn read(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
         let mut atlas = self.state.atlas.lock();
-        let (offset, info) = match atlas.info_of_grain(
+        let (offset, full_length) = match atlas.length_of_grain(
             grain,
+            self.current_batch(),
             &self.state.grain_map_page_cache,
             &mut self.file,
             &mut self.scratch,
         )? {
-            Some((_, info)) if info.allocated_at.is_none() => return Ok(None),
+            Some((_, info)) if info == 0 => return Ok(None),
             Some(result) => result,
             None => return Ok(None),
         };
         drop(atlas);
 
-        let allocated_at = info.allocated_at.expect("precondition checked above");
-        if allocated_at > self.current_batch() {
-            // The grain is allocated but hasn't been committed yet.
-            return Ok(None);
-        }
-
-        let data = vec![0; usize::try_from(info.length).to_io()?];
+        let data = vec![0; usize::try_from(full_length).to_io()?];
         let (result, data) = self.file.read_exact(data, offset);
         result?;
-        Ok(Some(GrainData { info, data }))
+        Ok(Some(GrainData::from_bytes(data)))
     }
 
     pub fn write(&mut self, data: &[u8]) -> io::Result<GrainRecord> {
@@ -220,7 +216,6 @@ pub struct GrainReservation {
     pub grain_id: GrainId,
     pub offset: u64,
     pub length: u32,
-    pub crc: u32,
 }
 
 #[derive(Debug)]
@@ -237,21 +232,54 @@ struct DatabaseState {
 
 #[derive(Debug)]
 pub struct GrainData {
-    pub info: GrainInfo,
-    pub data: Vec<u8>,
+    pub crc: u32,
+    length: usize,
+    data: Vec<u8>,
+}
+
+impl Deref for GrainData {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data[8..8 + self.length]
+    }
+}
+
+impl AsRef<[u8]> for GrainData {
+    fn as_ref(&self) -> &[u8] {
+        &*self
+    }
+}
+
+impl GrainData {
+    pub(crate) fn from_bytes(data: Vec<u8>) -> Self {
+        Self {
+            crc: u32::from_le_bytes(data[0..4].try_into().unwrap()),
+            length: usize::try_from(u32::from_le_bytes(data[4..8].try_into().unwrap())).unwrap(),
+            data,
+        }
+    }
+
+    #[must_use]
+    pub fn calculated_crc(&self) -> u32 {
+        crc(&self.data[4..])
+    }
+
+    #[must_use]
+    pub fn is_crc_valid(&self) -> bool {
+        self.calculated_crc() == self.crc
+    }
+
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &*self
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct GrainRecord {
     pub id: GrainId,
     pub batch: BatchId,
-}
-
-impl GrainData {
-    #[must_use]
-    pub fn is_crc_valid(&self) -> bool {
-        format::crc(&self.data) == self.info.crc
-    }
 }
 
 #[derive(Debug)]
@@ -299,14 +327,14 @@ crate::io_test!(basic_op, {
     println!("Batch: {committed_batch}");
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
-    assert_eq!(grain_data.data, b"hello world");
+    assert_eq!(&*grain_data, b"hello world");
 
     // Reopen the database.
     drop(db);
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
-    assert_eq!(grain_data.data, b"hello world");
+    assert_eq!(&*grain_data, b"hello world");
 
     // Add another grain
     let mut session = db.new_session();
@@ -320,10 +348,10 @@ crate::io_test!(basic_op, {
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
-    assert_eq!(grain_data.data, b"hello world");
+    assert_eq!(&*grain_data, b"hello world");
 
     let second_grain_data = db.read(second_grain_id).unwrap().unwrap();
-    assert_eq!(second_grain_data.data, b"hello again");
+    assert_eq!(&*second_grain_data, b"hello again");
 
     // Add a final grain, overwriting the original first header.
     let mut session = db.new_session();
@@ -337,13 +365,13 @@ crate::io_test!(basic_op, {
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
-    assert_eq!(grain_data.data, b"hello world");
+    assert_eq!(&*grain_data, b"hello world");
 
     let second_grain_data = db.read(second_grain_id).unwrap().unwrap();
-    assert_eq!(second_grain_data.data, b"hello again");
+    assert_eq!(&*second_grain_data, b"hello again");
 
     let third_grain_data = db.read(third_grain_id).unwrap().unwrap();
-    assert_eq!(third_grain_data.data, b"bye for now");
+    assert_eq!(&*third_grain_data, b"bye for now");
 
     drop(db);
     if path.exists() {
@@ -383,13 +411,19 @@ crate::io_test!(multiple_strata, {
         std::fs::remove_file(&path).unwrap();
     }
     let manager = Manager::default();
-    // Create the database.
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+    // This test makes assumptions about how the grain allocation strategy
+    // works. Each grain currently has 8 additional bytes added to the data that
+    // is written. This means the actual length of "test" becomes 12 bytes,
+    // which means it will allocate a 16-byte strata.
     let mut session = db.new_session();
     let first_grain_id = session.write(b"test").unwrap();
     session.commit().unwrap();
+    // To create a new strata, we currently need something at least 4x as large
+    // as the current strata size.
     let mut session = db.new_session();
-    let second_grain_id = session.write(b"at least 17 bytes").unwrap();
+    let second_grain_id = session.write(&[42; 65]).unwrap();
     session.commit().unwrap();
     assert_ne!(
         first_grain_id.stratum_index(),
@@ -400,10 +434,10 @@ crate::io_test!(multiple_strata, {
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
 
     let first_grain_data = db.read(first_grain_id).unwrap().unwrap();
-    assert_eq!(first_grain_data.data, b"test");
+    assert_eq!(&*first_grain_data, b"test");
 
     let second_grain_data = db.read(second_grain_id).unwrap().unwrap();
-    assert_eq!(second_grain_data.data, b"at least 17 bytes");
+    assert_eq!(&*second_grain_data, &[42; 65]);
 
     drop(db);
     if path.exists() {
@@ -437,7 +471,7 @@ crate::io_test!(multi_commits, {
         // Verify all written data exists
         for (index, grain) in grains.into_iter().enumerate() {
             let data = db.read(grain.id).unwrap().expect("grain not found");
-            let value = u32::from_be_bytes(data.data.try_into().unwrap());
+            let value = u32::from_be_bytes(data.as_bytes().try_into().unwrap());
             assert_eq!(value, u32::try_from(index).unwrap());
         }
 
@@ -482,7 +516,7 @@ crate::io_test!(commit_log, {
         assert_eq!(entry.grain_changes[0].count, 1);
         assert_eq!(
             entry.grain_changes[0].operation,
-            format::GrainOperation::Allocate
+            crate::format::GrainOperation::Allocate
         );
     }
 
@@ -519,7 +553,7 @@ crate::io_test!(basic_rollback, {
 
     let mut was_recovered = false;
     let mut db = Configuration::new(manager, &path)
-        .when_recovered(|_db: &mut Database<Manager::File>| {
+        .when_recovered(|_db: &mut Database<Manager::File>, _err| {
             was_recovered = true;
             Ok(())
         })

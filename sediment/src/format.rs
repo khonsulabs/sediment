@@ -302,7 +302,7 @@ pub struct StratumIndex {
 impl StratumIndex {
     #[must_use]
     pub const fn grains_per_map(&self) -> u64 {
-        2_u64.pow(self.grain_count_exp as u32) * 170
+        2_u64.pow(self.grain_count_exp as u32) * GrainMapPage::GRAINS_U64
     }
 
     #[must_use]
@@ -321,11 +321,12 @@ impl StratumIndex {
             + (self.grains_per_map() * u64::from(self.grain_length()))
                 .round_to_multiple_of(PAGE_SIZE_U64)
                 .expect("too many grains")
+                * 2
     }
 
     #[must_use]
     pub fn grain_map_data_offset(&self) -> u64 {
-        self.header_length() + u64::from(self.grain_map_count) * PAGE_SIZE_U64
+        self.header_length() + u64::from(self.grain_map_count) * PAGE_SIZE_U64 * 2
     }
 }
 
@@ -451,60 +452,62 @@ impl Default for Allocation {
     }
 }
 
-/// A collection of 170 [`GrainInfo`] structures.
+/// A header that describes 4,084 grain allocations.
 ///
-/// This data structure fits in a single on-disk page. This header is only
-/// written once and assumes [Powersafe Overwrite][psow].
-///
-/// [psow]: https://www.sqlite.org/psow.html
+/// This data structure is written twice. The page with the most recent
+/// `written_at` is considered the current page.
 #[derive(Clone, Debug)]
 pub struct GrainMapPage {
-    pub grains: [GrainInfo; 170],
+    /// The batch when this page was last updated at.
+    pub written_at: BatchId,
+    /// Each element represents how many consecutive grains are allocated at the
+    /// given index. For example, consider this list of entries:
+    ///
+    /// - Grain 0: `0`
+    /// - Grain 1: `1`
+    /// - Grain 2: `3`
+    /// - Grain 3: `2`
+    /// - Grain 4: `1`
+    /// - Grain 5: `1`
+    ///
+    /// There is data stored in 5 out of the 6 grains listed above. Grain 0 is
+    /// unallocated, Grain 1 is allocated spanning a single grain, Grain 2 is
+    /// allocated spanning 3 grains, and Grain 5 is allocated spanning a single
+    /// grain.
+    ///
+    /// This arrangement allows validating that a particular `GrainId` is
+    /// pointing to the first grain allocated.
+    pub consecutive_allocations: [u8; Self::GRAINS],
 }
 
 impl Default for GrainMapPage {
     fn default() -> Self {
         Self {
-            grains: [GrainInfo::default(); 170],
+            written_at: BatchId(0),
+            consecutive_allocations: [0; Self::GRAINS],
         }
     }
 }
 
 impl GrainMapPage {
+    pub const GRAINS: usize = PAGE_SIZE - 12;
+    pub const GRAINS_U64: u64 = Self::GRAINS as u64;
+
     pub fn deserialize(buffer: &[u8], verify_crc: bool) -> io::Result<Self> {
-        if buffer.len() < 170 * 24 + 4 {
-            return Err(io::invalid_data_error("GrainMapPage not long enough"));
+        if buffer.len() != PAGE_SIZE {
+            return Err(io::invalid_data_error("GrainMapPage not correct length"));
         }
 
-        let mut offset = 0;
-        let mut page = GrainMapPage::default();
-        for grain in 0..170 {
-            page.grains[grain].allocated_at =
-                BatchId::from_le_bytes_slice(&buffer[offset..offset + 8]).validate();
-            offset += 8;
-            page.grains[grain].archived_at =
-                BatchId::from_le_bytes_slice(&buffer[offset..offset + 8]).validate();
-            offset += 8;
-            page.grains[grain].length = u32::from_le_bytes(
-                buffer[offset..offset + 4]
-                    .try_into()
-                    .expect("u32 is 4 bytes"),
-            );
-            offset += 4;
-            page.grains[grain].crc = u32::from_le_bytes(
-                buffer[offset..offset + 4]
-                    .try_into()
-                    .expect("u32 is 4 bytes"),
-            );
-            offset += 4;
-        }
+        let written_at = BatchId::from_le_bytes_slice(&buffer[4..12]);
+        let mut page = GrainMapPage {
+            written_at,
+            ..GrainMapPage::default()
+        };
+        page.consecutive_allocations.copy_from_slice(&buffer[12..]);
+
         if verify_crc {
-            let computed_crc = crc(&buffer[..offset]);
-            let stored_crc = u32::from_le_bytes(
-                buffer[offset..offset + 4]
-                    .try_into()
-                    .expect("u32 is 4 bytes"),
-            );
+            let computed_crc = crc(&buffer[4..]);
+            let stored_crc = u32::from_le_bytes(buffer[0..4].try_into().expect("u32 is 4 bytes"));
             if stored_crc != computed_crc {
                 return Err(io::invalid_data_error("grain map page crc check failed"));
             }
@@ -521,63 +524,15 @@ impl GrainMapPage {
         let mut buffer = std::mem::take(scratch);
         buffer.resize(PAGE_SIZE, 0);
 
-        let mut bytes_written = 0;
-        for grain in self.grains {
-            buffer[bytes_written..bytes_written + 8]
-                .copy_from_slice(&grain.allocated_at.unwrap_or_default().to_le_bytes());
-            bytes_written += 8;
-            buffer[bytes_written..bytes_written + 8]
-                .copy_from_slice(&grain.archived_at.unwrap_or_default().to_le_bytes());
-            bytes_written += 8;
-            buffer[bytes_written..bytes_written + 4].copy_from_slice(&grain.length.to_le_bytes());
-            bytes_written += 4;
-            buffer[bytes_written..bytes_written + 4].copy_from_slice(&grain.crc.to_le_bytes());
-            bytes_written += 4;
-        }
+        buffer[4..12].copy_from_slice(&self.written_at.to_le_bytes());
+        buffer[12..].copy_from_slice(&self.consecutive_allocations);
 
-        let crc = crc(&buffer[..bytes_written]);
-        buffer[bytes_written..bytes_written + 4].copy_from_slice(&crc.to_le_bytes());
+        let crc = crc(&buffer[4..]);
+        buffer[0..4].copy_from_slice(&crc.to_le_bytes());
 
         let (result, buffer) = file.write_all(buffer, offset);
         *scratch = buffer;
         result
-    }
-}
-
-/// Information about a single grain. A grain's lifecycle can be seen through
-/// the `allocated_at` and `archive_at` values:
-///
-/// | Stage          | `allocated_at` | `archived_at`         | Grain State |
-/// |----------------|----------------|-----------------------|-------------|
-/// | initial        | None           | None                  | free        |
-/// | allocate       | Some(Active)   | None                  | allocated   |
-/// | archive        | Some(Active)   | Some(Active)          | archived    |
-/// | free for reuse | Some(Inactive) | Some(Active)          | free        |
-/// | allocate       | Some(Active)   | None                  | allocated   |
-///
-/// The highest bit of the [`BatchId`] is used to store whether the data stored
-/// is considered active or not. This lifecycle sequence allows reverting to the
-/// previous step at any given stage in the lifecycle without losing any data,
-/// and without needing to store the data in duplicate.
-#[derive(Debug, Default, Copy, Clone)]
-pub struct GrainInfo {
-    pub allocated_at: Option<BatchId>,
-    pub archived_at: Option<BatchId>,
-    pub length: u32,
-    pub crc: u32,
-}
-
-impl GrainInfo {
-    #[must_use]
-    pub fn checked_allocated_at(&self) -> Option<BatchId> {
-        self.allocated_at
-            .and_then(|allocated| allocated.active().then(|| allocated))
-    }
-
-    #[must_use]
-    pub fn checked_archived_at(&self) -> Option<BatchId> {
-        self.archived_at
-            .and_then(|archived| archived.active().then(|| archived))
     }
 }
 
@@ -913,12 +868,8 @@ impl CommitLogEntry {
         buffer.clear();
         for change in &self.grain_changes {
             buffer.extend(change.start.0.to_le_bytes());
-            // Top 2 bits are the operation.
-            if change.count >= 2_u32.pow(30) {
-                return Err(io::invalid_data_error("too many changes in entry"));
-            }
-            let op_and_count = (change.operation as u32) << 30 | change.count;
-            buffer.extend(op_and_count.to_le_bytes());
+            buffer.push(change.operation as u8);
+            buffer.push(change.count);
         }
         Ok(())
     }
@@ -946,47 +897,17 @@ impl CommitLogEntry {
     }
 
     fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
-        // This structure is always at least one page long. We'll start there to
-        // get the length.
-        // let mut buffer = std::mem::take(scratch);
-        // buffer.resize(PAGE_SIZE, 0);
-        // let (result, mut buffer) = file.read_exact(buffer, offset);
-        // result?;
-
-        // let grain_count =
-        //     usize::try_from(u32::from_le_bytes(serialized[4..8].try_into().unwrap())).unwrap();
-        // let total_length = grain_count
-        //     .checked_mul(12)
-        //     .and_then(|l| l.checked_add(8))
-        //     .unwrap();
-        // if total_length > PAGE_SIZE {
-        //     // Read the remaining amount of data
-        //     buffer.resize(total_length, 0);
-        //     let (result, returned_buffer) =
-        //         file.read_exact(buffer.io_slice(PAGE_SIZE..), offset + PAGE_SIZE_U64);
-        //     buffer = returned_buffer;
-        //     result?;
-        // }
-        // *scratch = buffer;
-
-        // if verify_crc {
-        //     let calculated_crc = crc(&scratch[4..]);
-        //     let stored_crc = u32::from_le_bytes(scratch[0..4].try_into().unwrap());
-        //     if calculated_crc != stored_crc {
-        //         return Err(io::invalid_data_error(format!("Commit Log Entry CRC Check Failed (Stored: {stored_crc:x} != Calculated: {calculated_crc:x}")));
-        //     }
-        // }
-
         let mut log = Self::default();
-        while serialized.len() >= 12 {
+        while serialized.len() >= 10 {
             let start = GrainId(u64::from_le_bytes(serialized[..8].try_into().unwrap()));
-            let op_and_count = u32::from_le_bytes(serialized[8..12].try_into().unwrap());
+            let operation = GrainOperation::try_from(serialized[8])?;
+            let count = serialized[9];
             log.grain_changes.push(GrainChange {
+                operation,
                 start,
-                operation: GrainOperation::try_from(op_and_count >> 30)?,
-                count: op_and_count & 0x3FFF_FFFF,
+                count,
             });
-            serialized = &serialized[12..];
+            serialized = &serialized[10..];
         }
 
         if serialized.is_empty() {
@@ -1005,7 +926,7 @@ pub struct GrainChange {
     /// The starting grain ID of the operation.
     pub start: GrainId,
     /// The number of sequential grains affected by this operation.
-    pub count: u32,
+    pub count: u8,
 }
 
 /// The operation being performed on the grain.
@@ -1019,10 +940,10 @@ pub enum GrainOperation {
     Free = 2,
 }
 
-impl TryFrom<u32> for GrainOperation {
+impl TryFrom<u8> for GrainOperation {
     type Error = std::io::Error;
 
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Allocate),
             1 => Ok(Self::Archive),

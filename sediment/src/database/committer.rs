@@ -8,6 +8,7 @@ use parking_lot::{Condvar, Mutex};
 use crate::{
     database::{
         disk::{BasinState, DiskState, GrainMapState, StratumState},
+        page_cache::LoadedGrainMapPage,
         DatabaseState, GrainReservation,
     },
     format::{
@@ -97,10 +98,9 @@ impl Committer {
         let mut modifications =
             Self::gather_modifications(committing_batch, database, &mut disk_state)?;
 
-        let (modified_pages, log_entry) = Self::update_grain_map_pages(
+        let (mut modified_pages, log_entry) = Self::update_grain_map_pages(
             &grains,
             &mut modifications,
-            committing_batch,
             database,
             &mut disk_state,
             file,
@@ -112,8 +112,8 @@ impl Committer {
         disk_state.header.log_offset =
             Self::write_commit_log(&log_entry, committing_batch, database, file, scratch)?;
 
-        for (offset, grain_map_page) in &modified_pages {
-            grain_map_page.write_to(*offset, file, scratch)?;
+        for (offset, grain_map_page) in &mut modified_pages {
+            grain_map_page.write_to(*offset, committing_batch, file, scratch)?;
         }
 
         for (basin_index, stratum_index, grain_map_index) in modifications.grain_maps.drain() {
@@ -245,13 +245,12 @@ impl Committer {
     fn update_grain_map_pages<File: io::File>(
         grains: &[GrainReservation],
         modifications: &mut CommitModifications,
-        committing_batch: BatchId,
         database: &DatabaseState,
         disk_state: &mut DiskState,
         file: &mut File,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<(Vec<(u64, GrainMapPage)>, CommitLogEntry)> {
-        let mut modified_pages = Vec::<(u64, GrainMapPage)>::new();
+    ) -> io::Result<(Vec<(u64, LoadedGrainMapPage)>, CommitLogEntry)> {
+        let mut modified_pages = Vec::<(u64, LoadedGrainMapPage)>::new();
         let mut grain_changes = Vec::with_capacity(grains.len());
         for reservation in grains {
             // Load any existing grain map pages, modify then, and add them to
@@ -267,27 +266,27 @@ impl Committer {
             let grains_per_map = stratum_info.grains_per_map();
             let grain_map_index = usize::try_from(grain_index / grains_per_map).to_io()?;
             let local_grain_index = usize::try_from(grain_index % grains_per_map).to_io()?;
-            let grain_count = usize::try_from(
+            let grain_count = u8::try_from(
                 (reservation.length + stratum_info.grain_length() - 1)
                     / stratum_info.grain_length(),
             )
             .to_io()?;
 
-            todo_if!(local_grain_index >= 170, "need to handle multiple grain map pages https://github.com/khonsulabs/sediment/issues/11");
+            todo_if!(local_grain_index >= GrainMapPage::GRAINS, "need to handle multiple grain map pages https://github.com/khonsulabs/sediment/issues/11");
             let grain_map_page_offset =
                 stratum.grain_maps[grain_map_index].offset + stratum_info.header_length();
-            let grain_map_page = match modified_pages.last_mut() {
+            let loaded_grain_map_page = match modified_pages.last_mut() {
                 Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
                     grain_map_page
                 }
                 _ => {
                     let page = if modifications.new_pages.remove(&grain_map_page_offset) {
                         // A new page, no need to load from disk.
-                        GrainMapPage::default()
+                        LoadedGrainMapPage::default()
                     } else {
                         database.grain_map_page_cache.fetch(
                             grain_map_page_offset,
-                            true,
+                            disk_state.header.batch,
                             file,
                             scratch,
                         )?
@@ -299,15 +298,16 @@ impl Committer {
             };
 
             stratum.grain_maps[grain_map_index].map.allocation_state
-                [local_grain_index..local_grain_index + grain_count]
+                [local_grain_index..local_grain_index + usize::from(grain_count)]
                 .fill(true);
-            for local_grain_index in local_grain_index..local_grain_index + grain_count {
-                let grain = &mut grain_map_page.grains[local_grain_index];
-                assert!(grain.allocated_at.is_none());
-                grain.allocated_at = Some(committing_batch);
-                grain.crc = reservation.crc;
-                grain.length = reservation.length;
-                grain.archived_at = None;
+
+            for (allocation_index, local_grain_index) in
+                (local_grain_index..local_grain_index + usize::from(grain_count)).enumerate()
+            {
+                let grain =
+                    &mut loaded_grain_map_page.page.consecutive_allocations[local_grain_index];
+                assert!(*grain == 0);
+                *grain = grain_count - u8::try_from(allocation_index).unwrap();
             }
             modifications
                 .grain_maps
@@ -315,7 +315,7 @@ impl Committer {
             grain_changes.push(GrainChange {
                 operation: GrainOperation::Allocate,
                 start: reservation.grain_id,
-                count: u32::try_from(grain_count).unwrap(),
+                count: grain_count,
             });
         }
 
