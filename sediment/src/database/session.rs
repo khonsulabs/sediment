@@ -79,7 +79,13 @@ where
     }
 
     pub fn commit(mut self) -> io::Result<BatchId> {
-        self.database.commit_reservations(self.writes.drain(..))
+        self.database
+            .commit_reservations(self.writes.drain(..), None)
+    }
+
+    pub fn commit_and_checkpoint(mut self, checkpoint_to: BatchId) -> io::Result<BatchId> {
+        self.database
+            .commit_reservations(self.writes.drain(..), Some(checkpoint_to))
     }
 }
 

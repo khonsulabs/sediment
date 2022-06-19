@@ -179,6 +179,11 @@ where
         CommitLogEntry::load_from(entry, true, &mut self.file, &mut self.scratch)
     }
 
+    pub fn checkpoint_to(&mut self, last_entry_to_remove: BatchId) -> io::Result<BatchId> {
+        self.new_session()
+            .commit_and_checkpoint(last_entry_to_remove)
+    }
+
     /// Reserve space within the database. This may allocate additional disk
     /// space.
     ///
@@ -217,10 +222,15 @@ where
     fn commit_reservations(
         &mut self,
         reservations: impl Iterator<Item = GrainBatchOperation>,
+        checkpoint_to: Option<BatchId>,
     ) -> io::Result<BatchId> {
-        self.state
-            .committer
-            .commit(reservations, &self.state, &mut self.file, &mut self.scratch)
+        self.state.committer.commit(
+            reservations,
+            checkpoint_to,
+            &self.state,
+            &mut self.file,
+            &mut self.scratch,
+        )
     }
 
     fn forget_reservations(
@@ -253,11 +263,17 @@ struct DatabaseState {
     file_allocations: FileAllocations,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct GrainData {
     pub crc: u32,
     length: usize,
     data: Vec<u8>,
+}
+
+impl PartialEq for GrainData {
+    fn eq(&self, other: &Self) -> bool {
+        self.crc == other.crc && self.as_bytes() == other.as_bytes()
+    }
 }
 
 impl Deref for GrainData {
@@ -630,8 +646,15 @@ crate::io_test!(grain_lifecycle, {
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(&*grain_data, b"hello world");
+    db.checkpoint_to(archiving_commit).unwrap();
 
-    // TODO Checkpoint the database.
+    // The data should now no longer be available.
+    assert_eq!(db.read(grain_id).unwrap(), None);
+
+    // Reopen the database and verify it's still gone.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    assert_eq!(db.read(grain_id).unwrap(), None);
 
     drop(db);
     if path.exists() {

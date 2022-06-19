@@ -757,6 +757,15 @@ pub struct LogPage {
 }
 
 impl LogPage {
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)] // value is always 1 byte
+    pub const fn index_of_batch_id(&self, batch_id: BatchId) -> Option<usize> {
+        match batch_id.0.checked_sub(self.first_batch_id.0) {
+            Some(delta) if delta < 170 => Some(delta as usize),
+            _ => None,
+        }
+    }
+
     pub fn serialize_into(&self, buffer: &mut Vec<u8>) {
         buffer.resize(PAGE_SIZE, 0);
 
@@ -922,7 +931,7 @@ impl CommitLogEntry {
 }
 
 /// A single change to a sequence of grains.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct GrainChange {
     /// The operation that happened to this grain.
     pub operation: GrainOperation,

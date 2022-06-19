@@ -417,13 +417,25 @@ impl DiskState {
 
         let local_grain_index = usize::try_from(local_grain_index).to_io()?;
 
-        for (index, expected_value) in (0..usize::from(change.count)).zip((1..=change.count).rev())
-        {
-            if loaded_page.page.consecutive_allocations[local_grain_index + index] != expected_value
+        if let GrainOperation::Free = change.operation {
+            for index in 0..usize::from(change.count) {
+                if loaded_page.page.consecutive_allocations[local_grain_index + index] != 0 {
+                    return Err(io::invalid_data_error(
+                        "log validation failed: grain not free",
+                    ));
+                }
+            }
+        } else {
+            for (index, expected_value) in
+                (0..usize::from(change.count)).zip((1..=change.count).rev())
             {
-                return Err(io::invalid_data_error(
-                    "log validation failed: grain allocation state mismatch",
-                ));
+                if loaded_page.page.consecutive_allocations[local_grain_index + index]
+                    != expected_value
+                {
+                    return Err(io::invalid_data_error(
+                        "log validation failed: grain allocation state mismatch",
+                    ));
+                }
             }
         }
 

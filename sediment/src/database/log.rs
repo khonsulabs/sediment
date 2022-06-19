@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct CommitLog {
     pub pages: VecDeque<CommitLogPage>,
-    _tail_checkpoint_index: usize,
+    tail_checkpoint_index: usize,
     head_insert_index: usize,
 }
 
@@ -127,7 +127,7 @@ impl CommitLog {
 
         Ok(Self {
             pages,
-            _tail_checkpoint_index: tail_checkpoint_index,
+            tail_checkpoint_index,
             head_insert_index,
         })
     }
@@ -203,33 +203,34 @@ impl CommitLog {
         )
     }
 
-    // pub fn checkpoint(&mut self, last_committed: BatchId, allocations: &mut FileAllocations) {
-    //     while let Some(page_state) = self.pages.front() {
-    //         match page_state
-    //             .page
-    //             .entries
-    //             .iter()
-    //             .enumerate()
-    //             .find(|(_, entry)| entry.batch > last_committed)
-    //         {
-    //             Some((keep_index, _)) => {
-    //                 self.tail_checkpoint_index = keep_index;
-    //                 break;
-    //             }
-    //             None => {
-    //                 // No IDs found that should be kept, remove the page.
-    //                 if let Some(removed_offset) =
-    //                     self.pages.pop_front().and_then(|removed| removed.offset)
-    //                 {
-    //                     allocations.set(
-    //                         removed_offset..removed_offset + PAGE_SIZE_U64,
-    //                         Allocation::Free,
-    //                     );
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    pub fn checkpoint(&mut self, remove_batches_to_inclusive: BatchId) -> Vec<CommitLogPage> {
+        let first_batch_to_keep = remove_batches_to_inclusive.next();
+        let mut checkpointed_entries = Vec::new();
+        while let Some(page_state) = self.pages.front() {
+            if page_state.page.first_batch_id > remove_batches_to_inclusive {
+                // The first commit checked is after the one being checkpointed.
+                break;
+            } else if let Some(tail_checkpoint_index) =
+                page_state.page.index_of_batch_id(first_batch_to_keep)
+            {
+                // Partial checkpoint
+                let mut partial_page = CommitLogPage::default();
+                let entries_to_copy =
+                    &page_state.page.entries[self.tail_checkpoint_index..=tail_checkpoint_index];
+                partial_page.page.entries[0..entries_to_copy.len()]
+                    .copy_from_slice(entries_to_copy);
+                checkpointed_entries.push(partial_page);
+                self.tail_checkpoint_index = tail_checkpoint_index;
+                break;
+            }
+
+            // The entire page can be removed
+            self.tail_checkpoint_index = 0;
+            checkpointed_entries.push(self.pages.pop_front().unwrap());
+        }
+
+        checkpointed_entries
+    }
 }
 
 #[derive(Debug, Default)]
