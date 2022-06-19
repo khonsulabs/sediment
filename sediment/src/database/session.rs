@@ -160,8 +160,14 @@ where
     /// the session is dropped, another session will be able to acquire the
     /// embedded header lock, and it will have the value prior to beginning this
     /// session.
-    pub fn set_embedded_header(&mut self, embedded_header: Option<GrainId>) {
-        self.new_embedded_header = EmbeddedHeaderUpdate::Replace(embedded_header);
+    pub fn set_embedded_header(&mut self, embedded_header: Option<GrainId>) -> io::Result<()> {
+        let mut embedded_header = EmbeddedHeaderUpdate::Replace(embedded_header);
+        std::mem::swap(&mut embedded_header, &mut self.new_embedded_header);
+        if let EmbeddedHeaderUpdate::Replace(Some(grain_id)) = embedded_header {
+            // This update already had assigned a new grain, we need to archive it.
+            self.archive(grain_id)?;
+        }
+        Ok(())
     }
 
     pub fn commit(self) -> io::Result<BatchId> {
@@ -171,8 +177,12 @@ where
             new_embedded_header,
         } = self;
 
-        let header_guard = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header {
-            *header_guard = new_header;
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(mut header) = new_embedded_header {
+            std::mem::swap(&mut header, &mut header_guard);
+            if let Some(grain_id) = header {
+                // We replaced an old header, archive the old grain.
+                session.archive(grain_id)?;
+            }
             Some(header_guard)
         } else {
             // The header never updated.

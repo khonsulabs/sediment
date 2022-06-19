@@ -168,28 +168,13 @@ impl Committer {
             grain_map_page.write_to(*offset, committing_batch, file, scratch)?;
         }
 
-        for (basin_index, stratum_index, grain_map_index) in modifications.grain_maps.drain() {
-            let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
-                [grain_map_index];
-            grain_map.map.written_at = committing_batch;
-            let offset = grain_map.offset_to_write_at();
-            grain_map.map.write_to(offset, file, scratch)?;
-            grain_map.first_is_current = !grain_map.first_is_current;
-        }
-
-        for basin_index in modifications.modified_basins.drain(..) {
-            disk_state.header.basins[basin_index].last_written_at = committing_batch;
-            let mut offset = disk_state.header.basins[basin_index].file_offset;
-
-            let basin = &mut disk_state.basins[basin_index];
-            if basin.first_is_current {
-                offset += PAGE_SIZE_U64;
-            }
-
-            basin.header.written_at = committing_batch;
-            basin.header.write_to(offset, file, scratch)?;
-            basin.first_is_current = !basin.first_is_current;
-        }
+        Self::write_modified(
+            &mut modifications,
+            committing_batch,
+            &mut disk_state,
+            file,
+            scratch,
+        )?;
 
         disk_state.header.batch = committing_batch;
         disk_state.header.write_to(
@@ -234,6 +219,39 @@ impl Committer {
         }
 
         Ok(committing_batch)
+    }
+
+    fn write_modified<File: io::File>(
+        modifications: &mut CommitModifications,
+        committing_batch: BatchId,
+        disk_state: &mut DiskState,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<()> {
+        for (basin_index, stratum_index, grain_map_index) in modifications.grain_maps.drain() {
+            let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
+                [grain_map_index];
+            grain_map.map.written_at = committing_batch;
+            let offset = grain_map.offset_to_write_at();
+            grain_map.map.write_to(offset, file, scratch)?;
+            grain_map.first_is_current = !grain_map.first_is_current;
+        }
+
+        for basin_index in modifications.modified_basins.drain(..) {
+            disk_state.header.basins[basin_index].last_written_at = committing_batch;
+            let mut offset = disk_state.header.basins[basin_index].file_offset;
+
+            let basin = &mut disk_state.basins[basin_index];
+            if basin.first_is_current {
+                offset += PAGE_SIZE_U64;
+            }
+
+            basin.header.written_at = committing_batch;
+            basin.header.write_to(offset, file, scratch)?;
+            basin.first_is_current = !basin.first_is_current;
+        }
+
+        Ok(())
     }
 
     fn gather_modifications(

@@ -687,7 +687,7 @@ crate::io_test!(embedded_header, {
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
     let mut session = db.new_session().updating_embedded_header();
     let grain_id = session.write(b"a header").unwrap();
-    session.set_embedded_header(Some(grain_id));
+    session.set_embedded_header(Some(grain_id)).unwrap();
     println!("Set header to {grain_id}");
     session.commit().unwrap();
 
@@ -710,17 +710,22 @@ crate::io_test!(embedded_header, {
 
     // Update the header one more time
     let mut session = db.new_session().updating_embedded_header();
-    session.set_embedded_header(Some(new_grain.id));
+    session.set_embedded_header(Some(new_grain.id)).unwrap();
     println!("Updated header to {}", new_grain.id);
-    session.commit().unwrap();
+    let new_header_commit = session.commit().unwrap();
 
     // Ensure the new write didn't overwrite the header.
     assert_eq!(db.embedded_header(), Some(new_grain.id));
 
     // Reopen the database and ensure the embedded header is still present.
     drop(db);
-    let db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
     assert_eq!(db.embedded_header(), Some(new_grain.id));
+
+    // Checkpoint the new header change, and verify the old grain is no longer readable.
+    db.checkpoint_to(new_header_commit).unwrap();
+
+    assert_eq!(db.read(grain_id).unwrap(), None);
 
     drop(db);
     if path.exists() {
