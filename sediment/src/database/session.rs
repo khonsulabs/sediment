@@ -1,6 +1,6 @@
 use crate::{
     database::{Database, GrainReservation},
-    format::{crc, BatchId, GrainId},
+    format::{BatchId, GrainId, CRC},
     io::{self, ext::ToIoResult, iobuffer::IoBufferExt},
 };
 
@@ -26,8 +26,12 @@ where
 
     pub fn write(&mut self, mut data: &[u8]) -> io::Result<GrainId> {
         let length = u32::try_from(data.len()).to_io()?;
-        let reservation = self.database.new_grain(length)?;
-        let crc = crc(data);
+        let mut reservation = self.database.new_grain(length)?;
+        let mut crc = CRC.digest();
+        crc.update(&length.to_le_bytes());
+        crc.update(data);
+        let crc = crc.finalize();
+        reservation.crc = Some(crc);
 
         let mut scratch = std::mem::take(&mut self.database.scratch);
         scratch.resize((data.len() + 8).min(16_384), 0);

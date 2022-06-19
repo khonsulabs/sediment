@@ -154,6 +154,7 @@ impl Atlas {
             grain_id,
             offset,
             length,
+            crc: None,
         })
     }
 

@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     fmt::{Debug, Display},
+    io::{ErrorKind, Write},
     num::ParseIntError,
     str::FromStr,
 };
@@ -18,7 +19,7 @@ pub const PAGE_SIZE: usize = 4096;
 /// [`PAGE_SIZE`] but in a u64.
 pub const PAGE_SIZE_U64: u64 = PAGE_SIZE as u64;
 
-const CRC: Crc<u32> = Crc::<u32>::new(&CRC_32_MPEG_2);
+pub const CRC: Crc<u32> = Crc::<u32>::new(&CRC_32_MPEG_2);
 
 #[must_use]
 pub fn crc(data: &[u8]) -> u32 {
@@ -868,8 +869,8 @@ impl CommitLogEntry {
         buffer.clear();
         for change in &self.grain_changes {
             buffer.extend(change.start.0.to_le_bytes());
-            buffer.push(change.operation as u8);
             buffer.push(change.count);
+            change.operation.serialize_into(buffer)?;
         }
         Ok(())
     }
@@ -900,14 +901,14 @@ impl CommitLogEntry {
         let mut log = Self::default();
         while serialized.len() >= 10 {
             let start = GrainId(u64::from_le_bytes(serialized[..8].try_into().unwrap()));
-            let operation = GrainOperation::try_from(serialized[8])?;
-            let count = serialized[9];
+            let count = serialized[8];
+            serialized = &serialized[9..];
+            let operation = GrainOperation::deserialize_from(&mut serialized)?;
             log.grain_changes.push(GrainChange {
                 operation,
                 start,
                 count,
             });
-            serialized = &serialized[10..];
         }
 
         if serialized.is_empty() {
@@ -933,22 +934,43 @@ pub struct GrainChange {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum GrainOperation {
     /// The grain transitioned from Free to Allocated.
-    Allocate = 0,
+    Allocate { crc: u32 },
     /// The grain transitioned from Allocated to Archived.
-    Archive = 1,
+    Archive,
     /// The grain transitioned from Archived to Free,
-    Free = 2,
+    Free,
 }
 
-impl TryFrom<u8> for GrainOperation {
-    type Error = std::io::Error;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Allocate),
-            1 => Ok(Self::Archive),
-            2 => Ok(Self::Free),
-            _ => Err(io::invalid_data_error("invalid value for GrainOperation")),
+impl GrainOperation {
+    pub fn serialize_into<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            GrainOperation::Allocate { crc } => {
+                let mut bytes = [0, 0, 0, 0, 0];
+                bytes[1..].copy_from_slice(&crc.to_le_bytes());
+                writer.write_all(&bytes)
+            }
+            GrainOperation::Archive => writer.write_all(&[1]),
+            GrainOperation::Free => writer.write_all(&[2]),
         }
+    }
+
+    pub fn deserialize_from(bytes: &mut &[u8]) -> io::Result<Self> {
+        let (result, bytes_read) = match bytes.get(0) {
+            Some(0) => {
+                if bytes.len() < 5 {
+                    return Err(io::invalid_data_error("crc not found"));
+                }
+                let crc = u32::from_le_bytes(bytes[1..5].try_into().expect("u32 is 4 bytes"));
+                (Self::Allocate { crc }, 5)
+            }
+            Some(1) => (Self::Archive, 1),
+            Some(2) => (Self::Free, 1),
+            Some(_) => return Err(io::invalid_data_error("invalid value for GrainOperation")),
+            None => return Err(std::io::Error::from(ErrorKind::UnexpectedEof)),
+        };
+
+        *bytes = &bytes[bytes_read..];
+
+        Ok(result)
     }
 }

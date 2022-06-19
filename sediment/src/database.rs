@@ -219,6 +219,7 @@ pub struct GrainReservation {
     pub grain_id: GrainId,
     pub offset: u64,
     pub length: u32,
+    crc: Option<u32>,
 }
 
 #[derive(Debug)]
@@ -265,7 +266,7 @@ impl GrainData {
 
     #[must_use]
     pub fn calculated_crc(&self) -> u32 {
-        crc(&self.data[4..])
+        crc(&self.data[4..8 + self.length])
     }
 
     #[must_use]
@@ -523,10 +524,10 @@ crate::io_test!(commit_log, {
         assert_eq!(entry.grain_changes.len(), 1);
         assert_eq!(entry.grain_changes[0].start, grain.id);
         assert_eq!(entry.grain_changes[0].count, 12);
-        assert_eq!(
+        assert!(matches!(
             entry.grain_changes[0].operation,
-            crate::format::GrainOperation::Allocate
-        );
+            crate::format::GrainOperation::Allocate { .. }
+        ));
     }
 
     drop(db);

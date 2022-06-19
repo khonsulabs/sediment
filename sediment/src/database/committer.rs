@@ -313,7 +313,11 @@ impl Committer {
                 .grain_maps
                 .insert((basin_index, stratum_index, grain_map_index));
             grain_changes.push(GrainChange {
-                operation: GrainOperation::Allocate,
+                operation: GrainOperation::Allocate {
+                    crc: reservation
+                        .crc
+                        .expect("reservation committed without being written to"),
+                },
                 start: reservation.grain_id,
                 count: grain_count,
             });

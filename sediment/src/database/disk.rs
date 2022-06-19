@@ -75,18 +75,42 @@ impl DiskState {
                 match previous.and_then(|header| {
                     Self::load_from_header(header, !current_is_first, file, scratch, page_cache)
                 }) {
-                    Ok((state, log, file_allocations)) => Ok(RecoveredState {
+
+                    Ok((mut state, log, file_allocations)) => {
+                        state.overwrite_rolled_back_commit( &log, file, scratch)?;
+
+                        Ok(RecoveredState {
                         recovered_from_error: Some(first_header_error),
                         disk_state: state,
                         log,
                         file_allocations,
-                    }),
+                    })
+                },
                     Err(error) => Err(io::invalid_data_error(format!(
                         "Unrecoverable database. Error loading first header: {first_header_error}. Error loading previous header: {error}."
                     ))),
                 }
             }
         }
+    }
+
+    /// Overwrites all headers that aren't referred to by the current commit.
+    ///
+    /// To allow the `BatchId` to be sequential and not need to keep track of
+    /// `BatchId`s that were rolled back due to inconsitent disk state, we must
+    /// remove all references to the bad data.
+    ///
+    /// The problem is that with a single fsync, we don't know what we don't
+    /// know if we have a valid log entry. The easiest solution is to validate
+    /// each header, and if any fail to parse or reference a batch ID greater
+    /// than the current state, we overwrite the bad copy with the current copy.
+    fn overwrite_rolled_back_commit<File: io::File>(
+        &mut self,
+        log: &CommitLog,
+        file: &mut File,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<()> {
+        todo!()
     }
 
     fn load_from_header<File: io::File>(
@@ -309,8 +333,13 @@ impl DiskState {
         // Verify the grain map is updated. This is a consistency check, and can
         // only fail from faulty logic.
         let should_be_allocated = match change.operation {
-            GrainOperation::Allocate | GrainOperation::Archive => true,
+            GrainOperation::Allocate { .. } | GrainOperation::Archive => true,
             GrainOperation::Free => false,
+        };
+        let check_crc = if let GrainOperation::Allocate { crc } = change.operation {
+            Some(crc)
+        } else {
+            None
         };
         for index in grain_map_local_index..grain_map_local_index + u64::from(change.count) {
             let allocated = grain_map.map.allocation_state[usize::try_from(index).to_io()?];
@@ -343,24 +372,28 @@ impl DiskState {
             }
         }
 
-        // Verify the data's CRC to ensure the data is fully present.
-        let mut buffer = std::mem::take(scratch);
-        let total_length = usize::try_from(
-            u64::from(loaded_page.page.consecutive_allocations[local_grain_index])
-                * u64::from(stratum_info.grain_length()),
-        )
-        .to_io()?;
-        buffer.resize(total_length, 0);
-        let (result, buffer) = file.read_exact(buffer, grain_data_offset);
-        result?;
+        // If this grain was allocated, ensure that the CRC is the CRC we are
+        // expecting, and that the data validates the CRC.
+        if let Some(check_crc) = check_crc {
+            // Verify the data's CRC to ensure the data is fully present.
+            let mut buffer = std::mem::take(scratch);
+            let total_length = usize::try_from(
+                u64::from(loaded_page.page.consecutive_allocations[local_grain_index])
+                    * u64::from(stratum_info.grain_length()),
+            )
+            .to_io()?;
+            buffer.resize(total_length, 0);
+            let (result, buffer) = file.read_exact(buffer, grain_data_offset);
+            result?;
 
-        let grain_data = GrainData::from_bytes(buffer);
-        if grain_data.is_crc_valid() {
-            return Err(io::invalid_data_error(
-                "log validation failed: grain crc check failed",
-            ));
+            let grain_data = GrainData::from_bytes(buffer);
+            if !grain_data.is_crc_valid() || grain_data.crc != check_crc {
+                return Err(io::invalid_data_error(
+                    "log validation failed: grain crc check failed",
+                ));
+            }
+            *scratch = grain_data.data;
         }
-        *scratch = grain_data.data;
 
         Ok(())
     }
