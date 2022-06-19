@@ -1,5 +1,11 @@
+use std::ops::{Deref, DerefMut};
+
 use crate::{
-    database::{committer::GrainBatchOperation, Database},
+    database::{
+        committer::GrainBatchOperation,
+        embedded::{EmbeddedHeaderGuard, EmbeddedHeaderUpdate},
+        Database,
+    },
     format::{BatchId, GrainId, CRC},
     io::{self, ext::ToIoResult, iobuffer::IoBufferExt},
 };
@@ -21,6 +27,18 @@ where
         Self {
             database,
             writes: Vec::new(),
+        }
+    }
+
+    /// Locks access to the current embedded header value. Only one session per
+    /// database will be able to acquire a `HeaderUpdateSession` at a time, the
+    /// other sessions will block until they are able to acquire the lock.
+    #[must_use]
+    pub fn updating_embedded_header(self) -> HeaderUpdateSession<'a, File> {
+        HeaderUpdateSession {
+            header_guard: self.database.state.embedded_header.lock(),
+            session: self,
+            new_embedded_header: EmbeddedHeaderUpdate::None,
         }
     }
 
@@ -80,12 +98,12 @@ where
 
     pub fn commit(mut self) -> io::Result<BatchId> {
         self.database
-            .commit_reservations(self.writes.drain(..), None)
+            .commit_reservations(self.writes.drain(..), None, None)
     }
 
     pub fn commit_and_checkpoint(mut self, checkpoint_to: BatchId) -> io::Result<BatchId> {
         self.database
-            .commit_reservations(self.writes.drain(..), Some(checkpoint_to))
+            .commit_reservations(self.writes.drain(..), Some(checkpoint_to), None)
     }
 }
 
@@ -105,5 +123,106 @@ where
                 }))
                 .unwrap();
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct HeaderUpdateSession<'a, File>
+where
+    File: io::File,
+{
+    session: WriteSession<'a, File>,
+    header_guard: EmbeddedHeaderGuard,
+    new_embedded_header: EmbeddedHeaderUpdate,
+}
+
+impl<'a, File> HeaderUpdateSession<'a, File>
+where
+    File: io::File,
+{
+    /// Returns the embedded header [`GrainId`], if one is present. This returns
+    /// the current in-memory state of the value and may not be persisted to
+    /// disk yet. To read the current header's value, use
+    /// [`Database::embedded_header`].
+    pub fn embedded_header(&self) -> Option<GrainId> {
+        match self.new_embedded_header {
+            EmbeddedHeaderUpdate::None => *self.header_guard,
+            EmbeddedHeaderUpdate::Replace(new_value) => new_value,
+        }
+    }
+
+    /// Updates the embedded header to the new [`GrainId`], or clears the header
+    /// if None is provided. This function updates the in-memory state for the
+    /// pending commit of this session, but the new value will not be available
+    /// until the session is committed.
+    ///
+    /// If this session is not committed, the header will not be published. Once
+    /// the session is dropped, another session will be able to acquire the
+    /// embedded header lock, and it will have the value prior to beginning this
+    /// session.
+    pub fn set_embedded_header(&mut self, embedded_header: Option<GrainId>) {
+        self.new_embedded_header = EmbeddedHeaderUpdate::Replace(embedded_header);
+    }
+
+    pub fn commit(self) -> io::Result<BatchId> {
+        let Self {
+            mut session,
+            mut header_guard,
+            new_embedded_header,
+        } = self;
+
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header {
+            *header_guard = new_header;
+            Some(header_guard)
+        } else {
+            // The header never updated.
+            None
+        };
+
+        session
+            .database
+            .commit_reservations(session.writes.drain(..), None, header_guard)
+    }
+
+    pub fn commit_and_checkpoint(self, checkpoint_to: BatchId) -> io::Result<BatchId> {
+        let Self {
+            mut session,
+            mut header_guard,
+            new_embedded_header,
+        } = self;
+
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header {
+            *header_guard = new_header;
+            Some(header_guard)
+        } else {
+            // The header never updated.
+            None
+        };
+
+        session.database.commit_reservations(
+            session.writes.drain(..),
+            Some(checkpoint_to),
+            header_guard,
+        )
+    }
+}
+
+impl<'a, File> Deref for HeaderUpdateSession<'a, File>
+where
+    File: io::File,
+{
+    type Target = WriteSession<'a, File>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.session
+    }
+}
+
+impl<'a, File> DerefMut for HeaderUpdateSession<'a, File>
+where
+    File: io::File,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.session
     }
 }

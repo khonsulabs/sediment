@@ -624,16 +624,22 @@ pub struct GrainId(u64);
 impl Debug for GrainId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GrainId")
-            .field("basin", &self.basin_index())
-            .field("stratum", &self.stratum_index())
-            .field("grain", &self.grain_index())
+            .field("basin", &(self.basin_index() + 1))
+            .field("stratum", &(self.stratum_index() + 1))
+            .field("grain", &(self.grain_index() + 1))
             .finish()
     }
 }
 
 impl Display for GrainId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:04x}-{:x}", self.0 >> 48, self.grain_index())
+        write!(
+            f,
+            "{:02x}{:02x}-{:x}",
+            self.basin_index() + 1,
+            self.stratum_index() + 1,
+            self.grain_index() + 1
+        )
     }
 }
 
@@ -648,7 +654,11 @@ impl FromStr for GrainId {
         let basin = u8::from_str_radix(&basin_and_stratum[..2], 16)?;
         let stratum = u8::from_str_radix(&basin_and_stratum[2..4], 16)?;
         let grain = u64::from_str_radix(grain, 16)?;
-        GrainId::new(basin, stratum, grain)
+        if basin == 0 || stratum == 0 || grain == 0 {
+            Err(InvalidGrainId)
+        } else {
+            GrainId::new(basin - 1, stratum - 1, grain - 1)
+        }
     }
 }
 
@@ -672,17 +682,17 @@ impl std::error::Error for InvalidGrainId {}
 impl GrainId {
     #[must_use]
     pub const fn basin_index(&self) -> u8 {
-        (self.0 >> 56) as u8
+        (self.0 >> 56) as u8 - 1
     }
 
     #[must_use]
     pub const fn stratum_index(&self) -> u8 {
-        ((self.0 >> 48) & 0xFF) as u8
+        ((self.0 >> 48) & 0xFF) as u8 - 1
     }
 
     #[must_use]
     pub const fn grain_index(&self) -> u64 {
-        self.0 & 0xFFFF_FFFF_FFFF
+        (self.0 & 0xFFFF_FFFF_FFFF) - 1
     }
 
     pub fn new(
@@ -693,8 +703,15 @@ impl GrainId {
         let basin_index = u64::from(basin_index);
         let stratum_index = u64::from(stratum_index);
 
-        if basin_index < 255 && stratum_index < 255 && grain_index < 0x1_0000_0000_0000 {
-            Ok(Self(basin_index << 56 | stratum_index << 48 | grain_index))
+        if basin_index < 255 && stratum_index < 255 && grain_index < 0xFFFF_FFFF_FFFF {
+            // We use 0 vs non-zero to distingush for Option<GrainId>. Since
+            // each of our fields is limited, we can add 1 to each index to make
+            // the GrainId be 1-based, allowing for 0 to represent no grain id.
+            // Technically we only had to do this to one field, but
+            // all fields are done for consistency.
+            Ok(Self(
+                (basin_index + 1) << 56 | (stratum_index + 1) << 48 | (grain_index + 1),
+            ))
         } else {
             Err(InvalidGrainId)
         }
@@ -714,17 +731,35 @@ impl GrainId {
             ))),
         }
     }
+
+    #[must_use]
+    pub const fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for GrainId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<GrainId> for u64 {
+    fn from(grain: GrainId) -> Self {
+        grain.0
+    }
 }
 
 #[test]
 fn grain_id_format_tests() {
     let test = GrainId::from_parts(1, 2, 3).unwrap();
-    assert_eq!(format!("{test}"), "0102-3");
+    // The visual display format for
+    assert_eq!(format!("{test}"), "0203-4");
     let parsed = GrainId::from_str(&test.to_string()).unwrap();
     assert_eq!(test, parsed);
     assert_eq!(
         format!("{test:?}"),
-        "GrainId { basin: 1, stratum: 2, grain: 3 }"
+        "GrainId { basin: 2, stratum: 3, grain: 4 }"
     );
 }
 

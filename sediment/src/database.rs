@@ -17,6 +17,7 @@ use crate::{
         atlas::Atlas,
         committer::{Committer, GrainBatchOperation},
         disk::DiskState,
+        embedded::{EmbeddedHeaderGuard, EmbeddedHeaderState},
         log::CommitLog,
         page_cache::PageCache,
     },
@@ -29,6 +30,7 @@ mod atlas;
 mod committer;
 mod config;
 mod disk;
+mod embedded;
 mod log;
 mod page_cache;
 mod session;
@@ -66,6 +68,10 @@ where
 
         let state = DiskState::recover(&mut file, &mut scratch, &grain_map_page_cache)?;
         let atlas = Atlas::from_state(&state.disk_state);
+        let embedded_header = state
+            .log
+            .most_recent_entry()
+            .and_then(|(_, index)| index.embedded_header);
         let mut database = Self {
             file,
             scratch,
@@ -75,6 +81,7 @@ where
                 atlas: Mutex::new(atlas),
                 log: RwLock::new(state.log),
                 disk_state: Mutex::new(state.disk_state),
+                embedded_header: EmbeddedHeaderState::new(embedded_header),
                 committer: Committer::default(),
                 grain_map_page_cache,
                 file_allocations: state.file_allocations,
@@ -97,6 +104,10 @@ where
 
     pub fn open_with_manager(path: impl AsRef<Path>, manager: &File::Manager) -> io::Result<Self> {
         Self::new(path, manager, ())
+    }
+
+    pub fn embedded_header(&self) -> Option<GrainId> {
+        self.state.embedded_header.current()
     }
 
     pub fn current_batch(&self) -> BatchId {
@@ -223,10 +234,12 @@ where
         &mut self,
         reservations: impl Iterator<Item = GrainBatchOperation>,
         checkpoint_to: Option<BatchId>,
+        new_embedded_header: Option<EmbeddedHeaderGuard>,
     ) -> io::Result<BatchId> {
         self.state.committer.commit(
             reservations,
             checkpoint_to,
+            new_embedded_header,
             &self.state,
             &mut self.file,
             &mut self.scratch,
@@ -257,6 +270,7 @@ struct DatabaseState {
     checkpoint: AtomicU64,
     atlas: Mutex<Atlas>,
     disk_state: Mutex<DiskState>,
+    embedded_header: EmbeddedHeaderState,
     log: RwLock<CommitLog>,
     committer: Committer,
     grain_map_page_cache: PageCache,
@@ -655,6 +669,58 @@ crate::io_test!(grain_lifecycle, {
     drop(db);
     let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
     assert_eq!(db.read(grain_id).unwrap(), None);
+
+    drop(db);
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+});
+
+#[cfg(test)]
+crate::io_test!(embedded_header, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    let manager = Manager::default();
+    // Create the database.
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut session = db.new_session().updating_embedded_header();
+    let grain_id = session.write(b"a header").unwrap();
+    session.set_embedded_header(Some(grain_id));
+    println!("Set header to {grain_id}");
+    session.commit().unwrap();
+
+    assert_eq!(db.embedded_header(), Some(grain_id));
+
+    // Reopen the database.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+    assert_eq!(db.embedded_header(), Some(grain_id));
+    let new_grain = db.write(b"another").unwrap();
+
+    // Ensure the new write didn't overwrite the header.
+    assert_eq!(db.embedded_header(), Some(grain_id));
+
+    // Reopen the database and ensure the embedded header is still present.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    assert_eq!(db.embedded_header(), Some(grain_id));
+
+    // Update the header one more time
+    let mut session = db.new_session().updating_embedded_header();
+    session.set_embedded_header(Some(new_grain.id));
+    println!("Updated header to {}", new_grain.id);
+    session.commit().unwrap();
+
+    // Ensure the new write didn't overwrite the header.
+    assert_eq!(db.embedded_header(), Some(new_grain.id));
+
+    // Reopen the database and ensure the embedded header is still present.
+    drop(db);
+    let db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    assert_eq!(db.embedded_header(), Some(new_grain.id));
 
     drop(db);
     if path.exists() {

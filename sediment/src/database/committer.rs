@@ -8,6 +8,7 @@ use parking_lot::{Condvar, Mutex};
 use crate::{
     database::{
         disk::{BasinState, DiskState, GrainMapState, StratumState},
+        embedded::{EmbeddedHeaderGuard, EmbeddedHeaderUpdate},
         page_cache::LoadedGrainMapPage,
         DatabaseState, GrainReservation,
     },
@@ -31,6 +32,7 @@ impl Committer {
         &self,
         batch: impl Iterator<Item = GrainBatchOperation>,
         checkpoint_to: Option<BatchId>,
+        new_embedded_header: Option<EmbeddedHeaderGuard>,
         database: &DatabaseState,
         file: &mut File,
         scratch: &mut Vec<u8>,
@@ -44,6 +46,12 @@ impl Committer {
             grains: batch.collect(),
         };
         state.pending_batches.push(batch);
+        // Take the new header value, and release the guard by consuming it with
+        // map.
+        state.new_embedded_header = new_embedded_header
+            .map_or(EmbeddedHeaderUpdate::None, |guard| {
+                EmbeddedHeaderUpdate::Replace(*guard)
+            });
 
         loop {
             if state.committing {
@@ -56,13 +64,20 @@ impl Committer {
             } else {
                 // No other thread has taken over committing, so this thread
                 // should.
-                let (last_batch_id, checkpoint_to, grains) = state.become_commit_thread();
+                let (last_batch_id, checkpoint_to, new_embedded_header, grains) =
+                    state.become_commit_thread();
                 // Release the mutex, allowing other threads to queue batches
                 // while we write and sync the file.
                 drop(state);
 
-                let new_batch_id =
-                    Self::commit_batches(grains, checkpoint_to, database, file, scratch)?;
+                let new_batch_id = Self::commit_batches(
+                    grains,
+                    checkpoint_to,
+                    new_embedded_header,
+                    database,
+                    file,
+                    scratch,
+                )?;
 
                 // Re-acquire the state to update the knowledge of committed batches
                 let mut state = self.state.lock();
@@ -86,6 +101,7 @@ impl Committer {
     fn commit_batches<File: io::File>(
         mut grains: Vec<GrainBatchOperation>,
         checkpoint_to: Option<BatchId>,
+        new_embedded_header: EmbeddedHeaderUpdate,
         database: &DatabaseState,
         file: &mut File,
         scratch: &mut Vec<u8>,
@@ -139,8 +155,14 @@ impl Committer {
 
         // TODO These writes should be able to be parallelized
 
-        disk_state.header.log_offset =
-            Self::write_commit_log(&log_entry, committing_batch, database, file, scratch)?;
+        disk_state.header.log_offset = Self::write_commit_log(
+            &log_entry,
+            committing_batch,
+            new_embedded_header,
+            database,
+            file,
+            scratch,
+        )?;
 
         for (offset, grain_map_page) in &mut modified_pages {
             grain_map_page.write_to(*offset, committing_batch, file, scratch)?;
@@ -204,6 +226,11 @@ impl Committer {
                 removed_log_page_offset..removed_log_page_offset + PAGE_SIZE_U64,
                 Allocation::Free,
             );
+        }
+
+        // Publish the new embedded header
+        if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header {
+            database.embedded_header.publish(new_header);
         }
 
         Ok(committing_batch)
@@ -404,6 +431,7 @@ impl Committer {
     fn write_commit_log<File: io::File>(
         log_entry: &CommitLogEntry,
         committing_batch: BatchId,
+        new_embedded_header: EmbeddedHeaderUpdate,
         database: &DatabaseState,
         file: &mut File,
         scratch: &mut Vec<u8>,
@@ -422,6 +450,13 @@ impl Committer {
         *scratch = buffer;
         result?;
 
+        let embedded_header = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header
+        {
+            new_header
+        } else {
+            database.embedded_header.current()
+        };
+
         // Point to the new entry from the commit log.
         let mut log = database.log.write();
         log.push(
@@ -430,7 +465,7 @@ impl Committer {
                 position: log_entry_offset,
                 length: log_entry_len,
                 crc: log_entry_crc,
-                embedded_header: None,
+                embedded_header,
             },
         );
         log.write_to(&database.file_allocations, file, scratch)?;
@@ -474,12 +509,18 @@ struct CommitBatches {
     committed_batch_id: GrainBatchId,
     committed_batches: HashMap<GrainBatchId, BatchId>,
     pending_batches: Vec<GrainBatch>,
+    new_embedded_header: EmbeddedHeaderUpdate,
 }
 
 impl CommitBatches {
     fn become_commit_thread(
         &mut self,
-    ) -> (GrainBatchId, Option<BatchId>, Vec<GrainBatchOperation>) {
+    ) -> (
+        GrainBatchId,
+        Option<BatchId>,
+        EmbeddedHeaderUpdate,
+        Vec<GrainBatchOperation>,
+    ) {
         self.committing = true;
         let mut grains =
             Vec::with_capacity(self.pending_batches.iter().map(|b| b.grains.len()).sum());
@@ -494,7 +535,12 @@ impl CommitBatches {
                 }
             }
         }
-        (latest_batch_id, checkpoint_to, grains)
+        (
+            latest_batch_id,
+            checkpoint_to,
+            std::mem::take(&mut self.new_embedded_header),
+            grains,
+        )
     }
 }
 
@@ -506,6 +552,7 @@ impl Default for CommitBatches {
             committed_batch_id: GrainBatchId(0),
             committed_batches: HashMap::new(),
             pending_batches: Vec::new(),
+            new_embedded_header: EmbeddedHeaderUpdate::None,
         }
     }
 }
