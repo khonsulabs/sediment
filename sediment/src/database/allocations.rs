@@ -76,15 +76,31 @@ impl FileAllocations {
         allocations.set(start..range.end.ceil_div_by(PAGE_SIZE_U64), allocation);
     }
 
-    pub fn statistics(&self) -> (u64, u64) {
+    pub fn statistics(&self) -> FileAllocationStatistics {
         let allocations = self.0.lock();
-        let free_space = allocations
-            .iter()
-            .filter_map(|(range, tag)| (tag == &Allocation::Free).then(|| range.len()))
-            .sum::<u64>();
-        (
-            free_space * PAGE_SIZE_U64,
-            allocations.maximum().unwrap() * PAGE_SIZE_U64,
+        allocations.iter().fold(
+            FileAllocationStatistics::default(),
+            |mut stats, (range, tag)| {
+                let length = range.len() * PAGE_SIZE_U64;
+                match tag {
+                    Allocation::Free => {
+                        stats.free_space += length;
+                        stats.largest_contiguous_free_space =
+                            stats.largest_contiguous_free_space.max(length);
+                    }
+                    Allocation::Allocated => {
+                        stats.allocated_space += length;
+                    }
+                }
+                stats
+            },
         )
     }
+}
+
+#[derive(Default, Debug)]
+pub struct FileAllocationStatistics {
+    pub free_space: u64,
+    pub allocated_space: u64,
+    pub largest_contiguous_free_space: u64,
 }

@@ -116,13 +116,13 @@ impl SingleCommand {
                 let stats = database.statistics();
                 println!(
                     "Total database size: {} ({} bytes).",
-                    ByteSize(stats.file_size).to_string_as(true),
-                    stats.file_size
+                    ByteSize(stats.file_length()).to_string_as(true),
+                    stats.file_length()
                 );
                 println!(
                     "Unallocated disk space: {} ({} bytes).",
-                    ByteSize(stats.unallocated_bytes).to_string_as(true),
-                    stats.unallocated_bytes
+                    ByteSize(stats.allocations.free_space).to_string_as(true),
+                    stats.allocations.free_space
                 );
                 let total_grain_space = stats
                     .grains_by_length

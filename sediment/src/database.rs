@@ -12,8 +12,12 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::{
     database::{
-        allocations::FileAllocations, atlas::Atlas, committer::Committer, disk::DiskState,
-        log::CommitLog, page_cache::PageCache,
+        allocations::{FileAllocationStatistics, FileAllocations},
+        atlas::Atlas,
+        committer::Committer,
+        disk::DiskState,
+        log::CommitLog,
+        page_cache::PageCache,
     },
     format::{crc, BatchId, CommitLogEntry, GrainId, LogEntryIndex},
     io::{self, ext::ToIoResult, FileManager},
@@ -105,7 +109,7 @@ where
     }
 
     pub fn statistics(&self) -> Statistics {
-        let (unallocated_bytes, file_size) = self.state.file_allocations.statistics();
+        let allocations = self.state.file_allocations.statistics();
         let disk_state = self.state.disk_state.lock();
         let mut grains_by_length = HashMap::new();
         for basin in &disk_state.basins {
@@ -127,8 +131,7 @@ where
         }
 
         Statistics {
-            file_size,
-            unallocated_bytes,
+            allocations,
             grains_by_length,
         }
     }
@@ -284,9 +287,15 @@ pub struct GrainRecord {
 
 #[derive(Debug)]
 pub struct Statistics {
-    pub file_size: u64,
-    pub unallocated_bytes: u64,
+    pub allocations: FileAllocationStatistics,
     pub grains_by_length: HashMap<u32, GrainStatistics>,
+}
+
+impl Statistics {
+    #[must_use]
+    pub const fn file_length(&self) -> u64 {
+        self.allocations.allocated_space + self.allocations.free_space
+    }
 }
 
 #[derive(Default, Debug)]
@@ -423,7 +432,7 @@ crate::io_test!(multiple_strata, {
     // To create a new strata, we currently need something at least 4x as large
     // as the current strata size.
     let mut session = db.new_session();
-    let second_grain_id = session.write(&[42; 65]).unwrap();
+    let second_grain_id = session.write(&vec![42; 32768]).unwrap();
     session.commit().unwrap();
     assert_ne!(
         first_grain_id.stratum_index(),
@@ -437,7 +446,7 @@ crate::io_test!(multiple_strata, {
     assert_eq!(&*first_grain_data, b"test");
 
     let second_grain_data = db.read(second_grain_id).unwrap().unwrap();
-    assert_eq!(&*second_grain_data, &[42; 65]);
+    assert_eq!(&*second_grain_data, &vec![42; 32768]);
 
     drop(db);
     if path.exists() {
@@ -513,7 +522,7 @@ crate::io_test!(commit_log, {
         let entry = db.read_commit_log_entry(&entry_index).unwrap();
         assert_eq!(entry.grain_changes.len(), 1);
         assert_eq!(entry.grain_changes[0].start, grain.id);
-        assert_eq!(entry.grain_changes[0].count, 1);
+        assert_eq!(entry.grain_changes[0].count, 12);
         assert_eq!(
             entry.grain_changes[0].operation,
             crate::format::GrainOperation::Allocate

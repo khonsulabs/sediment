@@ -36,7 +36,7 @@ where
         let mut write_at = reservation.offset;
         let mut header_written = false;
         while !data.is_empty() {
-            let (slice, bytes_copied) = if header_written {
+            let (slice, source_bytes_copied) = if header_written {
                 let bytes_to_copy = data.len().min(scratch.len());
                 scratch[..bytes_to_copy].copy_from_slice(&data[..bytes_to_copy]);
                 (scratch.io_slice(..bytes_to_copy), bytes_to_copy)
@@ -47,12 +47,14 @@ where
                 (scratch.io_slice(..bytes_to_copy + 8), bytes_to_copy)
             };
 
+            let total_bytes_copied = slice.len();
+
             let (result, buffer) = self.database.file.write_all(slice, write_at);
             result?;
             scratch = buffer;
 
-            data = &data[bytes_copied..];
-            write_at += u64::try_from(bytes_copied).to_io()?;
+            data = &data[source_bytes_copied..];
+            write_at += u64::try_from(total_bytes_copied).to_io()?;
         }
 
         debug_assert!(header_written);

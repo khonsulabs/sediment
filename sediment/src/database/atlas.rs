@@ -1,6 +1,9 @@
 use crate::{
     database::{
-        allocations::FileAllocations, disk::DiskState, page_cache::PageCache, GrainReservation,
+        allocations::{FileAllocationStatistics, FileAllocations},
+        disk::DiskState,
+        page_cache::PageCache,
+        GrainReservation,
     },
     format::{Allocation, Basin, BatchId, GrainId, GrainMapPage, StratumIndex, PAGE_SIZE_U64},
     io::{self, ext::ToIoResult},
@@ -94,7 +97,7 @@ impl Atlas {
         for (basin_index, basin) in self.basins.iter_mut().enumerate() {
             for (stratum_index, stratum) in basin.strata.iter_mut().enumerate() {
                 let grains_needed = (length + 8).ceil_div_by(stratum.grain_length);
-                if grains_needed > 4 {
+                if grains_needed > 255 {
                     continue;
                 }
 
@@ -207,17 +210,46 @@ impl Atlas {
         Some(map(stratum))
     }
 
+    #[allow(clippy::cast_precision_loss)]
+    fn ideal_grain_map_grain_length_exp(length: u32, file_info: &FileAllocationStatistics) -> u8 {
+        let length_with_header = length.checked_add(8).expect("length too large");
+        let maximum_grain_length = length_with_header
+            .min(2_u32.pow(24))
+            .next_power_of_two()
+            .trailing_zeros();
+        let minimum_grain_length = (length_with_header.ceil_div_by(255))
+            .min(2_u32.pow(24))
+            .next_power_of_two()
+            .trailing_zeros();
+
+        let total_file_length = (file_info.allocated_space + file_info.free_space) as f64;
+        let mut ideal_grain_length = minimum_grain_length;
+        let mut ideal_grain_length_overhead = u32::MAX;
+        for length_exp in (minimum_grain_length..=maximum_grain_length).rev() {
+            let grain_length = 2_u32.pow(length_exp);
+            let total_allocation = length_with_header
+                .round_to_multiple_of(grain_length)
+                .unwrap();
+            let percent_growth_of_file =
+                (u64::from(grain_length) * GrainMapPage::GRAINS_U64) as f64 / total_file_length;
+            let overhead = total_allocation - length_with_header;
+            if overhead < ideal_grain_length_overhead && percent_growth_of_file < 0.0625 {
+                ideal_grain_length = length_exp;
+                ideal_grain_length_overhead = overhead;
+            }
+        }
+
+        u8::try_from(ideal_grain_length).unwrap()
+    }
+
     fn allocate_new_grain_map<File: io::File>(
         &mut self,
         length: u32,
         file: &mut File,
         file_allocations: &FileAllocations,
     ) -> io::Result<GrainId> {
-        // TODO we shouldn't always pick the largest size. We should support
-        // using multiple grains on an initial allocation.
-        let ideal_grain_length = (length + 8).min(2_u32.pow(24)).next_power_of_two();
-        let grain_length_exp = u8::try_from(ideal_grain_length.trailing_zeros()).unwrap();
-
+        let grain_length_exp =
+            Self::ideal_grain_map_grain_length_exp(length, &file_allocations.statistics());
         // Attempt to allocate a new stratum in an existing basin
         if let Some(basin_index) = self
             .basins
@@ -275,8 +307,7 @@ impl Atlas {
         for reservation in reservations {
             if let Some(Err(err)) =
                 self.map_stratum_for_grain(reservation.grain_id, |strata| -> io::Result<()> {
-                    let grains_needed = reservation
-                        .length
+                    let grains_needed = (reservation.length + 8)
                         .round_to_multiple_of(strata.grain_length)
                         .expect("practically impossible to overflow");
 

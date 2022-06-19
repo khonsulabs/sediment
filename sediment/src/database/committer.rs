@@ -267,7 +267,7 @@ impl Committer {
             let grain_map_index = usize::try_from(grain_index / grains_per_map).to_io()?;
             let local_grain_index = usize::try_from(grain_index % grains_per_map).to_io()?;
             let grain_count = u8::try_from(
-                (reservation.length + stratum_info.grain_length() - 1)
+                (reservation.length + 8 + stratum_info.grain_length() - 1)
                     / stratum_info.grain_length(),
             )
             .to_io()?;

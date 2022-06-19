@@ -42,21 +42,28 @@ fn measure_sqlite(measurements: &Timings<&'static str>) {
         std::fs::remove_file(path).unwrap();
     }
     let mut sqlite = rusqlite::Connection::open(path).unwrap();
-    // On macOS with built-in SQLite versions, despite the name and the SQLite
-    // documentation, this pragma makes SQLite use `fcntl(_, F_BARRIER_FSYNC,
-    // _)`. There's not a good practical way to make rusqlite's access of SQLite
-    // on macOS to use `F_FULLFSYNC`, which skews benchmarks heavily in favor of
-    // SQLite when not enabling this feature.
-    //
-    // Enabling this feature reduces the durability guarantees, which breaks
-    // ACID compliance. Unless performance is critical on macOS or you know that
-    // ACID compliance is not important for your application, this feature
-    // should be left disabled.
-    //
-    // <https://bonsaidb.io/blog/acid-on-apple/>
-    // <https://www.sqlite.org/pragma.html#pragma_fullfsync>
-    #[cfg(feature = "fbarrier-fsync")]
-    sqlite.pragma_update(None, "fullfsync", "on").unwrap();
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        // On macOS with built-in SQLite versions, despite the name and the SQLite
+        // documentation, this pragma makes SQLite use `fcntl(_, F_BARRIER_FSYNC,
+        // _)`. There's not a good practical way to make rusqlite's access of SQLite
+        // on macOS to use `F_FULLFSYNC`, which skews benchmarks heavily in favor of
+        // SQLite when not enabling this feature.
+        //
+        // Enabling this feature reduces the durability guarantees, which breaks
+        // ACID compliance. Unless performance is critical on macOS or you know that
+        // ACID compliance is not important for your application, this feature
+        // should be left disabled.
+        //
+        // <https://bonsaidb.io/blog/acid-on-apple/>
+        // <https://www.sqlite.org/pragma.html#pragma_fullfsync>
+        sqlite.pragma_update(None, "fullfsync", "on").unwrap();
+
+        if !cfg!(feature = "fbarrier-fsync") {
+            println!("SQLite bundled in macOS uses F_BARRIERFSYNC instead of F_FULLFSYNC, which means it does not provide ACID guarantees. Enable feature `fbarrier-fsync` to configure Sediment to use the same synchronization primitive. See <https://bonsaidb.io/blog/acid-on-apple/> for more information.");
+        }
+    }
 
     sqlite
         .execute("create table blobs (value BLOB)", [])
