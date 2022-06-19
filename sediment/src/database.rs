@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    io::ErrorKind,
     ops::Deref,
     path::Path,
     sync::{
@@ -14,7 +15,7 @@ use crate::{
     database::{
         allocations::{FileAllocationStatistics, FileAllocations},
         atlas::Atlas,
-        committer::Committer,
+        committer::{Committer, GrainBatchOperation},
         disk::DiskState,
         log::CommitLog,
         page_cache::PageCache,
@@ -143,21 +144,21 @@ where
 
     pub fn read(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
         let mut atlas = self.state.atlas.lock();
-        let (offset, full_length) = match atlas.length_of_grain(
+        let info = match atlas.grain_allocation_info(
             grain,
             self.current_batch(),
             &self.state.grain_map_page_cache,
             &mut self.file,
             &mut self.scratch,
         )? {
-            Some((_, info)) if info == 0 => return Ok(None),
+            Some(info) if info.allocated_length == 0 => return Ok(None),
             Some(result) => result,
             None => return Ok(None),
         };
         drop(atlas);
 
-        let data = vec![0; usize::try_from(full_length).to_io()?];
-        let (result, data) = self.file.read_exact(data, offset);
+        let data = vec![0; usize::try_from(info.allocated_length).to_io()?];
+        let (result, data) = self.file.read_exact(data, info.offset);
         result?;
         Ok(Some(GrainData::from_bytes(data)))
     }
@@ -193,11 +194,29 @@ where
         active_state.reserve_grain(length, &mut self.file, &self.state.file_allocations)
     }
 
+    fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {
+        let mut active_state = self.state.atlas.lock();
+
+        let info = active_state.grain_allocation_info(
+            grain_id,
+            self.current_batch(),
+            &self.state.grain_map_page_cache,
+            &mut self.file,
+            &mut self.scratch,
+        )?;
+
+        if let Some(info) = info {
+            Ok(info.count)
+        } else {
+            Err(std::io::Error::from(ErrorKind::NotFound))
+        }
+    }
+
     /// Persists all of the writes to the database. When this function returns,
     /// the data is fully flushed to disk.
     fn commit_reservations(
         &mut self,
-        reservations: impl Iterator<Item = GrainReservation>,
+        reservations: impl Iterator<Item = GrainBatchOperation>,
     ) -> io::Result<BatchId> {
         self.state
             .committer
@@ -573,4 +592,49 @@ crate::io_test!(basic_rollback, {
     assert_ne!(db.current_batch(), committed_batch);
 
     assert!(db.read(grain_id).unwrap().is_none());
+});
+
+#[cfg(test)]
+crate::io_test!(grain_lifecycle, {
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    let manager = Manager::default();
+    // Create the database.
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut session = db.new_session();
+    let grain_id = session.write(b"hello world").unwrap();
+    println!("Wrote to {grain_id}");
+    let committed_batch = session.commit().unwrap();
+    println!("Batch: {committed_batch}");
+
+    // Reopen the database.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+    // Archive the grain
+    let mut session = db.new_session();
+    session.archive(grain_id).unwrap();
+    let archiving_commit = session.commit().unwrap();
+
+    println!("Archived at: {archiving_commit}");
+
+    // We should still be able to read the data.
+    let grain_data = db.read(grain_id).unwrap().unwrap();
+    assert_eq!(&*grain_data, b"hello world");
+
+    // Reopen the database.
+    drop(db);
+    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+
+    let grain_data = db.read(grain_id).unwrap().unwrap();
+    assert_eq!(&*grain_data, b"hello world");
+
+    // TODO Checkpoint the database.
+
+    drop(db);
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
 });

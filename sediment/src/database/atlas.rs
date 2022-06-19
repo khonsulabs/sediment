@@ -158,14 +158,14 @@ impl Atlas {
         })
     }
 
-    pub fn length_of_grain<File: io::File>(
+    pub fn grain_allocation_info<File: io::File>(
         &mut self,
         grain_id: GrainId,
         current_batch: BatchId,
         page_cache: &PageCache,
         file: &mut File,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<Option<(u64, u64)>> {
+    ) -> io::Result<Option<GrainAllocationInfo>> {
         let (offset, page_local_index, grain_map_page_offset, grain_length) = match self
             .map_stratum_for_grain(grain_id, |stratum| -> io::Result<(u64, usize, u64, u32)> {
                 let (offset, grain_map_index) =
@@ -193,10 +193,11 @@ impl Atlas {
             scratch,
         )?;
 
-        Ok(Some((
+        Ok(Some(GrainAllocationInfo {
             offset,
-            u64::from(consecutive_grains) * u64::from(grain_length),
-        )))
+            allocated_length: u64::from(consecutive_grains) * u64::from(grain_length),
+            count: consecutive_grains,
+        }))
     }
 
     fn map_stratum_for_grain<F: FnOnce(&mut StratumAtlas) -> R, R>(
@@ -394,4 +395,11 @@ pub struct GrainMapAtlas {
     pub new: bool,
     pub offset: u64,
     pub allocations: Ranges<Allocation>,
+}
+
+#[derive(Debug)]
+pub struct GrainAllocationInfo {
+    pub offset: u64,
+    pub count: u8,
+    pub allocated_length: u64,
 }

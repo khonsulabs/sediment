@@ -12,8 +12,8 @@ use crate::{
         DatabaseState, GrainReservation,
     },
     format::{
-        crc, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainMapPage, GrainOperation,
-        LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
+        crc, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainId, GrainMapPage,
+        GrainOperation, LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
     io::{self, ext::ToIoResult},
     todo_if,
@@ -29,7 +29,7 @@ pub(super) struct Committer {
 impl Committer {
     pub fn commit<File: io::File>(
         &self,
-        batch: impl Iterator<Item = GrainReservation>,
+        batch: impl Iterator<Item = GrainBatchOperation>,
         database: &DatabaseState,
         file: &mut File,
         scratch: &mut Vec<u8>,
@@ -81,14 +81,14 @@ impl Committer {
     }
 
     fn commit_batches<File: io::File>(
-        mut grains: Vec<GrainReservation>,
+        mut grains: Vec<GrainBatchOperation>,
         database: &DatabaseState,
         file: &mut File,
         scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
         // Sort the grains to ensure we can work with a single grain map at a
         // time.
-        grains.sort_by(|a, b| a.grain_id.cmp(&b.grain_id));
+        grains.sort_by_key(GrainBatchOperation::grain_id);
 
         let mut disk_state = database.disk_state.lock();
 
@@ -242,7 +242,7 @@ impl Committer {
     }
 
     fn update_grain_map_pages<File: io::File>(
-        grains: &[GrainReservation],
+        grains: &[GrainBatchOperation],
         modifications: &mut CommitModifications,
         database: &DatabaseState,
         disk_state: &mut DiskState,
@@ -252,74 +252,94 @@ impl Committer {
         let mut modified_pages = Vec::<(u64, LoadedGrainMapPage)>::new();
         let mut grain_changes = Vec::with_capacity(grains.len());
         for reservation in grains {
-            // Load any existing grain map pages, modify then, and add them to
-            // `modified_pages`. We must keep the atlas locked as little as
-            // possible during this phase.
-            let basin_index = usize::from(reservation.grain_id.basin_index());
+            let basin_index = usize::from(reservation.grain_id().basin_index());
+            let stratum_index = usize::from(reservation.grain_id().stratum_index());
             let basin = &mut disk_state.basins[basin_index];
-            let stratum_index = usize::from(reservation.grain_id.stratum_index());
             let stratum_info = &basin.header.strata[stratum_index];
             let stratum = &mut basin.strata[stratum_index];
 
-            let grain_index = reservation.grain_id.grain_index();
+            let grain_index = reservation.grain_id().grain_index();
             let grains_per_map = stratum_info.grains_per_map();
             let grain_map_index = usize::try_from(grain_index / grains_per_map).to_io()?;
-            let local_grain_index = usize::try_from(grain_index % grains_per_map).to_io()?;
-            let grain_count = u8::try_from(
-                (reservation.length + 8 + stratum_info.grain_length() - 1)
-                    / stratum_info.grain_length(),
-            )
-            .to_io()?;
+            match reservation {
+                GrainBatchOperation::Allocate(reservation) => {
+                    // Load any existing grain map pages, modify then, and add them to
+                    // `modified_pages`. We must keep the atlas locked as little as
+                    // possible during this phase.
+                    let local_grain_index =
+                        usize::try_from(grain_index % grains_per_map).to_io()?;
+                    let grain_count = u8::try_from(
+                        (reservation.length + 8 + stratum_info.grain_length() - 1)
+                            / stratum_info.grain_length(),
+                    )
+                    .to_io()?;
 
-            todo_if!(local_grain_index >= GrainMapPage::GRAINS, "need to handle multiple grain map pages https://github.com/khonsulabs/sediment/issues/11");
-            let grain_map_page_offset =
-                stratum.grain_maps[grain_map_index].offset + stratum_info.total_header_length();
-            let loaded_grain_map_page = match modified_pages.last_mut() {
-                Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
-                    grain_map_page
-                }
-                _ => {
-                    let page = if modifications.new_pages.remove(&grain_map_page_offset) {
-                        // A new page, no need to load from disk.
-                        LoadedGrainMapPage::default()
-                    } else {
-                        database.grain_map_page_cache.fetch(
-                            grain_map_page_offset,
-                            disk_state.header.batch,
-                            file,
-                            scratch,
-                        )?
+                    todo_if!(local_grain_index >= GrainMapPage::GRAINS, "need to handle multiple grain map pages https://github.com/khonsulabs/sediment/issues/11");
+                    let grain_map_page_offset = stratum.grain_maps[grain_map_index].offset
+                        + stratum_info.total_header_length();
+                    let loaded_grain_map_page = match modified_pages.last_mut() {
+                        Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
+                            grain_map_page
+                        }
+                        _ => {
+                            let page = if modifications.new_pages.remove(&grain_map_page_offset) {
+                                // A new page, no need to load from disk.
+                                LoadedGrainMapPage::default()
+                            } else {
+                                database.grain_map_page_cache.fetch(
+                                    grain_map_page_offset,
+                                    disk_state.header.batch,
+                                    file,
+                                    scratch,
+                                )?
+                            };
+                            modified_pages.push((grain_map_page_offset, page));
+
+                            &mut modified_pages.last_mut().unwrap().1
+                        }
                     };
-                    modified_pages.push((grain_map_page_offset, page));
 
-                    &mut modified_pages.last_mut().unwrap().1
+                    stratum.grain_maps[grain_map_index].map.allocation_state
+                        [local_grain_index..local_grain_index + usize::from(grain_count)]
+                        .fill(true);
+
+                    for (allocation_index, local_grain_index) in (local_grain_index
+                        ..local_grain_index + usize::from(grain_count))
+                        .enumerate()
+                    {
+                        let grain = &mut loaded_grain_map_page.page.consecutive_allocations
+                            [local_grain_index];
+                        assert!(*grain == 0);
+                        *grain = grain_count - u8::try_from(allocation_index).unwrap();
+                    }
+                    modifications
+                        .grain_maps
+                        .insert((basin_index, stratum_index, grain_map_index));
+                    grain_changes.push(GrainChange {
+                        operation: GrainOperation::Allocate {
+                            crc: reservation
+                                .crc
+                                .expect("reservation committed without being written to"),
+                        },
+                        start: reservation.grain_id,
+                        count: grain_count,
+                    });
                 }
-            };
-
-            stratum.grain_maps[grain_map_index].map.allocation_state
-                [local_grain_index..local_grain_index + usize::from(grain_count)]
-                .fill(true);
-
-            for (allocation_index, local_grain_index) in
-                (local_grain_index..local_grain_index + usize::from(grain_count)).enumerate()
-            {
-                let grain =
-                    &mut loaded_grain_map_page.page.consecutive_allocations[local_grain_index];
-                assert!(*grain == 0);
-                *grain = grain_count - u8::try_from(allocation_index).unwrap();
+                GrainBatchOperation::Archive { grain_id, count } => {
+                    // Archiving a grain doesn't actually change these pages, we
+                    // just need the archive entry in the commit log. The
+                    // allocation states will be updated when the log entry
+                    // containing the archive command is checkpointed.
+                    modifications
+                        .grain_maps
+                        .insert((basin_index, stratum_index, grain_map_index));
+                    grain_changes.push(GrainChange {
+                        operation: GrainOperation::Archive,
+                        start: *grain_id,
+                        count: *count,
+                    });
+                }
             }
-            modifications
-                .grain_maps
-                .insert((basin_index, stratum_index, grain_map_index));
-            grain_changes.push(GrainChange {
-                operation: GrainOperation::Allocate {
-                    crc: reservation
-                        .crc
-                        .expect("reservation committed without being written to"),
-                },
-                start: reservation.grain_id,
-                count: grain_count,
-            });
         }
 
         Ok((modified_pages, CommitLogEntry { grain_changes }))
@@ -367,7 +387,22 @@ impl Committer {
 #[derive(Debug)]
 struct GrainBatch {
     pub batch_id: GrainBatchId,
-    pub grains: Vec<GrainReservation>,
+    pub grains: Vec<GrainBatchOperation>,
+}
+
+#[derive(Debug)]
+pub enum GrainBatchOperation {
+    Allocate(GrainReservation),
+    Archive { grain_id: GrainId, count: u8 },
+}
+
+impl GrainBatchOperation {
+    pub const fn grain_id(&self) -> GrainId {
+        match self {
+            GrainBatchOperation::Allocate(reservation) => reservation.grain_id,
+            GrainBatchOperation::Archive { grain_id, .. } => *grain_id,
+        }
+    }
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
@@ -383,7 +418,7 @@ struct CommitBatches {
 }
 
 impl CommitBatches {
-    fn become_commit_thread(&mut self) -> (GrainBatchId, Vec<GrainReservation>) {
+    fn become_commit_thread(&mut self) -> (GrainBatchId, Vec<GrainBatchOperation>) {
         self.committing = true;
         let mut grains =
             Vec::with_capacity(self.pending_batches.iter().map(|b| b.grains.len()).sum());

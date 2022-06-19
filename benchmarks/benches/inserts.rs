@@ -84,8 +84,9 @@ fn measure_sqlite(measurements: &Timings<&'static str>) {
 
 #[cfg(feature = "marble")]
 mod marble {
-    use super::*;
     use ::marble::{Marble, ObjectId};
+
+    use super::*;
 
     pub fn measure(measurements: &Timings<&'static str>) {
         let path = Path::new("./bench-suite.marble");

@@ -1,5 +1,5 @@
 use crate::{
-    database::{Database, GrainReservation},
+    database::{committer::GrainBatchOperation, Database},
     format::{BatchId, GrainId, CRC},
     io::{self, ext::ToIoResult, iobuffer::IoBufferExt},
 };
@@ -10,7 +10,7 @@ where
     File: io::File,
 {
     database: &'a mut Database<File>,
-    writes: Vec<GrainReservation>,
+    writes: Vec<GrainBatchOperation>,
 }
 
 impl<'a, File> WriteSession<'a, File>
@@ -64,9 +64,18 @@ where
         debug_assert!(header_written);
 
         let id = reservation.grain_id;
-        self.writes.push(reservation);
+        self.writes.push(GrainBatchOperation::Allocate(reservation));
 
         Ok(id)
+    }
+
+    pub fn archive(&mut self, grain_id: GrainId) -> io::Result<()> {
+        let count = self.database.archive(grain_id)?;
+
+        self.writes
+            .push(GrainBatchOperation::Archive { grain_id, count });
+
+        Ok(())
     }
 
     pub fn commit(mut self) -> io::Result<BatchId> {
@@ -81,7 +90,13 @@ where
     fn drop(&mut self) {
         if !self.writes.is_empty() {
             self.database
-                .forget_reservations(self.writes.drain(..))
+                .forget_reservations(self.writes.drain(..).filter_map(|op| {
+                    if let GrainBatchOperation::Allocate(reservation) = op {
+                        Some(reservation)
+                    } else {
+                        None
+                    }
+                }))
                 .unwrap();
         }
     }
