@@ -10,7 +10,7 @@ use bitvec::prelude::BitVec;
 use crc::{Crc, CRC_32_MPEG_2};
 
 use crate::{
-    io::{self, ext::ToIoResult, iobuffer::IoBufferExt},
+    io::{self, ext::ToIoResult},
     utils::Multiples,
 };
 
@@ -63,7 +63,6 @@ impl Header {
     pub fn write_to<File: io::File>(
         &self,
         offset: u64,
-        write_full_page: bool,
         file: &mut File,
         scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
@@ -89,14 +88,7 @@ impl Header {
         let crc = crc(&buffer[4..length]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
 
-        let (result, buffer) = file.write_all(
-            if write_full_page {
-                buffer.io()
-            } else {
-                buffer.io_slice(..length)
-            },
-            offset,
-        );
+        let (result, buffer) = file.write_all(buffer, offset);
         *scratch = buffer;
         result
     }
@@ -302,8 +294,13 @@ pub struct StratumIndex {
 
 impl StratumIndex {
     #[must_use]
+    pub const fn grain_map_pages(&self) -> u64 {
+        2_u64.pow(self.grain_count_exp as u32)
+    }
+
+    #[must_use]
     pub const fn grains_per_map(&self) -> u64 {
-        2_u64.pow(self.grain_count_exp as u32) * GrainMapPage::GRAINS_U64
+        self.grain_map_pages() * GrainMapPage::GRAINS_U64
     }
 
     #[must_use]
@@ -313,7 +310,12 @@ impl StratumIndex {
 
     #[must_use]
     pub fn header_length(&self) -> u64 {
-        GrainMap::header_length_for_grain_count(self.grains_per_map()) * 2
+        GrainMap::header_length_for_grain_count(self.grains_per_map())
+    }
+
+    #[must_use]
+    pub fn total_header_length(&self) -> u64 {
+        self.header_length() * 2
     }
 
     #[must_use]
@@ -327,7 +329,7 @@ impl StratumIndex {
 
     #[must_use]
     pub fn grain_map_data_offset(&self) -> u64 {
-        self.header_length() + u64::from(self.grain_map_count) * PAGE_SIZE_U64 * 2
+        self.total_header_length() + u64::from(self.grain_map_count) * PAGE_SIZE_U64 * 2
     }
 }
 

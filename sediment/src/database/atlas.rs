@@ -71,7 +71,7 @@ impl Atlas {
                     allocated_grains,
                     grain_length: stratum_index.grain_length(),
                     grains_per_map: stratum_index.grains_per_map(),
-                    grain_map_header_length: stratum_index.header_length(),
+                    grain_map_header_length: stratum_index.total_header_length(),
                     grain_maps,
                 });
             }
@@ -283,7 +283,7 @@ impl Atlas {
                     offset: stratum.grain_map_location,
                     allocations,
                 }],
-                grain_map_header_length: stratum.header_length(),
+                grain_map_header_length: stratum.total_header_length(),
             });
             basin.header.strata.push(stratum);
             return Ok(grain_id);

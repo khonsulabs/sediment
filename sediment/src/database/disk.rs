@@ -32,8 +32,8 @@ impl DiskState {
         let (first_header, second_header) = if file.is_empty()? {
             // Initialize the an empty database.
             let header = Header::default();
-            header.write_to(0, true, file, scratch)?;
-            header.write_to(PAGE_SIZE_U64, true, file, scratch)?;
+            header.write_to(0, file, scratch)?;
+            header.write_to(PAGE_SIZE_U64, file, scratch)?;
             file.synchronize()?;
             (Ok(header.clone()), Ok(header))
         } else {
@@ -77,7 +77,7 @@ impl DiskState {
                 }) {
 
                     Ok((mut state, log, file_allocations)) => {
-                        state.overwrite_rolled_back_commit( &log, file, scratch)?;
+                        state.overwrite_rolled_back_commit(file, scratch, page_cache)?;
 
                         Ok(RecoveredState {
                         recovered_from_error: Some(first_header_error),
@@ -104,13 +104,67 @@ impl DiskState {
     /// know if we have a valid log entry. The easiest solution is to validate
     /// each header, and if any fail to parse or reference a batch ID greater
     /// than the current state, we overwrite the bad copy with the current copy.
+    ///
+    /// The current implementation is dumb and overwrites more data than
+    /// neccessary -- it doesn't perform the check in the previous paragraph,
+    /// instead opting to overwrite all inactive headers. Despite this, this
+    /// approach will likely be good enough for a long time, as there are
+    /// benefits to doing this overwrite: It helps protect against bit rot for
+    /// the pages that aren't being updated on a regular basis.
     fn overwrite_rolled_back_commit<File: io::File>(
         &mut self,
-        log: &CommitLog,
         file: &mut File,
         scratch: &mut Vec<u8>,
+        page_cache: &PageCache,
     ) -> io::Result<()> {
-        todo!()
+        self.header.write_to(
+            if self.first_header_is_current {
+                PAGE_SIZE_U64
+            } else {
+                0
+            },
+            file,
+            scratch,
+        )?;
+
+        for (basin_index, basin) in self.basins.iter().enumerate() {
+            basin.header.write_to(
+                self.header.basins[basin_index].file_offset
+                    + if basin.first_is_current {
+                        PAGE_SIZE_U64
+                    } else {
+                        0
+                    },
+                file,
+                scratch,
+            )?;
+
+            for (stratum_index, stratum) in basin.strata.iter().enumerate() {
+                for grain_map in &stratum.grain_maps {
+                    grain_map.map.write_to(
+                        basin.header.strata[stratum_index].grain_map_location
+                            + if basin.first_is_current {
+                                basin.header.strata[stratum_index].header_length()
+                            } else {
+                                0
+                            },
+                        file,
+                        scratch,
+                    )?;
+
+                    for page in 0..basin.header.strata[stratum_index].grain_map_pages() {
+                        let offset = basin.header.strata[stratum_index].grain_map_location
+                            + basin.header.strata[stratum_index].total_header_length()
+                            + PAGE_SIZE_U64 * 2 * page;
+                        let mut loaded_page =
+                            page_cache.fetch(offset, self.header.batch, file, scratch)?;
+                        loaded_page.write_to(offset, self.header.batch, file, scratch)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn load_from_header<File: io::File>(
@@ -353,8 +407,9 @@ impl DiskState {
         let grain_map_page_index = grain_map_local_index / GrainMapPage::GRAINS_U64;
         let local_grain_index = grain_map_local_index % GrainMapPage::GRAINS_U64;
         let grain_map_offset = grain_map.offset;
-        let page_offset =
-            grain_map_offset + stratum_info.header_length() + PAGE_SIZE_U64 * grain_map_page_index;
+        let page_offset = grain_map_offset
+            + stratum_info.total_header_length()
+            + PAGE_SIZE_U64 * grain_map_page_index;
         let grain_data_offset = grain_map_offset
             + stratum_info.grain_map_data_offset()
             + local_grain_index * u64::from(stratum_info.grain_length());

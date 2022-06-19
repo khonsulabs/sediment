@@ -146,7 +146,6 @@ impl Committer {
             } else {
                 0
             },
-            false,
             file,
             scratch,
         )?;
@@ -274,7 +273,7 @@ impl Committer {
 
             todo_if!(local_grain_index >= GrainMapPage::GRAINS, "need to handle multiple grain map pages https://github.com/khonsulabs/sediment/issues/11");
             let grain_map_page_offset =
-                stratum.grain_maps[grain_map_index].offset + stratum_info.header_length();
+                stratum.grain_maps[grain_map_index].offset + stratum_info.total_header_length();
             let loaded_grain_map_page = match modified_pages.last_mut() {
                 Some((offset, grain_map_page)) if offset == &grain_map_page_offset => {
                     grain_map_page
