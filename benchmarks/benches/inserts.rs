@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use sediment::{database::Database, io::fs::StdFileManager};
+use sediment::{
+    database::Database,
+    io::{fs::StdFileManager, FileManager},
+};
 use timings::Timings;
 
 const ITERS: u128 = 1000;
@@ -8,7 +11,9 @@ const ITERS: u128 = 1000;
 fn main() {
     let (measurements, stats) = Timings::new();
 
-    measure_sediment(&measurements);
+    measure_sediment::<StdFileManager>(&measurements);
+    #[cfg(feature = "iouring")]
+    measure_sediment::<sediment::io::uring::UringFileManager>(&measurements);
     #[cfg(feature = "marble")]
     marble::measure(&measurements);
     measure_sqlite(&measurements);
@@ -19,7 +24,17 @@ fn main() {
     timings::print_table_summaries(&stats).unwrap();
 }
 
-fn measure_sediment(measurements: &Timings<&'static str>) {
+fn measure_sediment<Manager: FileManager>(measurements: &Timings<&'static str>) {
+    let name = match std::any::type_name::<Manager>()
+        .rsplit_once("::")
+        .unwrap()
+        .1
+    {
+        "StdFileManager" => "std",
+        "UringFileManager" => "uring",
+        _ => panic!("unknown manager"),
+    };
+
     let path = Path::new(".bench-suite.sediment");
     if path.exists() {
         std::fs::remove_file(path).unwrap();
@@ -27,10 +42,9 @@ fn measure_sediment(measurements: &Timings<&'static str>) {
 
     let sediment = Database::<StdFileManager>::open(path).unwrap();
 
-    let data = vec![0; 4096];
-    for _ in 0_u128..ITERS {
-        let measurement = measurements.begin("sediment", "insert 16b");
-        sediment.write(&data).unwrap();
+    for i in 0_u128..ITERS {
+        let measurement = measurements.begin(format!("sediment-{name}"), "insert 16b");
+        sediment.write(&i.to_le_bytes()).unwrap();
         measurement.finish();
     }
 

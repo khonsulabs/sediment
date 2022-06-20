@@ -6,6 +6,22 @@ pub struct IoBuffer {
     pub range: Option<Range<usize>>,
 }
 
+impl IoBuffer {
+    pub fn advance_by(&mut self, bytes: usize) {
+        self.range = match &self.range {
+            Some(range) => {
+                let start = range.start.saturating_add(bytes).min(range.end);
+                Some(start..range.end)
+            }
+            None => {
+                let end = self.buffer.len();
+                let start = bytes.min(end);
+                Some(start..end)
+            }
+        };
+    }
+}
+
 impl From<Vec<u8>> for IoBuffer {
     fn from(buffer: Vec<u8>) -> Self {
         Self {

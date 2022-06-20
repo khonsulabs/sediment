@@ -5,15 +5,13 @@ use std::{
 
 pub use io::Result;
 
-use crate::io::{
-    iobuffer::{IoBuffer, IoBufferExt},
-    paths::PathId,
-};
+use crate::io::{iobuffer::IoBuffer, paths::PathId};
 
 pub mod fs;
 pub mod iobuffer;
 pub mod memory;
 pub mod paths;
+#[cfg(feature = "iouring")]
 pub mod uring;
 
 pub mod any;
@@ -39,53 +37,9 @@ pub trait File: WriteIoBuffer {
         self.len().map(|len| len == 0)
     }
 
-    fn read_at(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> BufferResult<usize>;
-    fn read_exact(&mut self, buffer: impl Into<IoBuffer>, mut position: u64) -> BufferResult<()> {
-        let buffer = buffer.into();
-        let (mut start, end) = buffer.range.clone().map_or_else(
-            || (0, buffer.buffer.len()),
-            |range| (range.start, range.end),
-        );
-        let mut buffer = buffer.buffer;
-        while start < end {
-            buffer = match self.read_at(buffer.io_slice(start..end), position) {
-                (Ok(bytes_read), original_buffer) if bytes_read == 0 => {
-                    return (
-                        Err(std::io::Error::from(ErrorKind::UnexpectedEof)),
-                        original_buffer,
-                    );
-                }
-                (Ok(bytes_read), original_buffer) => {
-                    start += bytes_read;
-                    position += u64::try_from(bytes_read).unwrap();
-                    original_buffer
-                }
-                (Err(other), original_buffer) => return (Err(other), original_buffer),
-            };
-        }
-        (Ok(()), buffer)
-    }
+    fn read_exact(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> BufferResult<()>;
 
-    fn write_at(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> BufferResult<usize>;
-    fn write_all(&mut self, buffer: impl Into<IoBuffer>, mut position: u64) -> BufferResult<()> {
-        let buffer = buffer.into();
-        let (mut start, end) = buffer.range.clone().map_or_else(
-            || (0, buffer.buffer.len()),
-            |range| (range.start, range.end),
-        );
-        let mut buffer = buffer.buffer;
-        while start < end {
-            buffer = match self.write_at(buffer.io_slice(start..end), position) {
-                (Ok(bytes_written), original_buffer) => {
-                    start += bytes_written;
-                    position += u64::try_from(bytes_written).unwrap();
-                    original_buffer
-                }
-                (Err(other), original_buffer) => return (Err(other), original_buffer),
-            };
-        }
-        (Ok(()), buffer)
-    }
+    fn write_all(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> BufferResult<()>;
 
     fn synchronize(&mut self) -> io::Result<()>;
     fn set_length(&mut self, new_length: u64) -> io::Result<()>;
@@ -104,6 +58,14 @@ pub trait AsyncFileWriter: WriteIoBuffer {
 }
 
 pub type BufferResult<T> = (io::Result<T>, Vec<u8>);
+
+#[derive(Debug)]
+pub struct AsyncOpParams {
+    path: PathId,
+    position: u64,
+    buffer: IoBuffer,
+    result_sender: flume::Sender<BufferResult<()>>,
+}
 
 #[cfg(test)]
 #[macro_export]
@@ -153,6 +115,12 @@ macro_rules! io_test {
             fn memory() {
                 test::<MemoryFileManager>();
             }
+
+            #[test]
+            #[cfg(feature = "iouring")]
+            fn uring() {
+                test::<$crate::io::uring::UringFileManager>();
+            }
         }
     };
 }
@@ -167,33 +135,28 @@ io_test!(basics, {
     let path = manager.resolve_path(unique_file_path::<Manager>());
     let mut file = manager.write(&path).unwrap();
     let data = b"hello, world".to_vec();
-    let (result, data) = file.write_at(data, 0);
-    let bytes_written = result.unwrap();
-    assert_eq!(bytes_written, data.len());
+    let (result, _) = file.write_all(data, 0);
+    result.unwrap();
     file.synchronize().unwrap();
 
     // Test overwriting.
     let data = b"new world".to_vec();
     // Replace "worl" with "new " (Overwrite without extend)
-    let (result, data) = file.write_at(data.io_slice(..4), 7);
-    let bytes_written = result.unwrap();
-    assert_eq!(bytes_written, 4);
+    let (result, data) = file.write_all(data.io_slice(..4), 7);
+    result.unwrap();
 
     // Replace final "d" with "new world" (Overwrite with extend)
-    let (result, data) = file.write_at(data, 11);
-    let bytes_written = result.unwrap();
-    assert_eq!(bytes_written, data.len());
+    let (result, _) = file.write_all(data, 11);
+    result.unwrap();
     drop(file);
 
     let expected_result = b"hello, new new world";
     let mut file = manager.read(&path).unwrap();
     let buffer = vec![0; expected_result.len()];
-    let (result, buffer) = file.read_at(buffer.io_slice(..4), 0);
-    let bytes_read = result.unwrap();
-    assert_eq!(bytes_read, 4);
-    let (result, buffer) = file.read_at(buffer.io_slice(4..expected_result.len()), 4);
-    let bytes_read = result.unwrap();
-    assert_eq!(bytes_read, expected_result.len() - 4);
+    let (result, buffer) = file.read_exact(buffer.io_slice(..4), 0);
+    result.unwrap();
+    let (result, buffer) = file.read_exact(buffer.io_slice(4..expected_result.len()), 4);
+    result.unwrap();
     assert_eq!(buffer, expected_result);
     drop(file);
 

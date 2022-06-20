@@ -11,13 +11,13 @@ use crate::io::{
     self,
     iobuffer::IoBuffer,
     paths::{PathId, PathIds},
-    AsyncFileWriter, BufferResult, File, FileManager, WriteIoBuffer,
+    AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, WriteIoBuffer,
 };
 
 #[derive(Default, Debug, Clone)]
 pub struct StdFileManager {
     path_ids: PathIds,
-    thread_pool: Arc<Mutex<Option<flume::Sender<AsyncWrite>>>>,
+    thread_pool: Arc<Mutex<Option<flume::Sender<AsyncOpParams>>>>,
 }
 
 impl FileManager for StdFileManager {
@@ -79,11 +79,11 @@ impl File for StdFile {
         self.file.metadata().map(|metadata| metadata.len())
     }
 
-    fn read_at(
+    fn read_exact(
         &mut self,
         buffer: impl Into<super::iobuffer::IoBuffer>,
         position: u64,
-    ) -> BufferResult<usize> {
+    ) -> BufferResult<()> {
         let mut buffer = buffer.into();
         if position != self.location {
             if let Err(err) = self.file.seek(SeekFrom::Start(position)) {
@@ -92,21 +92,25 @@ impl File for StdFile {
             self.location = position;
         }
 
-        match self.file.read(&mut buffer) {
-            Ok(bytes_read) => {
-                self.location += u64::try_from(bytes_read).unwrap();
-                (Ok(bytes_read), buffer.buffer)
+        while !buffer.is_empty() {
+            match self.file.read(&mut buffer) {
+                Ok(bytes_read) => {
+                    self.location += u64::try_from(bytes_read).unwrap();
+                    buffer.advance_by(bytes_read);
+                }
+                Err(err) => return (Err(err), buffer.buffer),
             }
-            Err(err) => (Err(err), buffer.buffer),
         }
+
+        (Ok(()), buffer.buffer)
     }
 
-    fn write_at(
+    fn write_all(
         &mut self,
         buffer: impl Into<super::iobuffer::IoBuffer>,
         position: u64,
-    ) -> BufferResult<usize> {
-        let buffer = buffer.into();
+    ) -> BufferResult<()> {
+        let mut buffer = buffer.into();
         if position != self.location {
             if let Err(err) = self.file.seek(SeekFrom::Start(position)) {
                 return (Err(err), buffer.buffer);
@@ -114,13 +118,17 @@ impl File for StdFile {
             self.location = position;
         }
 
-        match self.file.write(&buffer) {
-            Ok(bytes_written) => {
-                self.location += u64::try_from(bytes_written).unwrap();
-                (Ok(bytes_written), buffer.buffer)
+        while !buffer.is_empty() {
+            match self.file.write(&buffer) {
+                Ok(bytes_written) => {
+                    self.location += u64::try_from(bytes_written).unwrap();
+                    buffer.advance_by(bytes_written);
+                }
+                Err(err) => return (Err(err), buffer.buffer),
             }
-            Err(err) => (Err(err), buffer.buffer),
         }
+
+        (Ok(()), buffer.buffer)
     }
 
     #[cfg(all(
@@ -172,9 +180,9 @@ impl WriteIoBuffer for StdFile {
 #[derive(Debug)]
 pub struct StdAsyncFileWriter {
     path: PathId,
-    op_sender: flume::Sender<AsyncWrite>,
-    result_sender: flume::Sender<io::Result<()>>,
-    result_receiver: flume::Receiver<io::Result<()>>,
+    op_sender: flume::Sender<AsyncOpParams>,
+    result_sender: flume::Sender<BufferResult<()>>,
+    result_receiver: flume::Receiver<BufferResult<()>>,
     operations_sent: usize,
 }
 
@@ -187,7 +195,7 @@ impl AsyncFileWriter for StdAsyncFileWriter {
         position: u64,
     ) -> std::io::Result<()> {
         self.op_sender
-            .send(AsyncWrite {
+            .send(AsyncOpParams {
                 path: self.path.clone(),
                 buffer: buffer.into(),
                 result_sender: self.result_sender.clone(),
@@ -200,9 +208,11 @@ impl AsyncFileWriter for StdAsyncFileWriter {
 
     fn wait(&mut self) -> std::io::Result<()> {
         for _ in 0..self.operations_sent {
-            self.result_receiver
+            let (result, _) = self
+                .result_receiver
                 .recv()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))??;
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
+            result?;
         }
         Ok(())
     }
@@ -218,17 +228,9 @@ impl WriteIoBuffer for StdAsyncFileWriter {
     }
 }
 
-#[derive(Debug)]
-struct AsyncWrite {
-    path: PathId,
-    position: u64,
-    buffer: IoBuffer,
-    result_sender: flume::Sender<io::Result<()>>,
-}
-
 fn spawn_async_writer(
     manager: StdFileManager,
-    op_receiver: flume::Receiver<AsyncWrite>,
+    op_receiver: flume::Receiver<AsyncOpParams>,
     additional_thread_limit: usize,
 ) {
     std::thread::spawn(move || async_writer(&manager, &op_receiver, additional_thread_limit));
@@ -236,7 +238,7 @@ fn spawn_async_writer(
 
 fn async_writer(
     manager: &StdFileManager,
-    op_receiver: &flume::Receiver<AsyncWrite>,
+    op_receiver: &flume::Receiver<AsyncOpParams>,
     additional_thread_limit: usize,
 ) {
     let mut spawned_additional_thread = additional_thread_limit == 0;
@@ -260,8 +262,10 @@ fn async_write(
     path: &PathId,
     buffer: IoBuffer,
     position: u64,
-) -> io::Result<()> {
-    let mut file = manager.write(path)?;
-    let (result, _) = file.write_all(buffer, position);
-    result
+) -> BufferResult<()> {
+    let mut file = match manager.write(path) {
+        Ok(file) => file,
+        Err(err) => return (Err(err), buffer.buffer),
+    };
+    file.write_all(buffer, position)
 }

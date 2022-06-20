@@ -20,6 +20,7 @@ test-util = ["arbitrary"]
 # Enabling this feature will switch Sediment from using `F_FULLFSYNC` to
 # `F_BARRIERFSYNC`.
 fbarrier-fsync = ["libc"]
+iouring = ["tokio-uring", "tokio", "futures-util"]
 
 [dependencies]
 lrumap = { git = "https://github.com/khonsulabs/lrumap.git", branch = "main" }
@@ -29,6 +30,9 @@ crc = "3.0.0"
 libc = { version = "0.2.126", optional = true }
 num-traits = "0.2"
 bitvec = "1.0.0"
+tokio-uring = { version = "0.3.0", optional = true }
+tokio = { version = "1.19.2", features = ["rt"], optional = true }
+futures-util = { version = "0.3", optional = true }
 
 arbitrary = { version = "1.1.0", optional = true }
 

@@ -21,25 +21,25 @@ impl io::File for AnyFile {
         }
     }
 
-    fn read_at(
+    fn read_exact(
         &mut self,
         buffer: impl Into<io::iobuffer::IoBuffer>,
         position: u64,
-    ) -> io::BufferResult<usize> {
+    ) -> io::BufferResult<()> {
         match self {
-            AnyFile::Std(file) => file.read_at(buffer, position),
-            AnyFile::Memory(file) => file.read_at(buffer, position),
+            AnyFile::Std(file) => file.read_exact(buffer, position),
+            AnyFile::Memory(file) => file.read_exact(buffer, position),
         }
     }
 
-    fn write_at(
+    fn write_all(
         &mut self,
         buffer: impl Into<io::iobuffer::IoBuffer>,
         position: u64,
-    ) -> io::BufferResult<usize> {
+    ) -> io::BufferResult<()> {
         match self {
-            AnyFile::Std(file) => file.write_at(buffer, position),
-            AnyFile::Memory(file) => file.write_at(buffer, position),
+            AnyFile::Std(file) => file.write_all(buffer, position),
+            AnyFile::Memory(file) => file.write_all(buffer, position),
         }
     }
 

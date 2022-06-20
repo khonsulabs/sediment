@@ -48,11 +48,11 @@ impl File for MemoryFile {
         Ok(u64::try_from(file.len()).unwrap())
     }
 
-    fn read_at(
+    fn read_exact(
         &mut self,
         buffer: impl Into<super::iobuffer::IoBuffer>,
         position: u64,
-    ) -> super::BufferResult<usize> {
+    ) -> super::BufferResult<()> {
         let file = self.0.read();
         let mut buffer = buffer.into();
         let position = match usize::try_from(position) {
@@ -66,21 +66,21 @@ impl File for MemoryFile {
         };
         let length_after_position = file.len().saturating_sub(position);
         if length_after_position == 0 {
-            (Ok(0), buffer.buffer)
+            (Ok(()), buffer.buffer)
         } else {
             let buffer_slice = &mut *buffer;
             let bytes_to_read = buffer_slice.len().min(length_after_position);
             buffer_slice[..bytes_to_read]
                 .copy_from_slice(&file[position..position + bytes_to_read]);
-            (Ok(bytes_to_read), buffer.buffer)
+            (Ok(()), buffer.buffer)
         }
     }
 
-    fn write_at(
+    fn write_all(
         &mut self,
         buffer: impl Into<super::iobuffer::IoBuffer>,
         position: u64,
-    ) -> super::BufferResult<usize> {
+    ) -> super::BufferResult<()> {
         let mut file = self.0.write();
         let buffer = buffer.into();
         let position = match usize::try_from(position) {
@@ -94,7 +94,6 @@ impl File for MemoryFile {
         };
         let buffer_slice = &*buffer;
         let length_after_position = file.len().saturating_sub(position);
-        let bytes_written = buffer_slice.len();
         if length_after_position < buffer_slice.len() {
             // The wrote will extend past the buffer
             file.truncate(position);
@@ -104,7 +103,7 @@ impl File for MemoryFile {
             file[position..position + buffer_slice.len()].copy_from_slice(buffer_slice);
         }
 
-        (Ok(bytes_written), buffer.buffer)
+        (Ok(()), buffer.buffer)
     }
 
     fn synchronize(&mut self) -> io::Result<()> {
