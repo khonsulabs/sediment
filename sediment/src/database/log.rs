@@ -196,7 +196,10 @@ impl CommitLog {
         self.head_insert_index += 1;
     }
 
-    pub fn snapshot<File: io::File>(&self, database: &Database<File>) -> CommitLogSnapshot {
+    pub fn snapshot<Manager: io::FileManager>(
+        &self,
+        database: &Database<Manager>,
+    ) -> CommitLogSnapshot {
         CommitLogSnapshot::new(
             database.checkpoint().next()..=database.current_batch(),
             self.pages.iter().map(|page| &page.page),

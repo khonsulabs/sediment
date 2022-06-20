@@ -11,7 +11,7 @@ pub struct Configuration<Manager, Path, Recovered>
 where
     Manager: io::FileManager,
     Path: AsRef<std::path::Path>,
-    Recovered: RecoveryCallback<Manager::File>,
+    Recovered: RecoveryCallback<Manager>,
 {
     manager: Manager,
     path: Path,
@@ -22,10 +22,10 @@ impl<Manager, Path, Recovered> Configuration<Manager, Path, Recovered>
 where
     Manager: io::FileManager,
     Path: AsRef<path::Path>,
-    Recovered: RecoveryCallback<Manager::File>,
+    Recovered: RecoveryCallback<Manager>,
 {
-    pub fn open(self) -> io::Result<Database<Manager::File>> {
-        Database::new(self.path, &self.manager, self.recovered_callback)
+    pub fn open(self) -> io::Result<Database<Manager>> {
+        Database::new(self.path, self.manager, self.recovered_callback)
     }
 }
 
@@ -76,7 +76,7 @@ where
         recovered: Recovered,
     ) -> Configuration<Manager, Path, Recovered>
     where
-        Recovered: RecoveryCallback<Manager::File>,
+        Recovered: RecoveryCallback<Manager>,
     {
         Configuration {
             manager: self.manager,
@@ -86,22 +86,22 @@ where
     }
 }
 
-pub trait RecoveryCallback<File> {
-    fn recovered(self, database: &mut Database<File>, error: std::io::Error) -> io::Result<()>;
+pub trait RecoveryCallback<Manager> {
+    fn recovered(self, database: &mut Database<Manager>, error: std::io::Error) -> io::Result<()>;
 }
 
-impl<File> RecoveryCallback<File> for () {
-    fn recovered(self, _database: &mut Database<File>, error: std::io::Error) -> io::Result<()> {
+impl<Manager> RecoveryCallback<Manager> for () {
+    fn recovered(self, _database: &mut Database<Manager>, error: std::io::Error) -> io::Result<()> {
         eprintln!("Database recovered from a failure to read the most recent commit: {error}");
         Ok(())
     }
 }
 
-impl<T, File> RecoveryCallback<File> for T
+impl<T, Manager> RecoveryCallback<Manager> for T
 where
-    T: FnOnce(&mut Database<File>, std::io::Error) -> io::Result<()>,
+    T: FnOnce(&mut Database<Manager>, std::io::Error) -> io::Result<()>,
 {
-    fn recovered(self, database: &mut Database<File>, error: std::io::Error) -> io::Result<()> {
+    fn recovered(self, database: &mut Database<Manager>, error: std::io::Error) -> io::Result<()> {
         self(database, error)
     }
 }

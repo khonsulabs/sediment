@@ -21,7 +21,7 @@ pub mod ext;
 #[cfg(target_os = "linux")]
 mod linux;
 
-pub trait FileManager: Default {
+pub trait FileManager: Default + Clone {
     type File: File<Manager = Self>;
     fn resolve_path(&self, path: impl AsRef<Path>) -> PathId;
 

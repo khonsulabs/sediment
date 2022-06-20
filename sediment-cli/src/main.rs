@@ -7,10 +7,7 @@ use rustyline::Editor;
 use sediment::{
     database::Database,
     format::GrainId,
-    io::{
-        self,
-        any::{AnyFile, AnyFileManager},
-    },
+    io::{self, any::AnyFileManager},
 };
 
 #[derive(Parser, Debug)]
@@ -44,10 +41,10 @@ enum SingleCommand {
 fn main() {
     let args = Args::parse();
     let mut db = if let Some(path) = &args.database_path {
-        Database::open_with_manager(path, &AnyFileManager::new_file()).unwrap()
+        Database::open_with_manager(path, AnyFileManager::new_file()).unwrap()
     } else {
         println!("Using memory database with no persistence.");
-        Database::open_with_manager("db", &AnyFileManager::new_memory()).unwrap()
+        Database::open_with_manager("db", AnyFileManager::new_memory()).unwrap()
     };
 
     match args.command {
@@ -56,7 +53,7 @@ fn main() {
     }
 }
 
-fn repl(mut db: Database<AnyFile>) {
+fn repl(mut db: Database<AnyFileManager>) {
     let mut rl = Editor::<()>::new();
 
     while let Ok(line) = rl.readline("> ") {
@@ -83,7 +80,7 @@ fn repl(mut db: Database<AnyFile>) {
 }
 
 impl SingleCommand {
-    fn execute_on(self, database: &mut Database<AnyFile>) -> io::Result<()> {
+    fn execute_on(self, database: &mut Database<AnyFileManager>) -> io::Result<()> {
         match self {
             SingleCommand::Get { grain_id } => {
                 let data = database.read(grain_id)?;

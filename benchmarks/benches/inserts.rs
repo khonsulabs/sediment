@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use sediment::{database::Database, io::fs::StdFile};
+use sediment::{database::Database, io::fs::StdFileManager};
 use timings::Timings;
 
 fn main() {
@@ -23,7 +23,7 @@ fn measure_sediment(measurements: &Timings<&'static str>) {
         std::fs::remove_file(path).unwrap();
     }
 
-    let mut sediment = Database::<StdFile>::open(path).unwrap();
+    let sediment = Database::<StdFileManager>::open(path).unwrap();
 
     let data = vec![0; 4096];
     for _ in 0_u128..5 {

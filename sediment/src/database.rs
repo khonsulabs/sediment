@@ -22,7 +22,7 @@ use crate::{
         page_cache::PageCache,
     },
     format::{crc, BatchId, CommitLogEntry, GrainId, LogEntryIndex},
-    io::{self, ext::ToIoResult, FileManager},
+    io::{self, ext::ToIoResult, paths::PathId, File},
 };
 
 mod allocations;
@@ -42,26 +42,27 @@ pub use self::{
 };
 
 #[derive(Debug)]
-pub struct Database<File> {
-    file: File,
+pub struct Database<Manager> {
+    path: PathId,
+    manager: Manager,
     scratch: Vec<u8>,
     state: Arc<DatabaseState>,
 }
 
-impl<File> Database<File>
+impl<Manager> Database<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
     fn new<Recovered>(
         path: impl AsRef<Path>,
-        manager: &File::Manager,
+        manager: Manager,
         recovered_callback: Recovered,
     ) -> io::Result<Self>
     where
-        Recovered: RecoveryCallback<File>,
+        Recovered: RecoveryCallback<Manager>,
     {
-        let path_id = manager.resolve_path(path);
-        let mut file = manager.write(&path_id)?;
+        let path = manager.resolve_path(path);
+        let mut file = manager.write(&path)?;
 
         let mut scratch = Vec::new();
         let grain_map_page_cache = PageCache::default();
@@ -73,7 +74,8 @@ where
             .most_recent_entry()
             .and_then(|(_, index)| index.embedded_header);
         let mut database = Self {
-            file,
+            path,
+            manager,
             scratch,
             state: Arc::new(DatabaseState {
                 current_batch: AtomicU64::new(state.disk_state.header.batch.0),
@@ -97,12 +99,12 @@ where
 
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self>
     where
-        File::Manager: Default,
+        Manager: Default,
     {
-        Self::open_with_manager(path, &<File::Manager as Default>::default())
+        Self::open_with_manager(path, Manager::default())
     }
 
-    pub fn open_with_manager(path: impl AsRef<Path>, manager: &File::Manager) -> io::Result<Self> {
+    pub fn open_with_manager(path: impl AsRef<Path>, manager: Manager) -> io::Result<Self> {
         Self::new(path, manager, ())
     }
 
@@ -149,17 +151,18 @@ where
     }
 
     /// Create a new session for writing data to this database.
-    pub fn new_session(&mut self) -> WriteSession<'_, File> {
-        WriteSession::new(self)
+    pub fn new_session(&self) -> WriteSession<Manager> {
+        WriteSession::new(self.clone())
     }
 
     pub fn read(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
         let mut atlas = self.state.atlas.lock();
+        let mut file = self.manager.read(&self.path)?;
         let info = match atlas.grain_allocation_info(
             grain,
             self.current_batch(),
             &self.state.grain_map_page_cache,
-            &mut self.file,
+            &mut file,
             &mut self.scratch,
         )? {
             Some(info) if info.allocated_length == 0 => return Ok(None),
@@ -169,12 +172,12 @@ where
         drop(atlas);
 
         let data = vec![0; usize::try_from(info.allocated_length).to_io()?];
-        let (result, data) = self.file.read_exact(data, info.offset);
+        let (result, data) = file.read_exact(data, info.offset);
         result?;
         Ok(Some(GrainData::from_bytes(data)))
     }
 
-    pub fn write(&mut self, data: &[u8]) -> io::Result<GrainRecord> {
+    pub fn write(&self, data: &[u8]) -> io::Result<GrainRecord> {
         let mut session = self.new_session();
         let id = session.write(data)?;
         let batch = session.commit()?;
@@ -187,10 +190,11 @@ where
     }
 
     pub fn read_commit_log_entry(&mut self, entry: &LogEntryIndex) -> io::Result<CommitLogEntry> {
-        CommitLogEntry::load_from(entry, true, &mut self.file, &mut self.scratch)
+        let mut file = self.manager.read(&self.path)?;
+        CommitLogEntry::load_from(entry, true, &mut file, &mut self.scratch)
     }
 
-    pub fn checkpoint_to(&mut self, last_entry_to_remove: BatchId) -> io::Result<BatchId> {
+    pub fn checkpoint_to(&self, last_entry_to_remove: BatchId) -> io::Result<BatchId> {
         self.new_session()
             .commit_and_checkpoint(last_entry_to_remove)
     }
@@ -204,20 +208,22 @@ where
     /// While the data being written may be synced during another session's
     /// commit, the Stratum is not updated with the new information until the
     /// commit phase.
-    fn new_grain(&mut self, length: u32) -> io::Result<GrainReservation> {
+    fn new_grain(&self, length: u32) -> io::Result<GrainReservation> {
         let mut active_state = self.state.atlas.lock();
 
-        active_state.reserve_grain(length, &mut self.file, &self.state.file_allocations)
+        let mut file = self.manager.write(&self.path)?;
+        active_state.reserve_grain(length, &mut file, &self.state.file_allocations)
     }
 
     fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {
         let mut active_state = self.state.atlas.lock();
 
+        let mut file = self.manager.read(&self.path)?;
         let info = active_state.grain_allocation_info(
             grain_id,
             self.current_batch(),
             &self.state.grain_map_page_cache,
-            &mut self.file,
+            &mut file,
             &mut self.scratch,
         )?;
 
@@ -236,12 +242,13 @@ where
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<EmbeddedHeaderGuard>,
     ) -> io::Result<BatchId> {
+        let mut file = self.manager.write(&self.path)?;
         self.state.committer.commit(
             reservations,
             checkpoint_to,
             new_embedded_header,
             &self.state,
-            &mut self.file,
+            &mut file,
             &mut self.scratch,
         )
     }
@@ -253,6 +260,20 @@ where
         let mut active_state = self.state.atlas.lock();
 
         active_state.forget_reservations(reservations)
+    }
+}
+
+impl<Manager> Clone for Database<Manager>
+where
+    Manager: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            manager: self.manager.clone(),
+            scratch: Vec::new(),
+            state: self.state.clone(),
+        }
     }
 }
 
@@ -362,9 +383,9 @@ crate::io_test!(empty, {
     }
     let manager = Manager::default();
     // Create the database.
-    drop(Database::<Manager::File>::open_with_manager(&path, &manager).unwrap());
+    drop(Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap());
     // Test opening it again.
-    drop(Database::<Manager::File>::open_with_manager(&path, &manager).unwrap());
+    drop(Database::<Manager>::open_with_manager(&path, manager).unwrap());
     if path.exists() {
         std::fs::remove_file(&path).unwrap();
     }
@@ -378,7 +399,7 @@ crate::io_test!(basic_op, {
     }
     let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
     let mut session = db.new_session();
     let grain_id = session.write(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
@@ -390,7 +411,7 @@ crate::io_test!(basic_op, {
 
     // Reopen the database.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(&*grain_data, b"hello world");
@@ -404,7 +425,7 @@ crate::io_test!(basic_op, {
 
     // Reopen the database.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(&*grain_data, b"hello world");
@@ -421,7 +442,7 @@ crate::io_test!(basic_op, {
 
     // Reopen the database.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(&*grain_data, b"hello world");
@@ -446,7 +467,7 @@ crate::io_test!(basic_abort_reuse, {
     }
     let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
     let mut session = db.new_session();
     let first_grain_id = session.write(b"hello world").unwrap();
     drop(session);
@@ -470,7 +491,7 @@ crate::io_test!(multiple_strata, {
         std::fs::remove_file(&path).unwrap();
     }
     let manager = Manager::default();
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
 
     // This test makes assumptions about how the grain allocation strategy
     // works. Each grain currently has 8 additional bytes added to the data that
@@ -490,7 +511,7 @@ crate::io_test!(multiple_strata, {
     );
 
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
 
     let first_grain_data = db.read(first_grain_id).unwrap().unwrap();
     assert_eq!(&*first_grain_data, b"test");
@@ -518,14 +539,14 @@ crate::io_test!(multi_commits, {
             std::fs::remove_file(&path).unwrap();
         }
         let manager = Manager::default();
-        let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+        let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
         let mut grains = Vec::new();
         for value in 0..count {
             grains.push(db.write(&value.to_be_bytes()).unwrap());
         }
         drop(db);
 
-        let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+        let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
 
         // Verify all written data exists
         for (index, grain) in grains.into_iter().enumerate() {
@@ -556,12 +577,12 @@ crate::io_test!(commit_log, {
     // and then try to reload the database and insert again.
     let mut grains = Vec::new();
     for _ in 0..170 {
-        let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+        let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
         grains.push(db.write(b"test").unwrap());
         drop(db);
     }
 
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
     let snapshot_before_write = db.commit_log();
     assert_eq!(snapshot_before_write.len(), 170);
     grains.push(db.write(b"test").unwrap());
@@ -593,7 +614,7 @@ crate::io_test!(basic_rollback, {
     }
     let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
     let mut session = db.new_session();
     let grain_id = session.write(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
@@ -612,7 +633,7 @@ crate::io_test!(basic_rollback, {
 
     let mut was_recovered = false;
     let mut db = Configuration::new(manager, &path)
-        .when_recovered(|_db: &mut Database<Manager::File>, _err| {
+        .when_recovered(|_db: &mut Database<Manager>, _err| {
             was_recovered = true;
             Ok(())
         })
@@ -632,7 +653,7 @@ crate::io_test!(grain_lifecycle, {
     }
     let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
     let mut session = db.new_session();
     let grain_id = session.write(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
@@ -641,7 +662,7 @@ crate::io_test!(grain_lifecycle, {
 
     // Reopen the database.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
 
     // Archive the grain
     let mut session = db.new_session();
@@ -656,7 +677,7 @@ crate::io_test!(grain_lifecycle, {
 
     // Reopen the database.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
 
     let grain_data = db.read(grain_id).unwrap().unwrap();
     assert_eq!(&*grain_data, b"hello world");
@@ -667,7 +688,7 @@ crate::io_test!(grain_lifecycle, {
 
     // Reopen the database and verify it's still gone.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
     assert_eq!(db.read(grain_id).unwrap(), None);
 
     drop(db);
@@ -684,7 +705,7 @@ crate::io_test!(embedded_header, {
     }
     let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
     let mut session = db.new_session().updating_embedded_header();
     let grain_id = session.write(b"a header").unwrap();
     session.set_embedded_header(Some(grain_id)).unwrap();
@@ -695,7 +716,7 @@ crate::io_test!(embedded_header, {
 
     // Reopen the database.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
 
     assert_eq!(db.embedded_header(), Some(grain_id));
     let new_grain = db.write(b"another").unwrap();
@@ -705,7 +726,7 @@ crate::io_test!(embedded_header, {
 
     // Reopen the database and ensure the embedded header is still present.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
     assert_eq!(db.embedded_header(), Some(grain_id));
 
     // Update the header one more time
@@ -719,7 +740,7 @@ crate::io_test!(embedded_header, {
 
     // Reopen the database and ensure the embedded header is still present.
     drop(db);
-    let mut db = Database::<Manager::File>::open_with_manager(&path, &manager).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
     assert_eq!(db.embedded_header(), Some(new_grain.id));
 
     // Checkpoint the new header change, and verify the old grain is no longer readable.

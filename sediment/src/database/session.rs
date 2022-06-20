@@ -7,23 +7,23 @@ use crate::{
         Database,
     },
     format::{BatchId, GrainId, CRC},
-    io::{self, ext::ToIoResult, iobuffer::IoBufferExt},
+    io::{self, ext::ToIoResult, iobuffer::IoBufferExt, File},
 };
 
 #[derive(Debug)]
-pub struct WriteSession<'a, File>
+pub struct WriteSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
-    database: &'a mut Database<File>,
+    database: Database<Manager>,
     writes: Vec<GrainBatchOperation>,
 }
 
-impl<'a, File> WriteSession<'a, File>
+impl<Manager> WriteSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
-    pub(super) fn new(database: &'a mut Database<File>) -> Self {
+    pub(super) fn new(database: Database<Manager>) -> Self {
         Self {
             database,
             writes: Vec::new(),
@@ -34,7 +34,7 @@ where
     /// database will be able to acquire a `HeaderUpdateSession` at a time, the
     /// other sessions will block until they are able to acquire the lock.
     #[must_use]
-    pub fn updating_embedded_header(self) -> HeaderUpdateSession<'a, File> {
+    pub fn updating_embedded_header(self) -> HeaderUpdateSession<Manager> {
         HeaderUpdateSession {
             header_guard: self.database.state.embedded_header.lock(),
             session: self,
@@ -44,6 +44,7 @@ where
 
     pub fn write(&mut self, mut data: &[u8]) -> io::Result<GrainId> {
         let length = u32::try_from(data.len()).to_io()?;
+        let mut file = self.database.manager.write(&self.database.path)?;
         let mut reservation = self.database.new_grain(length)?;
         let mut crc = CRC.digest();
         crc.update(&length.to_le_bytes());
@@ -71,7 +72,7 @@ where
 
             let total_bytes_copied = slice.len();
 
-            let (result, buffer) = self.database.file.write_all(slice, write_at);
+            let (result, buffer) = file.write_all(slice, write_at);
             result?;
             scratch = buffer;
 
@@ -107,9 +108,9 @@ where
     }
 }
 
-impl<'a, File> Drop for WriteSession<'a, File>
+impl<Manager> Drop for WriteSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
     fn drop(&mut self) {
         if !self.writes.is_empty() {
@@ -127,18 +128,18 @@ where
 }
 
 #[derive(Debug)]
-pub struct HeaderUpdateSession<'a, File>
+pub struct HeaderUpdateSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
-    session: WriteSession<'a, File>,
+    session: WriteSession<Manager>,
     header_guard: EmbeddedHeaderGuard,
     new_embedded_header: EmbeddedHeaderUpdate,
 }
 
-impl<'a, File> HeaderUpdateSession<'a, File>
+impl<Manager> HeaderUpdateSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
     /// Returns the embedded header [`GrainId`], if one is present. This returns
     /// the current in-memory state of the value and may not be persisted to
@@ -217,20 +218,20 @@ where
     }
 }
 
-impl<'a, File> Deref for HeaderUpdateSession<'a, File>
+impl<Manager> Deref for HeaderUpdateSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
-    type Target = WriteSession<'a, File>;
+    type Target = WriteSession<Manager>;
 
     fn deref(&self) -> &Self::Target {
         &self.session
     }
 }
 
-impl<'a, File> DerefMut for HeaderUpdateSession<'a, File>
+impl<Manager> DerefMut for HeaderUpdateSession<Manager>
 where
-    File: io::File,
+    Manager: io::FileManager,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.session
