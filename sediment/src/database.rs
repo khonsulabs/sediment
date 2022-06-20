@@ -42,11 +42,13 @@ pub use self::{
 };
 
 #[derive(Debug)]
-pub struct Database<Manager> {
+pub struct Database<Manager>
+where
+    Manager: io::FileManager,
+{
     path: PathId,
-    manager: Manager,
     scratch: Vec<u8>,
-    state: Arc<DatabaseState>,
+    state: Arc<DatabaseState<Manager>>,
 }
 
 impl<Manager> Database<Manager>
@@ -75,9 +77,9 @@ where
             .and_then(|(_, index)| index.embedded_header);
         let mut database = Self {
             path,
-            manager,
             scratch,
             state: Arc::new(DatabaseState {
+                file_manager: manager,
                 current_batch: AtomicU64::new(state.disk_state.header.batch.0),
                 checkpoint: AtomicU64::new(state.disk_state.header.checkpoint.0),
                 atlas: Mutex::new(atlas),
@@ -108,20 +110,24 @@ where
         Self::new(path, manager, ())
     }
 
+    #[must_use]
     pub fn embedded_header(&self) -> Option<GrainId> {
         self.state.embedded_header.current()
     }
 
+    #[must_use]
     pub fn current_batch(&self) -> BatchId {
         // TODO does this need SeqCst?
         BatchId(self.state.current_batch.load(Ordering::SeqCst))
     }
 
+    #[must_use]
     pub fn checkpoint(&self) -> BatchId {
         // TODO does this need SeqCst?
         BatchId(self.state.checkpoint.load(Ordering::SeqCst))
     }
 
+    #[must_use]
     pub fn statistics(&self) -> Statistics {
         let allocations = self.state.file_allocations.statistics();
         let disk_state = self.state.disk_state.lock();
@@ -151,13 +157,14 @@ where
     }
 
     /// Create a new session for writing data to this database.
+    #[must_use]
     pub fn new_session(&self) -> WriteSession<Manager> {
         WriteSession::new(self.clone())
     }
 
     pub fn read(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
         let mut atlas = self.state.atlas.lock();
-        let mut file = self.manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.path)?;
         let info = match atlas.grain_allocation_info(
             grain,
             self.current_batch(),
@@ -184,13 +191,14 @@ where
         Ok(GrainRecord { id, batch })
     }
 
+    #[must_use]
     pub fn commit_log(&self) -> CommitLogSnapshot {
         let log = self.state.log.read();
         log.snapshot(self)
     }
 
     pub fn read_commit_log_entry(&mut self, entry: &LogEntryIndex) -> io::Result<CommitLogEntry> {
-        let mut file = self.manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.path)?;
         CommitLogEntry::load_from(entry, true, &mut file, &mut self.scratch)
     }
 
@@ -211,14 +219,14 @@ where
     fn new_grain(&self, length: u32) -> io::Result<GrainReservation> {
         let mut active_state = self.state.atlas.lock();
 
-        let mut file = self.manager.write(&self.path)?;
+        let mut file = self.state.file_manager.write(&self.path)?;
         active_state.reserve_grain(length, &mut file, &self.state.file_allocations)
     }
 
     fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {
         let mut active_state = self.state.atlas.lock();
 
-        let mut file = self.manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.path)?;
         let info = active_state.grain_allocation_info(
             grain_id,
             self.current_batch(),
@@ -242,13 +250,12 @@ where
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<EmbeddedHeaderGuard>,
     ) -> io::Result<BatchId> {
-        let mut file = self.manager.write(&self.path)?;
         self.state.committer.commit(
             reservations,
             checkpoint_to,
             new_embedded_header,
             &self.state,
-            &mut file,
+            &self.path,
             &mut self.scratch,
         )
     }
@@ -265,12 +272,11 @@ where
 
 impl<Manager> Clone for Database<Manager>
 where
-    Manager: Clone,
+    Manager: io::FileManager,
 {
     fn clone(&self) -> Self {
         Self {
             path: self.path.clone(),
-            manager: self.manager.clone(),
             scratch: Vec::new(),
             state: self.state.clone(),
         }
@@ -286,7 +292,11 @@ pub struct GrainReservation {
 }
 
 #[derive(Debug)]
-struct DatabaseState {
+struct DatabaseState<Manager>
+where
+    Manager: io::FileManager,
+{
+    file_manager: Manager,
     current_batch: AtomicU64,
     checkpoint: AtomicU64,
     atlas: Mutex<Atlas>,

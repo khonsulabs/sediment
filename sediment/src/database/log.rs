@@ -131,11 +131,11 @@ impl CommitLog {
             head_insert_index,
         })
     }
-    pub fn write_to<File: io::File>(
+    pub fn write_to<File: io::File, Writer: io::AsyncFileWriter>(
         &mut self,
         allocations: &FileAllocations,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        writer: &mut Writer,
     ) -> io::Result<()> {
         let last_index = self.pages.len() - 1;
         let mut last_page_offset = 0;
@@ -156,11 +156,9 @@ impl CommitLog {
                 };
 
                 page_state.page.previous_offset = last_page_offset;
-                page_state.page.serialize_into(scratch);
-                let buffer = std::mem::take(scratch);
-                let (result, buffer) = file.write_all(buffer, offset);
-                *scratch = buffer;
-                result?;
+                let mut buffer = Vec::new();
+                page_state.page.serialize_into(&mut buffer);
+                writer.write_all_at(buffer, offset)?;
 
                 offset
             } else {

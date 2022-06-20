@@ -86,11 +86,17 @@ where
     }
 }
 
-pub trait RecoveryCallback<Manager> {
+pub trait RecoveryCallback<Manager>
+where
+    Manager: io::FileManager,
+{
     fn recovered(self, database: &mut Database<Manager>, error: std::io::Error) -> io::Result<()>;
 }
 
-impl<Manager> RecoveryCallback<Manager> for () {
+impl<Manager> RecoveryCallback<Manager> for ()
+where
+    Manager: io::FileManager,
+{
     fn recovered(self, _database: &mut Database<Manager>, error: std::io::Error) -> io::Result<()> {
         eprintln!("Database recovered from a failure to read the most recent commit: {error}");
         Ok(())
@@ -99,6 +105,7 @@ impl<Manager> RecoveryCallback<Manager> for () {
 
 impl<T, Manager> RecoveryCallback<Manager> for T
 where
+    Manager: io::FileManager,
     T: FnOnce(&mut Database<Manager>, std::io::Error) -> io::Result<()>,
 {
     fn recovered(self, database: &mut Database<Manager>, error: std::io::Error) -> io::Result<()> {

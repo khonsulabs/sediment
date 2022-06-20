@@ -23,13 +23,16 @@ mod linux;
 
 pub trait FileManager: Default + Clone {
     type File: File<Manager = Self>;
+    type AsyncFile: AsyncFileWriter<Manager = Self>;
+
     fn resolve_path(&self, path: impl AsRef<Path>) -> PathId;
 
     fn read(&self, path: &PathId) -> io::Result<Self::File>;
     fn write(&self, path: &PathId) -> io::Result<Self::File>;
+    fn write_async(&self, path: &PathId) -> io::Result<Self::AsyncFile>;
 }
 
-pub trait File {
+pub trait File: WriteIoBuffer {
     type Manager: FileManager<File = Self>;
     fn len(&self) -> io::Result<u64>;
     fn is_empty(&self) -> io::Result<bool> {
@@ -88,6 +91,18 @@ pub trait File {
     fn set_length(&mut self, new_length: u64) -> io::Result<()>;
 }
 
+pub trait AsyncFileWriter: WriteIoBuffer {
+    type Manager: FileManager<AsyncFile = Self>;
+
+    fn background_write_all(
+        &mut self,
+        buffer: impl Into<IoBuffer>,
+        position: u64,
+    ) -> io::Result<()>;
+
+    fn wait(&mut self) -> io::Result<()>;
+}
+
 pub type BufferResult<T> = (io::Result<T>, Vec<u8>);
 
 #[cfg(test)]
@@ -140,6 +155,10 @@ macro_rules! io_test {
             }
         }
     };
+}
+
+pub trait WriteIoBuffer {
+    fn write_all_at(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> std::io::Result<()>;
 }
 
 #[cfg(test)]

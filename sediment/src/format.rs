@@ -168,15 +168,12 @@ pub struct Basin {
 }
 
 impl Basin {
-    pub fn write_to<File: io::File>(
+    pub fn write_to<File: io::WriteIoBuffer>(
         &self,
         offset: u64,
         file: &mut File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
-        let mut buffer = Vec::new();
-        std::mem::swap(&mut buffer, scratch);
-        buffer.resize(PAGE_SIZE, 0);
+        let mut buffer = vec![0; PAGE_SIZE];
 
         if self.strata.len() > 254 {
             return Err(io::invalid_data_error("too many strata"));
@@ -200,9 +197,7 @@ impl Basin {
         let crc = crc(&buffer[4..length]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
 
-        let (result, buffer) = file.write_all(buffer, offset);
-        *scratch = buffer;
-        result
+        file.write_all_at(buffer, offset)
     }
 
     pub fn deserialize_from(bytes: &[u8], verify_crc: bool) -> io::Result<Self> {
@@ -410,14 +405,12 @@ impl GrainMap {
         })
     }
 
-    pub fn write_to<File: io::File>(
+    pub fn write_to<File: io::WriteIoBuffer>(
         &self,
         offset: u64,
         file: &mut File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
-        let mut buffer = std::mem::take(scratch);
-        buffer.clear();
+        let mut buffer = Vec::with_capacity(PAGE_SIZE);
 
         buffer.extend(&[0; 4]); // Reserve space for CRC
         buffer.extend(self.written_at.to_le_bytes());
@@ -426,19 +419,15 @@ impl GrainMap {
         // Calculate the CRC of everything after the CRC
         let crc = crc(&buffer[4..]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
-        scratch.resize(
-            scratch
+        buffer.resize(
+            buffer
                 .len()
                 .round_to_multiple_of(PAGE_SIZE)
                 .expect("too large"),
             0,
         );
 
-        let (result, returned_buffer) = file.write_all(buffer, offset);
-        *scratch = returned_buffer;
-        result?;
-
-        Ok(())
+        file.write_all_at(buffer, offset)
     }
 }
 
@@ -518,14 +507,12 @@ impl GrainMapPage {
         Ok(page)
     }
 
-    pub fn write_to<File: io::File>(
+    pub fn write_to<File: io::WriteIoBuffer>(
         &self,
         offset: u64,
         file: &mut File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(PAGE_SIZE, 0);
+        let mut buffer = vec![0; PAGE_SIZE];
 
         buffer[4..12].copy_from_slice(&self.written_at.to_le_bytes());
         buffer[12..].copy_from_slice(&self.consecutive_allocations);
@@ -533,9 +520,7 @@ impl GrainMapPage {
         let crc = crc(&buffer[4..]);
         buffer[0..4].copy_from_slice(&crc.to_le_bytes());
 
-        let (result, buffer) = file.write_all(buffer, offset);
-        *scratch = buffer;
-        result
+        file.write_all_at(buffer, offset)
     }
 }
 

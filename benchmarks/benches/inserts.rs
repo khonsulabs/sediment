@@ -3,6 +3,8 @@ use std::path::Path;
 use sediment::{database::Database, io::fs::StdFileManager};
 use timings::Timings;
 
+const ITERS: u128 = 1000;
+
 fn main() {
     let (measurements, stats) = Timings::new();
 
@@ -26,7 +28,7 @@ fn measure_sediment(measurements: &Timings<&'static str>) {
     let sediment = Database::<StdFileManager>::open(path).unwrap();
 
     let data = vec![0; 4096];
-    for _ in 0_u128..5 {
+    for _ in 0_u128..ITERS {
         let measurement = measurements.begin("sediment", "insert 16b");
         sediment.write(&data).unwrap();
         measurement.finish();
@@ -69,7 +71,7 @@ fn measure_sqlite(measurements: &Timings<&'static str>) {
         .execute("create table blobs (value BLOB)", [])
         .unwrap();
 
-    for i in 0_u128..5 {
+    for i in 0_u128..ITERS {
         let measurement = measurements.begin("sqlite", "insert 16b");
         let tx = sqlite.transaction().unwrap();
         tx.execute("insert into blobs (value) values ($1)", [&i.to_le_bytes()])
@@ -95,7 +97,7 @@ mod marble {
         }
         let marble = Marble::open(path).unwrap();
 
-        for i in 0_u128..1000 {
+        for i in 0_u128..ITERS {
             let measurement = measurements.begin("marble", "insert 16b");
             marble
                 .write_batch([(ObjectId::new(i as u64 + 1).unwrap(), Some(i.to_le_bytes()))])

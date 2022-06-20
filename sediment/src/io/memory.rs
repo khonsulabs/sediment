@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::ErrorKind, sync::Arc};
 
 use parking_lot::{Mutex, RwLock};
 
-use crate::io::{self, paths::PathIds, File, FileManager};
+use crate::io::{self, paths::PathIds, AsyncFileWriter, File, FileManager, WriteIoBuffer};
 
 #[derive(Debug, Default, Clone)]
 pub struct MemoryFileManager {
@@ -12,6 +12,7 @@ pub struct MemoryFileManager {
 
 impl FileManager for MemoryFileManager {
     type File = MemoryFile;
+    type AsyncFile = MemoryFile;
 
     fn resolve_path(&self, path: impl AsRef<std::path::Path>) -> super::paths::PathId {
         self.path_ids.get_or_insert(path.as_ref())
@@ -29,6 +30,10 @@ impl FileManager for MemoryFileManager {
     fn write(&self, path: &super::paths::PathId) -> io::Result<Self::File> {
         let mut files = self.files.lock();
         Ok(files.entry(path.id).or_default().clone())
+    }
+
+    fn write_async(&self, path: &io::paths::PathId) -> std::io::Result<Self::AsyncFile> {
+        self.write(path)
     }
 }
 
@@ -113,6 +118,34 @@ impl File for MemoryFile {
             Err(err) => return Err(std::io::Error::new(ErrorKind::Other, err)),
         };
         file.resize(new_length, 0);
+        Ok(())
+    }
+}
+
+impl WriteIoBuffer for MemoryFile {
+    fn write_all_at(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        let (result, _) = self.write_all(buffer, position);
+        result
+    }
+}
+
+impl AsyncFileWriter for MemoryFile {
+    type Manager = MemoryFileManager;
+
+    fn background_write_all(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        let (result, _) = self.write_all(buffer, position);
+        result
+    }
+
+    fn wait(&mut self) -> std::io::Result<()> {
         Ok(())
     }
 }

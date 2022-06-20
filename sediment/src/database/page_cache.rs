@@ -155,12 +155,11 @@ pub struct LoadedGrainMapPage {
 }
 
 impl LoadedGrainMapPage {
-    pub fn write_to<File: io::File>(
+    pub fn write_to<File: io::WriteIoBuffer>(
         &mut self,
         offset: u64,
         new_batch: BatchId,
         file: &mut File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
         let offset = if self.is_first {
             offset + PAGE_SIZE_U64
@@ -169,7 +168,7 @@ impl LoadedGrainMapPage {
         };
 
         self.page.written_at = new_batch;
-        self.page.write_to(offset, file, scratch)?;
+        self.page.write_to(offset, file)?;
         self.is_first = !self.is_first;
 
         Ok(())

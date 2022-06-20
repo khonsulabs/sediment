@@ -1,17 +1,28 @@
 use std::{
     fs::OpenOptions,
     io::{Read, Seek, SeekFrom, Write},
+    num::NonZeroUsize,
+    sync::Arc,
 };
 
-use crate::io::{self, paths::PathIds, BufferResult, File, FileManager};
+use parking_lot::Mutex;
+
+use crate::io::{
+    self,
+    iobuffer::IoBuffer,
+    paths::{PathId, PathIds},
+    AsyncFileWriter, BufferResult, File, FileManager, WriteIoBuffer,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct StdFileManager {
     path_ids: PathIds,
+    thread_pool: Arc<Mutex<Option<flume::Sender<AsyncWrite>>>>,
 }
 
 impl FileManager for StdFileManager {
     type File = StdFile;
+    type AsyncFile = StdAsyncFileWriter;
     fn resolve_path(&self, path: impl AsRef<std::path::Path>) -> super::PathId {
         self.path_ids.get_or_insert(path.as_ref())
     }
@@ -27,6 +38,31 @@ impl FileManager for StdFileManager {
             .create(true)
             .open(path)
             .map(|file| StdFile { file, location: 0 })
+    }
+
+    fn write_async(&self, path: &PathId) -> std::io::Result<Self::AsyncFile> {
+        let (result_sender, result_receiver) = flume::unbounded();
+        let mut thread_pool = self.thread_pool.lock();
+        if thread_pool.is_none() {
+            // TODO maybe this shouldn't be unbounded?
+            let (op_sender, op_receiver) = flume::unbounded();
+
+            spawn_async_writer(
+                self.clone(),
+                op_receiver,
+                std::thread::available_parallelism().map_or(1, NonZeroUsize::get),
+            );
+
+            *thread_pool = Some(op_sender);
+        }
+
+        Ok(StdAsyncFileWriter {
+            path: path.clone(),
+            op_sender: thread_pool.as_ref().cloned().unwrap(),
+            result_sender,
+            result_receiver,
+            operations_sent: 0,
+        })
     }
 }
 
@@ -120,4 +156,112 @@ impl File for StdFile {
     fn set_length(&mut self, new_length: u64) -> io::Result<()> {
         self.file.set_len(new_length)
     }
+}
+
+impl WriteIoBuffer for StdFile {
+    fn write_all_at(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        let (result, _) = self.write_all(buffer, position);
+        result
+    }
+}
+
+#[derive(Debug)]
+pub struct StdAsyncFileWriter {
+    path: PathId,
+    op_sender: flume::Sender<AsyncWrite>,
+    result_sender: flume::Sender<io::Result<()>>,
+    result_receiver: flume::Receiver<io::Result<()>>,
+    operations_sent: usize,
+}
+
+impl AsyncFileWriter for StdAsyncFileWriter {
+    type Manager = StdFileManager;
+
+    fn background_write_all(
+        &mut self,
+        buffer: impl Into<IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        self.op_sender
+            .send(AsyncWrite {
+                path: self.path.clone(),
+                buffer: buffer.into(),
+                result_sender: self.result_sender.clone(),
+                position,
+            })
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
+        self.operations_sent += 1;
+        Ok(())
+    }
+
+    fn wait(&mut self) -> std::io::Result<()> {
+        for _ in 0..self.operations_sent {
+            self.result_receiver
+                .recv()
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))??;
+        }
+        Ok(())
+    }
+}
+
+impl WriteIoBuffer for StdAsyncFileWriter {
+    fn write_all_at(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        self.background_write_all(buffer, position)
+    }
+}
+
+#[derive(Debug)]
+struct AsyncWrite {
+    path: PathId,
+    position: u64,
+    buffer: IoBuffer,
+    result_sender: flume::Sender<io::Result<()>>,
+}
+
+fn spawn_async_writer(
+    manager: StdFileManager,
+    op_receiver: flume::Receiver<AsyncWrite>,
+    additional_thread_limit: usize,
+) {
+    std::thread::spawn(move || async_writer(&manager, &op_receiver, additional_thread_limit));
+}
+
+fn async_writer(
+    manager: &StdFileManager,
+    op_receiver: &flume::Receiver<AsyncWrite>,
+    additional_thread_limit: usize,
+) {
+    let mut spawned_additional_thread = additional_thread_limit == 0;
+    while let Ok(write) = op_receiver.recv() {
+        if !spawned_additional_thread && !op_receiver.is_empty() {
+            spawned_additional_thread = true;
+            spawn_async_writer(
+                manager.clone(),
+                op_receiver.clone(),
+                additional_thread_limit - 1,
+            );
+        }
+
+        let result = async_write(manager, &write.path, write.buffer, write.position);
+        drop(write.result_sender.send(result));
+    }
+}
+
+fn async_write(
+    manager: &StdFileManager,
+    path: &PathId,
+    buffer: IoBuffer,
+    position: u64,
+) -> io::Result<()> {
+    let mut file = manager.write(path)?;
+    let (result, _) = file.write_all(buffer, position);
+    result
 }

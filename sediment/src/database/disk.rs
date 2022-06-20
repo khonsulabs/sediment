@@ -136,7 +136,6 @@ impl DiskState {
                         0
                     },
                 file,
-                scratch,
             )?;
 
             for (stratum_index, stratum) in basin.strata.iter().enumerate() {
@@ -149,7 +148,6 @@ impl DiskState {
                                 0
                             },
                         file,
-                        scratch,
                     )?;
 
                     for page in 0..basin.header.strata[stratum_index].grain_map_pages() {
@@ -158,7 +156,7 @@ impl DiskState {
                             + PAGE_SIZE_U64 * 2 * page;
                         let mut loaded_page =
                             page_cache.fetch(offset, self.header.batch, file, scratch)?;
-                        loaded_page.write_to(offset, self.header.batch, file, scratch)?;
+                        loaded_page.write_to(offset, self.header.batch, file)?;
                     }
                 }
             }

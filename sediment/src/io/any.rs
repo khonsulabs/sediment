@@ -1,7 +1,8 @@
 use crate::io::{
     self,
-    fs::{StdFile, StdFileManager},
+    fs::{StdAsyncFileWriter, StdFile, StdFileManager},
     memory::{MemoryFile, MemoryFileManager},
+    AsyncFileWriter, File, WriteIoBuffer,
 };
 
 #[derive(Debug)]
@@ -57,6 +58,17 @@ impl io::File for AnyFile {
     }
 }
 
+impl WriteIoBuffer for AnyFile {
+    fn write_all_at(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        let (result, _) = self.write_all(buffer, position);
+        result
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AnyFileManager {
     Std(StdFileManager),
@@ -71,6 +83,7 @@ impl Default for AnyFileManager {
 
 impl io::FileManager for AnyFileManager {
     type File = AnyFile;
+    type AsyncFile = AnyAsyncFileWriter;
 
     fn resolve_path(&self, path: impl AsRef<std::path::Path>) -> io::paths::PathId {
         match self {
@@ -92,6 +105,15 @@ impl io::FileManager for AnyFileManager {
             AnyFileManager::Memory(manager) => manager.write(path).map(AnyFile::Memory),
         }
     }
+
+    fn write_async(&self, path: &io::paths::PathId) -> std::io::Result<Self::AsyncFile> {
+        match self {
+            AnyFileManager::Std(manager) => manager.write_async(path).map(AnyAsyncFileWriter::Std),
+            AnyFileManager::Memory(manager) => {
+                manager.write_async(path).map(AnyAsyncFileWriter::Memory)
+            }
+        }
+    }
 }
 
 impl AnyFileManager {
@@ -103,5 +125,43 @@ impl AnyFileManager {
     #[must_use]
     pub fn new_memory() -> Self {
         Self::Memory(MemoryFileManager::default())
+    }
+}
+
+#[derive(Debug)]
+pub enum AnyAsyncFileWriter {
+    Std(StdAsyncFileWriter),
+    Memory(MemoryFile),
+}
+
+impl AsyncFileWriter for AnyAsyncFileWriter {
+    type Manager = AnyFileManager;
+
+    fn background_write_all(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        match self {
+            AnyAsyncFileWriter::Std(writer) => writer.background_write_all(buffer, position),
+            AnyAsyncFileWriter::Memory(writer) => writer.background_write_all(buffer, position),
+        }
+    }
+
+    fn wait(&mut self) -> std::io::Result<()> {
+        match self {
+            AnyAsyncFileWriter::Std(writer) => writer.wait(),
+            AnyAsyncFileWriter::Memory(writer) => writer.wait(),
+        }
+    }
+}
+
+impl WriteIoBuffer for AnyAsyncFileWriter {
+    fn write_all_at(
+        &mut self,
+        buffer: impl Into<io::iobuffer::IoBuffer>,
+        position: u64,
+    ) -> std::io::Result<()> {
+        self.background_write_all(buffer, position)
     }
 }

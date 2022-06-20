@@ -44,7 +44,11 @@ where
 
     pub fn write(&mut self, mut data: &[u8]) -> io::Result<GrainId> {
         let length = u32::try_from(data.len()).to_io()?;
-        let mut file = self.database.manager.write(&self.database.path)?;
+        let mut file = self
+            .database
+            .state
+            .file_manager
+            .write(&self.database.path)?;
         let mut reservation = self.database.new_grain(length)?;
         let mut crc = CRC.digest();
         crc.update(&length.to_le_bytes());

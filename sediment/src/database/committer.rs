@@ -16,7 +16,7 @@ use crate::{
         crc, Allocation, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainId, GrainMapPage,
         GrainOperation, LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
-    io::{self, ext::ToIoResult},
+    io::{self, ext::ToIoResult, paths::PathId, AsyncFileWriter, FileManager, WriteIoBuffer},
     todo_if,
     utils::Multiples,
 };
@@ -28,17 +28,18 @@ pub(super) struct Committer {
 }
 
 impl Committer {
-    pub fn commit<File: io::File>(
+    pub fn commit<Manager: io::FileManager>(
         &self,
         batch: impl Iterator<Item = GrainBatchOperation>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<EmbeddedHeaderGuard>,
-        database: &DatabaseState,
-        file: &mut File,
+        database: &DatabaseState<Manager>,
+        path: &PathId,
         scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
         let mut state = self.state.lock();
         let batch_id = state.batch_id;
+        let mut file = database.file_manager.write(path)?;
         state.batch_id.0 += 1;
         let batch = GrainBatch {
             batch_id,
@@ -75,7 +76,8 @@ impl Committer {
                     checkpoint_to,
                     new_embedded_header,
                     database,
-                    file,
+                    path,
+                    &mut file,
                     scratch,
                 )?;
 
@@ -102,7 +104,8 @@ impl Committer {
         mut grains: Vec<GrainBatchOperation>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: EmbeddedHeaderUpdate,
-        database: &DatabaseState,
+        database: &DatabaseState<File::Manager>,
+        path: &PathId,
         file: &mut File,
         scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
@@ -153,7 +156,7 @@ impl Committer {
             scratch,
         )?;
 
-        // TODO These writes should be able to be parallelized
+        let mut async_writer = database.file_manager.write_async(path)?;
 
         disk_state.header.log_offset = Self::write_commit_log(
             &log_entry,
@@ -161,19 +164,18 @@ impl Committer {
             new_embedded_header,
             database,
             file,
-            scratch,
+            &mut async_writer,
         )?;
 
         for (offset, grain_map_page) in &mut modified_pages {
-            grain_map_page.write_to(*offset, committing_batch, file, scratch)?;
+            grain_map_page.write_to(*offset, committing_batch, &mut async_writer)?;
         }
 
         Self::write_modified(
             &mut modifications,
             committing_batch,
             &mut disk_state,
-            file,
-            scratch,
+            &mut async_writer,
         )?;
 
         disk_state.header.batch = committing_batch;
@@ -186,6 +188,9 @@ impl Committer {
             file,
             scratch,
         )?;
+
+        async_writer.wait()?;
+
         file.synchronize()?;
 
         disk_state.first_header_is_current = !disk_state.first_header_is_current;
@@ -221,19 +226,18 @@ impl Committer {
         Ok(committing_batch)
     }
 
-    fn write_modified<File: io::File>(
+    fn write_modified<File: io::AsyncFileWriter>(
         modifications: &mut CommitModifications,
         committing_batch: BatchId,
         disk_state: &mut DiskState,
         file: &mut File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<()> {
         for (basin_index, stratum_index, grain_map_index) in modifications.grain_maps.drain() {
             let grain_map = &mut disk_state.basins[basin_index].strata[stratum_index].grain_maps
                 [grain_map_index];
             grain_map.map.written_at = committing_batch;
             let offset = grain_map.offset_to_write_at();
-            grain_map.map.write_to(offset, file, scratch)?;
+            grain_map.map.write_to(offset, file)?;
             grain_map.first_is_current = !grain_map.first_is_current;
         }
 
@@ -247,16 +251,16 @@ impl Committer {
             }
 
             basin.header.written_at = committing_batch;
-            basin.header.write_to(offset, file, scratch)?;
+            basin.header.write_to(offset, file)?;
             basin.first_is_current = !basin.first_is_current;
         }
 
         Ok(())
     }
 
-    fn gather_modifications(
+    fn gather_modifications<Manager: io::FileManager>(
         committing_batch: BatchId,
-        database: &DatabaseState,
+        database: &DatabaseState<Manager>,
         disk_state: &mut DiskState,
     ) -> io::Result<CommitModifications> {
         let atlas = database.atlas.lock();
@@ -331,7 +335,7 @@ impl Committer {
     fn update_grain_map_pages<File: io::File>(
         grains: &[GrainBatchOperation],
         modifications: &mut CommitModifications,
-        database: &DatabaseState,
+        database: &DatabaseState<File::Manager>,
         disk_state: &mut DiskState,
         file: &mut File,
         scratch: &mut Vec<u8>,
@@ -446,27 +450,25 @@ impl Committer {
         Ok((modified_pages, CommitLogEntry { grain_changes }))
     }
 
-    fn write_commit_log<File: io::File>(
+    fn write_commit_log<Manager: io::FileManager>(
         log_entry: &CommitLogEntry,
         committing_batch: BatchId,
         new_embedded_header: EmbeddedHeaderUpdate,
-        database: &DatabaseState,
-        file: &mut File,
-        scratch: &mut Vec<u8>,
+        database: &DatabaseState<Manager>,
+        file: &mut Manager::File,
+        async_file: &mut Manager::AsyncFile,
     ) -> io::Result<u64> {
         // Write the commit log for these changes.
-        log_entry.serialize_into(scratch)?;
-        let log_entry_crc = crc(scratch);
-        let log_entry_len = u32::try_from(scratch.len()).to_io()?;
+        let mut buffer = Vec::new();
+        log_entry.serialize_into(&mut buffer)?;
+        let log_entry_crc = crc(&buffer);
+        let log_entry_len = u32::try_from(buffer.len()).to_io()?;
         // pad the entry to the next page size
-        scratch.resize(scratch.len().round_to_multiple_of(PAGE_SIZE).unwrap(), 0);
+        buffer.resize(buffer.len().round_to_multiple_of(PAGE_SIZE).unwrap(), 0);
         let log_entry_offset = database
             .file_allocations
-            .allocate(u64::try_from(scratch.len()).to_io()?, file)?;
-        let buffer = std::mem::take(scratch);
-        let (result, buffer) = file.write_all(buffer, log_entry_offset);
-        *scratch = buffer;
-        result?;
+            .allocate(u64::try_from(buffer.len()).to_io()?, file)?;
+        async_file.write_all_at(buffer, log_entry_offset)?;
 
         let embedded_header = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header
         {
@@ -486,7 +488,7 @@ impl Committer {
                 embedded_header,
             },
         );
-        log.write_to(&database.file_allocations, file, scratch)?;
+        log.write_to(&database.file_allocations, file, async_file)?;
         let offset = log.position().unwrap();
         drop(log);
         Ok(offset)
