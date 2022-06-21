@@ -19,7 +19,7 @@ pub mod ext;
 #[cfg(target_os = "linux")]
 mod linux;
 
-pub trait FileManager: Default + Clone {
+pub trait FileManager: Default + Clone + Send + Sync + 'static {
     type File: File<Manager = Self>;
     type AsyncFile: AsyncFileWriter<Manager = Self>;
 

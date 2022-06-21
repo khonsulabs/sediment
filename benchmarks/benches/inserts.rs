@@ -40,7 +40,7 @@ fn measure_sediment<Manager: FileManager>(measurements: &Timings<&'static str>) 
         std::fs::remove_file(path).unwrap();
     }
 
-    let sediment = Database::<StdFileManager>::open(path).unwrap();
+    let sediment = Database::<Manager>::open(path).unwrap();
 
     for i in 0_u128..ITERS {
         let measurement = measurements.begin(format!("sediment-{name}"), "insert 16b");

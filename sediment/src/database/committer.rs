@@ -447,6 +447,10 @@ impl Committer {
             });
         }
 
+        for new_page_offset in modifications.new_pages.drain() {
+            modified_pages.push((new_page_offset, LoadedGrainMapPage::default()));
+        }
+
         Ok((modified_pages, CommitLogEntry { grain_changes }))
     }
 

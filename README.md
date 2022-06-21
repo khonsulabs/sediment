@@ -4,10 +4,14 @@
 where I wanted to start sharing ideas with others as well as using the issues
 tracker.**
 
-An experimental storage format that supports highly concurrent, ACID-compliant
-MVCC reads and writes in a single file. It is a low level crate and is not meant
-for general purpose storage. It is a layer that higher level databases could be
-built atop.
+An experimental storage format designed for ACID-compliant, bulk blob storage.
+This crate is designed as a replacement to the append-only format that
+[Nebari][nebari] began with.
+
+Each blob stored is assigned a unique `GrainId`. Once a blob is no longer
+needed, its `GrainId` can be archived. Once the database's log has been
+checkpointed far enough, the blob will be fully freed, and its storage will be
+able to be reused.
 
 ## Goals of this format
 

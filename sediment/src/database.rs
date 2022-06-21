@@ -763,3 +763,71 @@ crate::io_test!(embedded_header, {
         std::fs::remove_file(&path).unwrap();
     }
 });
+
+#[cfg(test)]
+crate::io_test!(multithreaded, {
+    const OPS: usize = 100;
+    let path = unique_file_path::<Manager>();
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+    let manager = Manager::default();
+    // Create the database.
+    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
+
+    let (result_sender, result_receiver) = flume::unbounded();
+    let mut threads = Vec::new();
+    let starter = Arc::new(RwLock::new(()));
+    let start_guard = starter.write();
+    let number_of_threads = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+        * 2;
+    for _ in 0..number_of_threads {
+        let result_sender = result_sender.clone();
+        let db = db.clone();
+        let starter = starter.clone();
+        threads.push(std::thread::spawn(move || {
+            drop(starter.read());
+
+            for i in 0..OPS {
+                let value = i.to_le_bytes().to_vec();
+                let grain = db.write(&value).unwrap();
+                result_sender.send((grain, value)).unwrap();
+            }
+        }));
+    }
+
+    // Start the threads.
+    drop(start_guard);
+    drop(result_sender);
+
+    for thread in threads {
+        thread.join().unwrap();
+    }
+
+    // Verify the results before closing and then after reopening.
+    let mut ops_counted = 0;
+    let mut results = Vec::new();
+    while let Ok((grain, expected_value)) = result_receiver.recv() {
+        let data = db.read(grain.id).unwrap().unwrap();
+        assert_eq!(&*data, &expected_value);
+        ops_counted += 1;
+        results.push((grain, expected_value));
+    }
+
+    assert!(ops_counted == number_of_threads * OPS);
+
+    drop(db);
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
+
+    for (grain, expected_value) in results {
+        let data = db.read(grain.id).unwrap().unwrap();
+        assert_eq!(&*data, &expected_value);
+    }
+
+    drop(db);
+    if path.exists() {
+        std::fs::remove_file(&path).unwrap();
+    }
+});
