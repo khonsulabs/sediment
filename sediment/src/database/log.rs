@@ -214,14 +214,16 @@ impl CommitLog {
             } else if let Some(tail_checkpoint_index) =
                 page_state.page.index_of_batch_id(first_batch_to_keep)
             {
-                // Partial checkpoint
-                let mut partial_page = CommitLogPage::default();
-                let entries_to_copy =
-                    &page_state.page.entries[self.tail_checkpoint_index..=tail_checkpoint_index];
-                partial_page.page.entries[0..entries_to_copy.len()]
-                    .copy_from_slice(entries_to_copy);
-                checkpointed_entries.push(partial_page);
-                self.tail_checkpoint_index = tail_checkpoint_index;
+                if tail_checkpoint_index > self.tail_checkpoint_index {
+                    // Partial checkpoint
+                    let mut partial_page = CommitLogPage::default();
+                    let entries_to_copy = &page_state.page.entries
+                        [self.tail_checkpoint_index..=tail_checkpoint_index];
+                    partial_page.page.entries[0..entries_to_copy.len()]
+                        .copy_from_slice(entries_to_copy);
+                    checkpointed_entries.push(partial_page);
+                    self.tail_checkpoint_index = tail_checkpoint_index;
+                }
                 break;
             }
 

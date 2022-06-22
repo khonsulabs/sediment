@@ -1,5 +1,10 @@
-use std::io::ErrorKind;
+use std::{
+    collections::{HashMap, VecDeque},
+    io::ErrorKind,
+    sync::Arc,
+};
 
+use parking_lot::Mutex;
 use tokio_uring::buf::IoBuf;
 
 use crate::io::{
@@ -207,9 +212,11 @@ impl io::FileManager for UringFileManager {
 fn uring_thread(ops: flume::Receiver<AsyncOp>) {
     tokio_uring::start(async move {
         let local = tokio::task::LocalSet::new();
+        let open_files = OpenFiles::default();
         local
             .run_until(async {
                 while let Ok(op) = ops.recv_async().await {
+                    let open_files = open_files.clone();
                     local.spawn_local(async move {
                         let result = match op.op {
                             Op::Write => {
@@ -217,6 +224,7 @@ fn uring_thread(ops: flume::Receiver<AsyncOp>) {
                                     op.params.buffer,
                                     op.params.position,
                                     op.params.path,
+                                    &open_files,
                                 )
                                 .await
                             }
@@ -225,10 +233,13 @@ fn uring_thread(ops: flume::Receiver<AsyncOp>) {
                                     op.params.buffer,
                                     op.params.position,
                                     op.params.path,
+                                    &open_files,
                                 )
                                 .await
                             }
-                            Op::Synchronize => perform_async_sync(op.params.path).await,
+                            Op::Synchronize => {
+                                perform_async_sync(op.params.path, &open_files).await
+                            }
                         };
                         drop(op.params.result_sender.send(result));
                     });
@@ -310,13 +321,9 @@ async fn perform_async_write_all(
     buffer: IoBuffer,
     mut position: u64,
     path: PathId,
+    open_files: &OpenFiles,
 ) -> (io::Result<()>, Vec<u8>) {
-    let file = match tokio_uring::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(&path)
-        .await
-    {
+    let file = match open_files.open(&path).await {
         Ok(file) => file,
         Err(err) => return (Err(err), buffer.buffer),
     };
@@ -324,6 +331,10 @@ async fn perform_async_write_all(
         buffer.buffer.slice(range)
     } else {
         let end = buffer.buffer.len();
+        if end == 0 {
+            return (Ok(()), buffer.buffer);
+        }
+
         buffer.buffer.slice(0..end)
     };
     while buffer.len() > 0 {
@@ -341,9 +352,10 @@ async fn perform_async_write_all(
             break;
         }
 
-        buffer = buffer.into_inner().slice(dbg!(new_start..end));
+        buffer = buffer.into_inner().slice(new_start..end);
         position += u64::try_from(bytes_written).unwrap();
     }
+    open_files.return_file(&path, file);
 
     (Ok(()), buffer.into_inner())
 }
@@ -352,12 +364,9 @@ async fn perform_async_read_all(
     buffer: IoBuffer,
     mut position: u64,
     path: PathId,
+    open_files: &OpenFiles,
 ) -> (io::Result<()>, Vec<u8>) {
-    let file = match tokio_uring::fs::OpenOptions::new()
-        .read(true)
-        .open(&path)
-        .await
-    {
+    let file = match open_files.open(&path).await {
         Ok(file) => file,
         Err(err) => return (Err(err), buffer.buffer),
     };
@@ -365,6 +374,9 @@ async fn perform_async_read_all(
         buffer.buffer.slice(range)
     } else {
         let end = buffer.buffer.len();
+        if end == 0 {
+            return (Ok(()), buffer.buffer);
+        }
         buffer.buffer.slice(0..end)
     };
     while buffer.len() > 0 {
@@ -385,18 +397,46 @@ async fn perform_async_read_all(
         buffer = buffer.into_inner().slice(new_start..end);
         position += u64::try_from(bytes_read).unwrap();
     }
+    open_files.return_file(&path, file);
 
     (Ok(()), buffer.into_inner())
 }
 
-async fn perform_async_sync(path: PathId) -> (io::Result<()>, Vec<u8>) {
-    let file = match tokio_uring::fs::OpenOptions::new()
-        .read(true)
-        .open(&path)
-        .await
-    {
+async fn perform_async_sync(path: PathId, open_files: &OpenFiles) -> (io::Result<()>, Vec<u8>) {
+    let file = match open_files.open(&path).await {
         Ok(file) => file,
         Err(err) => return (Err(err), Vec::new()),
     };
-    (file.sync_all().await, Vec::new())
+    let result = file.sync_data().await;
+    open_files.return_file(&path, file);
+    (result, Vec::new())
+}
+
+#[derive(Clone, Default)]
+struct OpenFiles(Arc<Mutex<HashMap<u64, VecDeque<tokio_uring::fs::File>>>>);
+
+impl OpenFiles {
+    async fn open(&self, path: &PathId) -> io::Result<tokio_uring::fs::File> {
+        let file = {
+            let mut files = self.0.lock();
+            let open_files_for_path = files.entry(path.id).or_default();
+            open_files_for_path.pop_front()
+        };
+
+        if let Some(file) = file {
+            Ok(file)
+        } else {
+            tokio_uring::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(&path)
+                .await
+        }
+    }
+
+    fn return_file(&self, path: &PathId, file: tokio_uring::fs::File) {
+        let mut files = self.0.lock();
+        files.get_mut(&path.id).unwrap().push_front(file);
+    }
 }

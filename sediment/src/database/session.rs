@@ -6,7 +6,7 @@ use crate::{
         embedded::{EmbeddedHeaderGuard, EmbeddedHeaderUpdate},
         Database,
     },
-    format::{BatchId, GrainId, CRC},
+    format::{BatchId, GrainId},
     io::{self, ext::ToIoResult, iobuffer::IoBufferExt, File},
 };
 
@@ -50,10 +50,8 @@ where
             .file_manager
             .write(&self.database.path)?;
         let mut reservation = self.database.new_grain(length)?;
-        let mut crc = CRC.digest();
-        crc.update(&length.to_le_bytes());
-        crc.update(data);
-        let crc = crc.finalize();
+        let mut crc = crc32c::crc32c(&length.to_le_bytes());
+        crc = crc32c::crc32c_append(crc, data);
         reservation.crc = Some(crc);
 
         let mut scratch = std::mem::take(&mut self.database.scratch);

@@ -26,7 +26,7 @@ iouring = ["tokio-uring", "tokio", "futures-util"]
 lrumap = { git = "https://github.com/khonsulabs/lrumap.git", branch = "main" }
 parking_lot = { version = "0.12.0", features = ["arc_lock"] }
 flume = "0.10.12"
-crc = "3.0.0"
+crc32c = "0.6.3"
 libc = { version = "0.2.126", optional = true }
 num-traits = "0.2"
 bitvec = "1.0.0"

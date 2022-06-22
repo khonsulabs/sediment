@@ -89,6 +89,7 @@ impl Atlas {
     pub fn reserve_grain<File: io::File>(
         &mut self,
         length: u32,
+        page_cache: &PageCache,
         file: &mut File,
         file_allocations: &FileAllocations,
     ) -> io::Result<GrainReservation> {
@@ -129,14 +130,12 @@ impl Atlas {
         let grain_id = if let Some(grain_id) = best_grain_id {
             grain_id
         } else {
-            self.allocate_new_grain_map(length, file, file_allocations)?
+            self.allocate_new_grain_map(length, page_cache, file, file_allocations)?
         };
 
         let offset = self
             .map_stratum_for_grain(grain_id, |stratum| -> io::Result<u64> {
-                let grains_needed = (length + 8)
-                    .round_to_multiple_of(stratum.grain_length)
-                    .expect("practically impossible to overflow");
+                let grains_needed = (length + 8).ceil_div_by(stratum.grain_length);
 
                 let (offset, grain_map_index) =
                     stratum.offset_and_index_of_grain_data(grain_id.grain_index())?;
@@ -247,6 +246,7 @@ impl Atlas {
     fn allocate_new_grain_map<File: io::File>(
         &mut self,
         length: u32,
+        page_cache: &PageCache,
         file: &mut File,
         file_allocations: &FileAllocations,
     ) -> io::Result<GrainId> {
@@ -268,6 +268,10 @@ impl Atlas {
             };
             stratum.grain_map_location =
                 file_allocations.allocate(stratum.grain_map_length(), file)?;
+
+            // TODO once we can allocate more than one page, we need to register each page.
+            page_cache
+                .register_new_page(stratum.grain_map_location + stratum.total_header_length());
 
             let allocations = Ranges::new(Allocation::Free, Some(stratum.grains_per_map()));
 
@@ -296,7 +300,7 @@ impl Atlas {
             self.basins.push(BasinAtlas::new(location));
             // Recurse. Now that we have a new basin, the previous loop will be
             // able to allocate a strata.
-            return self.allocate_new_grain_map(length, file, file_allocations);
+            return self.allocate_new_grain_map(length, page_cache, file, file_allocations);
         }
 
         todo!("grow an existing grain map or add an additional grain map to a stratum https://github.com/khonsulabs/sediment/issues/11")

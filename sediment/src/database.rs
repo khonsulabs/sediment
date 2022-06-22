@@ -220,7 +220,12 @@ where
         let mut active_state = self.state.atlas.lock();
 
         let mut file = self.state.file_manager.write(&self.path)?;
-        active_state.reserve_grain(length, &mut file, &self.state.file_allocations)
+        active_state.reserve_grain(
+            length,
+            &self.state.grain_map_page_cache,
+            &mut file,
+            &self.state.file_allocations,
+        )
     }
 
     fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {

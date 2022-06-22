@@ -7,7 +7,6 @@ use std::{
 };
 
 use bitvec::prelude::BitVec;
-use crc::{Crc, CRC_32_MPEG_2};
 
 use crate::{
     io::{self, ext::ToIoResult},
@@ -19,13 +18,9 @@ pub const PAGE_SIZE: usize = 4096;
 /// [`PAGE_SIZE`] but in a u64.
 pub const PAGE_SIZE_U64: u64 = PAGE_SIZE as u64;
 
-pub const CRC: Crc<u32> = Crc::<u32>::new(&CRC_32_MPEG_2);
-
 #[must_use]
 pub fn crc(data: &[u8]) -> u32 {
-    let mut digest = CRC.digest();
-    digest.update(data);
-    digest.finalize()
+    crc32c::crc32c(data)
 }
 
 /// The root header for a Sediment file. On-disk, this structure fits in one

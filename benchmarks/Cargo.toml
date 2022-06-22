@@ -9,12 +9,15 @@ edition = "2021"
 default = ["fbarrier-fsync"]
 iouring = ["sediment/iouring"]
 fbarrier-fsync = ["sediment/fbarrier-fsync"]
+sqlite = ["rusqlite"]
 
 [dependencies]
 timings = { git = "https://github.com/khonsulabs/timings", branch = "main" }
 sediment = { path = "../sediment" }
 marble = { version = "11.7.11", optional = true }
-rusqlite = "0.27.0"
+rusqlite = { version = "0.27.0", optional = true }
+rocksdb = { version = "0.18.0", optional = true }
+rand = "0.8"
 
 [[bench]]
 name = "inserts"

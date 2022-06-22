@@ -16,6 +16,7 @@ pub struct PageCache {
 #[derive(Debug)]
 struct Data {
     cache: LruHashMap<u64, CacheEntry>,
+    new_pages: HashMap<u64, LoadedGrainMapPage>,
     first_is_active: HashMap<u64, bool>,
 }
 
@@ -39,6 +40,10 @@ impl PageCache {
             }
             Some(CacheEntry::Loaded(page)) => Ok(map(page)),
             None => {
+                if let Some(page) = data.new_pages.get_mut(&page_offset) {
+                    return Ok(map(page));
+                }
+
                 let sync = Arc::new(RwLock::new(()));
                 data.cache
                     .push(page_offset, CacheEntry::Loading(sync.clone()));
@@ -121,12 +126,19 @@ impl PageCache {
             Ok(grains_allocated)
         })?
     }
+
     pub fn update_pages(&self, pages: impl Iterator<Item = (u64, LoadedGrainMapPage)>) {
         let mut data = self.data.lock();
         for (offset, page) in pages {
             *data.first_is_active.entry(offset).or_default() = page.is_first;
             data.cache.push(offset, CacheEntry::Loaded(page));
+            data.new_pages.remove(&offset);
         }
+    }
+
+    pub fn register_new_page(&self, offset: u64) {
+        let mut data = self.data.lock();
+        data.new_pages.insert(offset, LoadedGrainMapPage::default());
     }
 }
 
@@ -135,6 +147,7 @@ impl Default for PageCache {
         Self {
             data: Mutex::new(Data {
                 cache: LruHashMap::new(4096),
+                new_pages: HashMap::new(),
                 first_is_active: HashMap::new(),
             }),
         }
@@ -161,14 +174,14 @@ impl LoadedGrainMapPage {
         new_batch: BatchId,
         file: &mut File,
     ) -> io::Result<()> {
-        let offset = if self.is_first {
+        let page_offset = if self.is_first {
             offset + PAGE_SIZE_U64
         } else {
             offset
         };
 
         self.page.written_at = new_batch;
-        self.page.write_to(offset, file)?;
+        self.page.write_to(page_offset, file)?;
         self.is_first = !self.is_first;
 
         Ok(())
@@ -233,7 +246,7 @@ impl LoadedGrainMapPage {
         buffer.resize(PAGE_SIZE, 0);
         let (result, buffer) = file.read_exact(
             buffer,
-            page_offset + first_page.then(|| 4096).unwrap_or_default(),
+            page_offset + (!first_page).then(|| 4096).unwrap_or_default(),
         );
         result?;
 

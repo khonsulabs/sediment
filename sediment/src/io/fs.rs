@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, VecDeque},
     fs::OpenOptions,
     io::{Read, Seek, SeekFrom, Write},
     num::NonZeroUsize,
@@ -18,7 +19,10 @@ use crate::io::{
 pub struct StdFileManager {
     path_ids: PathIds,
     thread_pool: Arc<Mutex<Option<flume::Sender<AsyncOpParams>>>>,
+    open_files: OpenFiles,
 }
+
+type OpenFiles = Arc<Mutex<HashMap<u64, VecDeque<(std::fs::File, u64)>>>>;
 
 impl FileManager for StdFileManager {
     type File = StdFile;
@@ -28,16 +32,30 @@ impl FileManager for StdFileManager {
     }
 
     fn read(&self, path: &super::PathId) -> io::Result<Self::File> {
-        std::fs::File::open(path).map(|file| StdFile { file, location: 0 })
+        self.write(path)
     }
 
     fn write(&self, path: &super::PathId) -> io::Result<Self::File> {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .map(|file| StdFile { file, location: 0 })
+        let mut open_files = self.open_files.lock();
+        let open_files_for_path = open_files.entry(path.id).or_default();
+        let (file, location) = if let Some((file, location)) = open_files_for_path.pop_front() {
+            (file, location)
+        } else {
+            (
+                OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .open(path)?,
+                0,
+            )
+        };
+        Ok(StdFile {
+            file: Some(file),
+            path_id: path.id,
+            manager: self.clone(),
+            location,
+        })
     }
 
     fn write_async(&self, path: &PathId) -> std::io::Result<Self::AsyncFile> {
@@ -68,15 +86,23 @@ impl FileManager for StdFileManager {
 
 #[derive(Debug)]
 pub struct StdFile {
-    file: std::fs::File,
+    file: Option<std::fs::File>,
     location: u64,
+    path_id: u64,
+    manager: StdFileManager,
+}
+
+impl StdFile {
+    fn file(&self) -> &std::fs::File {
+        self.file.as_ref().expect("only cleared during drop")
+    }
 }
 
 impl File for StdFile {
     type Manager = StdFileManager;
 
     fn len(&self) -> io::Result<u64> {
-        self.file.metadata().map(|metadata| metadata.len())
+        self.file().metadata().map(|metadata| metadata.len())
     }
 
     fn read_exact(
@@ -86,14 +112,14 @@ impl File for StdFile {
     ) -> BufferResult<()> {
         let mut buffer = buffer.into();
         if position != self.location {
-            if let Err(err) = self.file.seek(SeekFrom::Start(position)) {
+            if let Err(err) = self.file().seek(SeekFrom::Start(position)) {
                 return (Err(err), buffer.buffer);
             }
             self.location = position;
         }
 
         while !buffer.is_empty() {
-            match self.file.read(&mut buffer) {
+            match self.file().read(&mut buffer) {
                 Ok(bytes_read) => {
                     self.location += u64::try_from(bytes_read).unwrap();
                     buffer.advance_by(bytes_read);
@@ -112,14 +138,14 @@ impl File for StdFile {
     ) -> BufferResult<()> {
         let mut buffer = buffer.into();
         if position != self.location {
-            if let Err(err) = self.file.seek(SeekFrom::Start(position)) {
+            if let Err(err) = self.file().seek(SeekFrom::Start(position)) {
                 return (Err(err), buffer.buffer);
             }
             self.location = position;
         }
 
         while !buffer.is_empty() {
-            match self.file.write(&buffer) {
+            match self.file().write(&buffer) {
                 Ok(bytes_written) => {
                     self.location += u64::try_from(bytes_written).unwrap();
                     buffer.advance_by(bytes_written);
@@ -158,11 +184,19 @@ impl File for StdFile {
         any(target_os = "macos", target_os = "ios")
     )))]
     fn synchronize(&mut self) -> io::Result<()> {
-        self.file.sync_data()
+        self.file().sync_data()
     }
 
     fn set_length(&mut self, new_length: u64) -> io::Result<()> {
-        self.file.set_len(new_length)
+        self.file().set_len(new_length)
+    }
+}
+
+impl Drop for StdFile {
+    fn drop(&mut self) {
+        let mut open_files = self.manager.open_files.lock();
+        let open_files_for_path = open_files.entry(self.path_id).or_default();
+        open_files_for_path.push_front((self.file.take().expect("already dropped"), self.location));
     }
 }
 

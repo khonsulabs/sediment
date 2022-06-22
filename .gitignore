@@ -2,3 +2,7 @@
 /Cargo.lock
 .test-*
 *.sediment
+.vscode
+*.sqlite3
+*.rocksdb
+*.marble

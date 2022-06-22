@@ -84,10 +84,13 @@ impl Committer {
                 // Re-acquire the state to update the knowledge of committed batches
                 let mut state = self.state.lock();
                 for id in (state.committed_batch_id.0 + 1)..=last_batch_id.0 {
-                    state
-                        .committed_batches
-                        .insert(GrainBatchId(id), new_batch_id);
+                    if id != batch_id.0 {
+                        state
+                            .committed_batches
+                            .insert(GrainBatchId(id), new_batch_id);
+                    }
                 }
+                state.committed_batch_id = last_batch_id;
                 state.committing = false;
                 drop(state);
 
@@ -463,7 +466,7 @@ impl Committer {
         async_file: &mut Manager::AsyncFile,
     ) -> io::Result<u64> {
         // Write the commit log for these changes.
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(PAGE_SIZE);
         log_entry.serialize_into(&mut buffer)?;
         let log_entry_crc = crc(&buffer);
         let log_entry_len = u32::try_from(buffer.len()).to_io()?;
