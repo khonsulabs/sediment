@@ -168,7 +168,12 @@ impl File for StdFile {
 
         // SAFETY: As long as the underlying File has a valid descriptor, this
         // should always be safe to call.
-        let result = unsafe { libc::fcntl(self.file.as_raw_fd(), F_BARRIERFSYNC) };
+        let result = unsafe {
+            libc::fcntl(
+                self.file.as_ref().expect("already dropped").as_raw_fd(),
+                F_BARRIERFSYNC,
+            )
+        };
         if result == 0 {
             Ok(())
         } else {

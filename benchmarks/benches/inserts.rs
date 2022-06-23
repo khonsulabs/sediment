@@ -12,6 +12,24 @@ const ITERS: u128 = 100;
 const INSERTS_PER_BATCH: usize = 20;
 
 fn main() {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        if cfg!(feature = "sqlite") && !cfg!(feature = "fbarrier-fsync") {
+            eprintln!("SQLite bundled in macOS uses F_BARRIERFSYNC instead of F_FULLFSYNC, which means it does not provide ACID guarantees. Enable feature `fbarrier-fsync` to configure Sediment to use the same synchronization primitive. See <https://bonsaidb.io/blog/acid-on-apple/> for more information.");
+        }
+
+        if cfg!(feature = "rocksdb") {
+            if cfg!(feature = "fbarrier-fsync") {
+                eprintln!("RocksDB prior to 7.3.1 only utilizes fdatasync. As of writing this, RocksDB does not support F_BARRIERFSYNC. The current version used by the rocksdb crate is 7.1.2.");
+                eprintln!("rocksdb crate's built version: <https://github.com/rust-rocksdb/rust-rocksdb/blob/master/librocksdb-sys/build_version.cc#L11>");
+                eprintln!("ACID on Apple: <https://bonsaidb.io/blog/acid-on-apple/>");
+            } else {
+                eprintln!("RocksDB does not use F_FULLFSYNC until version 7.3.1. The current version used by the rocksdb crate is 7.1.2.");
+                eprintln!("rocksdb crate's built version: <https://github.com/rust-rocksdb/rust-rocksdb/blob/master/librocksdb-sys/build_version.cc#L11>");
+            }
+        }
+    }
+
     let (measurements, stats) = Timings::new();
 
     let source = vec![0; 4096];
@@ -145,10 +163,6 @@ fn initialize_sqlite(path: &Path) -> rusqlite::Connection {
         // <https://bonsaidb.io/blog/acid-on-apple/>
         // <https://www.sqlite.org/pragma.html#pragma_fullfsync>
         sqlite.pragma_update(None, "fullfsync", "on").unwrap();
-
-        if !cfg!(feature = "fbarrier-fsync") {
-            println!("SQLite bundled in macOS uses F_BARRIERFSYNC instead of F_FULLFSYNC, which means it does not provide ACID guarantees. Enable feature `fbarrier-fsync` to configure Sediment to use the same synchronization primitive. See <https://bonsaidb.io/blog/acid-on-apple/> for more information.");
-        }
     }
 
     sqlite
