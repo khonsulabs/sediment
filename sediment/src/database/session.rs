@@ -1,10 +1,13 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{
     database::{
         committer::GrainBatchOperation,
         embedded::{EmbeddedHeaderGuard, EmbeddedHeaderUpdate},
-        Database,
+        Database, GrainData,
     },
     format::{BatchId, GrainId},
     io::{self, ext::ToIoResult, iobuffer::IoBufferExt, File},
@@ -16,7 +19,7 @@ where
     Manager: io::FileManager,
 {
     database: Database<Manager>,
-    writes: Vec<GrainBatchOperation>,
+    writes: HashMap<GrainId, GrainBatchOperation>,
 }
 
 impl<Manager> WriteSession<Manager>
@@ -26,7 +29,7 @@ where
     pub(super) fn new(database: Database<Manager>) -> Self {
         Self {
             database,
-            writes: Vec::new(),
+            writes: HashMap::new(),
         }
     }
 
@@ -42,7 +45,7 @@ where
         }
     }
 
-    pub fn write(&mut self, mut data: &[u8]) -> io::Result<GrainId> {
+    pub fn push(&mut self, mut data: &[u8]) -> io::Result<GrainId> {
         let length = u32::try_from(data.len()).to_io()?;
         let mut file = self
             .database
@@ -85,28 +88,46 @@ where
         debug_assert!(header_written);
 
         let id = reservation.grain_id;
-        self.writes.push(GrainBatchOperation::Allocate(reservation));
+        self.writes
+            .insert(id, GrainBatchOperation::Allocate(reservation));
 
         Ok(id)
+    }
+
+    pub fn get(&mut self, grain_id: GrainId) -> io::Result<Option<GrainData>> {
+        if let Some(GrainBatchOperation::Allocate(reservation)) = self.writes.get(&grain_id) {
+            // This grain was allocated during this session.
+            let mut file = self.database.state.file_manager.read(&self.database.path)?;
+
+            let data = vec![0; usize::try_from(reservation.length + 8).to_io()?];
+            let (result, data) = file.read_exact(data, reservation.offset);
+            result?;
+            return Ok(Some(GrainData::from_bytes(data)));
+        }
+
+        self.database.get(grain_id)
     }
 
     pub fn archive(&mut self, grain_id: GrainId) -> io::Result<()> {
         let count = self.database.archive(grain_id)?;
 
         self.writes
-            .push(GrainBatchOperation::Archive { grain_id, count });
+            .insert(grain_id, GrainBatchOperation::Archive { grain_id, count });
 
         Ok(())
     }
 
     pub fn commit(mut self) -> io::Result<BatchId> {
         self.database
-            .commit_reservations(self.writes.drain(..), None, None)
+            .commit_reservations(self.writes.drain().map(|(_, op)| op), None, None)
     }
 
     pub fn commit_and_checkpoint(mut self, checkpoint_to: BatchId) -> io::Result<BatchId> {
-        self.database
-            .commit_reservations(self.writes.drain(..), Some(checkpoint_to), None)
+        self.database.commit_reservations(
+            self.writes.drain().map(|(_, op)| op),
+            Some(checkpoint_to),
+            None,
+        )
     }
 }
 
@@ -117,7 +138,7 @@ where
     fn drop(&mut self) {
         if !self.writes.is_empty() {
             self.database
-                .forget_reservations(self.writes.drain(..).filter_map(|op| {
+                .forget_reservations(self.writes.drain().map(|(_, op)| op).filter_map(|op| {
                     if let GrainBatchOperation::Allocate(reservation) = op {
                         Some(reservation)
                     } else {
@@ -192,9 +213,11 @@ where
             None
         };
 
-        session
-            .database
-            .commit_reservations(session.writes.drain(..), None, header_guard)
+        session.database.commit_reservations(
+            session.writes.drain().map(|(_, op)| op),
+            None,
+            header_guard,
+        )
     }
 
     pub fn commit_and_checkpoint(self, checkpoint_to: BatchId) -> io::Result<BatchId> {
@@ -213,7 +236,7 @@ where
         };
 
         session.database.commit_reservations(
-            session.writes.drain(..),
+            session.writes.drain().map(|(_, op)| op),
             Some(checkpoint_to),
             header_guard,
         )

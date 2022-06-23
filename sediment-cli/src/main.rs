@@ -83,7 +83,7 @@ impl SingleCommand {
     fn execute_on(self, database: &mut Database<AnyFileManager>) -> io::Result<()> {
         match self {
             SingleCommand::Get { grain_id } => {
-                let data = database.read(grain_id)?;
+                let data = database.get(grain_id)?;
                 if let Some(data) = data {
                     println!("{}", pretty_hex::pretty_hex(&data));
                     Ok(())
@@ -103,7 +103,7 @@ impl SingleCommand {
                 };
 
                 let mut session = database.new_session();
-                let grain = session.write(&data)?;
+                let grain = session.push(&data)?;
                 let batch = session.commit()?;
                 println!("New grain id: {}", grain);
                 println!("Committed in batch: {}", batch);
