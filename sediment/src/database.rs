@@ -38,7 +38,7 @@ mod session;
 pub use self::{
     config::{Configuration, RecoveryCallback},
     log::CommitLogSnapshot,
-    session::WriteSession,
+    session::{HeaderUpdateSession, WriteSession},
 };
 
 #[derive(Debug)]
@@ -97,6 +97,14 @@ where
         }
 
         Ok(database)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path.path
+    }
+
+    pub fn path_id(&self) -> u64 {
+        self.path.id
     }
 
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self>
@@ -338,7 +346,7 @@ impl Deref for GrainData {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.data[8..8 + self.length]
+        &self.data[Self::HEADER_BYTES..Self::HEADER_BYTES + self.length]
     }
 }
 
@@ -349,6 +357,7 @@ impl AsRef<[u8]> for GrainData {
 }
 
 impl GrainData {
+    pub const HEADER_BYTES: usize = 8;
     pub(crate) fn from_bytes(data: Vec<u8>) -> Self {
         Self {
             crc: u32::from_le_bytes(data[0..4].try_into().unwrap()),
@@ -370,6 +379,10 @@ impl GrainData {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &*self
+    }
+
+    pub fn into_raw_bytes(self) -> Vec<u8> {
+        self.data
     }
 }
 

@@ -361,11 +361,8 @@ impl Committer {
             // and the data comes from two different locations.
             let (grain_count, allocation_state, log_op) = match operation {
                 GrainBatchOperation::Allocate(reservation) => (
-                    u8::try_from(
-                        (reservation.length + 8 + stratum_info.grain_length() - 1)
-                            / stratum_info.grain_length(),
-                    )
-                    .to_io()?,
+                    u8::try_from((reservation.length + 8).ceil_div_by(stratum_info.grain_length()))
+                        .to_io()?,
                     true,
                     GrainOperation::Allocate {
                         crc: reservation
@@ -431,12 +428,14 @@ impl Committer {
                     *grain = grain_count - u8::try_from(allocation_index).unwrap();
                 }
             } else {
-                for local_grain_index in
-                    local_grain_index..local_grain_index + usize::from(grain_count)
-                {
-                    let grain =
-                        &mut loaded_grain_map_page.page.consecutive_allocations[local_grain_index];
-                    assert!(*grain != 0);
+                for index in local_grain_index..local_grain_index + usize::from(grain_count) {
+                    let grain = &mut loaded_grain_map_page.page.consecutive_allocations[index];
+                    assert!(
+                        *grain != 0,
+                        "grain not allocated {}:{}/{grain_count}",
+                        operation.grain_id(),
+                        index - local_grain_index
+                    );
                     *grain = 0;
                 }
             }
