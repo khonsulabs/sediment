@@ -110,7 +110,7 @@ fn measure_sediment<Manager: FileManager>(measurements: &Timings<String>) {
         let measurement =
             measurements.begin(format!("sediment-{name}"), String::from("insert 16b"));
         let mut session = sediment.new_session();
-        session.write(&i.to_le_bytes()).unwrap();
+        session.push(&i.to_le_bytes()).unwrap();
         checkpoint_to = session.commit_and_checkpoint(checkpoint_to).unwrap();
         measurement.finish();
     }
@@ -256,7 +256,7 @@ where
                 measurements.begin(label, format!("{}-threads-inserts", self.number_of_threads));
             let mut session = self.db.new_session();
             for range in batch {
-                session.write(&self.data.source[range.clone()]).unwrap();
+                session.push(&self.data.source[range.clone()]).unwrap();
             }
             checkpoint_to = session.commit_and_checkpoint(checkpoint_to).unwrap();
             //session.commit().unwrap();
