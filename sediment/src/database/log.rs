@@ -217,8 +217,8 @@ impl CommitLog {
                 if tail_checkpoint_index > self.tail_checkpoint_index {
                     // Partial checkpoint
                     let mut partial_page = CommitLogPage::default();
-                    let entries_to_copy = &page_state.page.entries
-                        [self.tail_checkpoint_index..=tail_checkpoint_index];
+                    let entries_to_copy =
+                        &page_state.page.entries[self.tail_checkpoint_index..tail_checkpoint_index];
                     partial_page.page.entries[0..entries_to_copy.len()]
                         .copy_from_slice(entries_to_copy);
                     checkpointed_entries.push(partial_page);
@@ -228,8 +228,19 @@ impl CommitLog {
             }
 
             // The entire page can be removed
-            self.tail_checkpoint_index = 0;
-            checkpointed_entries.push(self.pages.pop_front().unwrap());
+            let mut page = self.pages.pop_front().unwrap();
+            if self.tail_checkpoint_index > 0 {
+                page.page
+                    .entries
+                    .copy_within(self.tail_checkpoint_index.., 0);
+                for invalidated_entry in
+                    page.page.entries[170 - self.tail_checkpoint_index..].iter_mut()
+                {
+                    invalidated_entry.position = 0;
+                }
+                self.tail_checkpoint_index = 0;
+            }
+            checkpointed_entries.push(page);
         }
 
         checkpointed_entries
