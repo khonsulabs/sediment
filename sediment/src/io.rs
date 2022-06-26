@@ -45,7 +45,7 @@ pub trait File: WriteIoBuffer {
     fn set_length(&mut self, new_length: u64) -> io::Result<()>;
 }
 
-pub trait AsyncFileWriter: WriteIoBuffer {
+pub trait AsyncFileWriter: std::fmt::Debug + WriteIoBuffer + Send + Sync {
     type Manager: FileManager<AsyncFile = Self>;
 
     fn background_write_all(

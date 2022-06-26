@@ -268,11 +268,13 @@ where
     fn commit_reservations(
         &mut self,
         reservations: impl Iterator<Item = GrainBatchOperation>,
+        async_writes: impl Iterator<Item = Manager::AsyncFile>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<EmbeddedHeaderGuard>,
     ) -> io::Result<BatchId> {
         self.state.committer.commit(
             reservations,
+            async_writes,
             checkpoint_to,
             new_embedded_header,
             &self.state,
@@ -324,7 +326,7 @@ where
     disk_state: Mutex<DiskState>,
     embedded_header: EmbeddedHeaderState,
     log: RwLock<CommitLog>,
-    committer: Committer,
+    committer: Committer<Manager::AsyncFile>,
     grain_map_page_cache: PageCache,
     file_allocations: FileAllocations,
 }

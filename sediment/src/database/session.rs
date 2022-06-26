@@ -10,7 +10,7 @@ use crate::{
         Database, GrainData,
     },
     format::{BatchId, GrainId},
-    io::{self, ext::ToIoResult, iobuffer::IoBufferExt, File},
+    io::{self, ext::ToIoResult, iobuffer::IoBufferExt, File, WriteIoBuffer},
 };
 
 #[derive(Debug)]
@@ -20,6 +20,7 @@ where
 {
     database: Database<Manager>,
     writes: HashMap<GrainId, GrainBatchOperation>,
+    async_writer: Option<Manager::AsyncFile>,
 }
 
 impl<Manager> WriteSession<Manager>
@@ -30,6 +31,7 @@ where
         Self {
             database,
             writes: HashMap::new(),
+            async_writer: None,
         }
     }
 
@@ -58,7 +60,7 @@ where
         reservation.crc = Some(crc);
 
         let mut scratch = std::mem::take(&mut self.database.scratch);
-        scratch.resize((data.len() + 8).min(16_384), 0);
+        scratch.resize((data.len() + 8).min(4 * 16_384), 0);
         scratch[0..4].copy_from_slice(&crc.to_le_bytes());
         scratch[4..8].copy_from_slice(&length.to_le_bytes());
         let mut write_at = reservation.offset;
@@ -94,6 +96,38 @@ where
         Ok(id)
     }
 
+    pub fn push_async(&mut self, mut data: Vec<u8>) -> io::Result<GrainId> {
+        if self.async_writer.is_none() {
+            self.async_writer = Some(
+                self.database
+                    .state
+                    .file_manager
+                    .write_async(&self.database.path)?,
+            );
+        }
+        let length = u32::try_from(data.len()).to_io()?;
+        let mut reservation = self.database.new_grain(length)?;
+        let mut crc = crc32c::crc32c(&length.to_le_bytes());
+        crc = crc32c::crc32c_append(crc, &data);
+        reservation.crc = Some(crc);
+
+        let mut header = [0; 8];
+        header[0..4].copy_from_slice(&crc.to_le_bytes());
+        header[4..8].copy_from_slice(&length.to_le_bytes());
+        data.splice(..0, header);
+
+        self.async_writer
+            .as_mut()
+            .unwrap()
+            .write_all_at(data, reservation.offset)?;
+
+        let id = reservation.grain_id;
+        self.writes
+            .insert(id, GrainBatchOperation::Allocate(reservation));
+
+        Ok(id)
+    }
+
     pub fn get(&mut self, grain_id: GrainId) -> io::Result<Option<GrainData>> {
         if let Some(GrainBatchOperation::Allocate(reservation)) = self.writes.get(&grain_id) {
             // This grain was allocated during this session.
@@ -118,13 +152,18 @@ where
     }
 
     pub fn commit(mut self) -> io::Result<BatchId> {
-        self.database
-            .commit_reservations(self.writes.drain().map(|(_, op)| op), None, None)
+        self.database.commit_reservations(
+            self.writes.drain().map(|(_, op)| op),
+            self.async_writer.take().into_iter(),
+            None,
+            None,
+        )
     }
 
     pub fn commit_and_checkpoint(mut self, checkpoint_to: BatchId) -> io::Result<BatchId> {
         self.database.commit_reservations(
             self.writes.drain().map(|(_, op)| op),
+            self.async_writer.take().into_iter(),
             Some(checkpoint_to),
             None,
         )
@@ -215,6 +254,7 @@ where
 
         session.database.commit_reservations(
             session.writes.drain().map(|(_, op)| op),
+            session.async_writer.take().into_iter(),
             None,
             header_guard,
         )
@@ -237,6 +277,7 @@ where
 
         session.database.commit_reservations(
             session.writes.drain().map(|(_, op)| op),
+            session.async_writer.take().into_iter(),
             Some(checkpoint_to),
             header_guard,
         )

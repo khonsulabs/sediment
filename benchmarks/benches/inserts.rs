@@ -340,9 +340,8 @@ mod rocksdb {
     use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch, WriteOptions, DB};
     use timings::{BenchmarkImplementation, Timings};
 
-    use crate::ThreadedInsertsData;
-
     use super::ITERS;
+    use crate::ThreadedInsertsData;
 
     pub fn measure(measurements: &Timings<String>) {
         let path = Path::new("./bench-suite.rocksdb");
