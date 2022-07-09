@@ -3,7 +3,7 @@ use std::{
     fs::OpenOptions,
     io::{Read, Seek, SeekFrom, Write},
     num::NonZeroUsize,
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 
 use parking_lot::Mutex;
@@ -17,8 +17,13 @@ use crate::io::{
 
 #[derive(Default, Debug, Clone)]
 pub struct StdFileManager {
+    data: Arc<Data>,
+}
+
+#[derive(Default, Debug)]
+struct Data {
     path_ids: PathIds,
-    thread_pool: Arc<Mutex<Option<flume::Sender<AsyncOpParams>>>>,
+    thread_pool: Mutex<Option<flume::Sender<AsyncOpParams>>>,
     open_files: OpenFiles,
 }
 
@@ -28,7 +33,7 @@ impl FileManager for StdFileManager {
     type File = StdFile;
     type AsyncFile = StdAsyncFileWriter;
     fn resolve_path(&self, path: impl AsRef<std::path::Path>) -> super::PathId {
-        self.path_ids.get_or_insert(path.as_ref())
+        self.data.path_ids.get_or_insert(path.as_ref())
     }
 
     fn read(&self, path: &super::PathId) -> io::Result<Self::File> {
@@ -36,7 +41,7 @@ impl FileManager for StdFileManager {
     }
 
     fn write(&self, path: &super::PathId) -> io::Result<Self::File> {
-        let mut open_files = self.open_files.lock();
+        let mut open_files = self.data.open_files.lock();
         let open_files_for_path = open_files.entry(path.id).or_default();
         let (file, location) = if let Some((file, location)) = open_files_for_path.pop_front() {
             (file, location)
@@ -60,13 +65,13 @@ impl FileManager for StdFileManager {
 
     fn write_async(&self, path: &PathId) -> std::io::Result<Self::AsyncFile> {
         let (result_sender, result_receiver) = flume::unbounded();
-        let mut thread_pool = self.thread_pool.lock();
+        let mut thread_pool = self.data.thread_pool.lock();
         if thread_pool.is_none() {
             // TODO maybe this shouldn't be unbounded?
             let (op_sender, op_receiver) = flume::unbounded();
 
             spawn_async_writer(
-                self.clone(),
+                Arc::downgrade(&self.data),
                 op_receiver,
                 std::thread::available_parallelism().map_or(1, NonZeroUsize::get),
             );
@@ -81,6 +86,11 @@ impl FileManager for StdFileManager {
             result_receiver,
             operations_sent: 0,
         })
+    }
+
+    fn synchronize(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        let file = std::fs::File::open(path)?;
+        file.sync_data()
     }
 }
 
@@ -199,7 +209,7 @@ impl File for StdFile {
 
 impl Drop for StdFile {
     fn drop(&mut self) {
-        let mut open_files = self.manager.open_files.lock();
+        let mut open_files = self.manager.data.open_files.lock();
         let open_files_for_path = open_files.entry(self.path_id).or_default();
         open_files_for_path.push_front((self.file.take().expect("already dropped"), self.location));
     }
@@ -268,7 +278,7 @@ impl WriteIoBuffer for StdAsyncFileWriter {
 }
 
 fn spawn_async_writer(
-    manager: StdFileManager,
+    manager: Weak<Data>,
     op_receiver: flume::Receiver<AsyncOpParams>,
     additional_thread_limit: usize,
 ) {
@@ -276,22 +286,23 @@ fn spawn_async_writer(
 }
 
 fn async_writer(
-    manager: &StdFileManager,
+    weak_manager: &Weak<Data>,
     op_receiver: &flume::Receiver<AsyncOpParams>,
     additional_thread_limit: usize,
 ) {
     let mut spawned_additional_thread = additional_thread_limit == 0;
-    while let Ok(write) = op_receiver.recv() {
+    while let (Ok(write), Some(manager)) = (op_receiver.recv(), weak_manager.upgrade()) {
+        let manager = StdFileManager { data: manager };
         if !spawned_additional_thread && !op_receiver.is_empty() {
             spawned_additional_thread = true;
             spawn_async_writer(
-                manager.clone(),
+                weak_manager.clone(),
                 op_receiver.clone(),
                 additional_thread_limit - 1,
             );
         }
 
-        let result = async_write(manager, &write.path, write.buffer, write.position);
+        let result = async_write(&manager, &write.path, write.buffer, write.position);
         drop(write.result_sender.send(result));
     }
 }

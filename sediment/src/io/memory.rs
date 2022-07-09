@@ -35,6 +35,10 @@ impl FileManager for MemoryFileManager {
     fn write_async(&self, path: &io::paths::PathId) -> std::io::Result<Self::AsyncFile> {
         self.write(path)
     }
+
+    fn synchronize(&self, _path: &io::paths::PathId) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Default)]

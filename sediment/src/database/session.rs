@@ -5,8 +5,8 @@ use std::{
 
 use crate::{
     database::{
-        committer::GrainBatchOperation,
-        embedded::{EmbeddedHeaderGuard, EmbeddedHeaderUpdate},
+        committer::{GrainBatchOperation, PendingCommit},
+        embedded::{EmbeddedHeaderUpdate, GrainMutexGuard},
         Database, GrainData,
     },
     format::{BatchId, GrainId},
@@ -53,7 +53,7 @@ where
             .database
             .state
             .file_manager
-            .write(&self.database.path)?;
+            .write(self.database.path_id())?;
         let mut reservation = self.database.new_grain(length)?;
         let mut crc = crc32c::crc32c(&length.to_le_bytes());
         crc = crc32c::crc32c_append(crc, data);
@@ -102,7 +102,7 @@ where
                 self.database
                     .state
                     .file_manager
-                    .write_async(&self.database.path)?,
+                    .write_async(self.database.path_id())?,
             );
         }
         let length = u32::try_from(data.len()).to_io()?;
@@ -118,7 +118,7 @@ where
 
         self.async_writer
             .as_mut()
-            .unwrap()
+            .expect("always initialized")
             .write_all_at(data, reservation.offset)?;
 
         let id = reservation.grain_id;
@@ -131,7 +131,11 @@ where
     pub fn get(&mut self, grain_id: GrainId) -> io::Result<Option<GrainData>> {
         if let Some(GrainBatchOperation::Allocate(reservation)) = self.writes.get(&grain_id) {
             // This grain was allocated during this session.
-            let mut file = self.database.state.file_manager.read(&self.database.path)?;
+            let mut file = self
+                .database
+                .state
+                .file_manager
+                .read(self.database.path_id())?;
 
             let data = vec![0; usize::try_from(reservation.length + 8).to_io()?];
             let (result, data) = file.read_exact(data, reservation.offset);
@@ -168,6 +172,27 @@ where
             None,
         )
     }
+
+    pub fn enqueue_commit(mut self) -> PendingCommit<Manager> {
+        self.database.enqueue_commit_reservations(
+            self.writes.drain().map(|(_, op)| op),
+            self.async_writer.take().into_iter(),
+            None,
+            None,
+        )
+    }
+
+    pub fn enqueue_commit_and_checkpoint(
+        mut self,
+        checkpoint_to: BatchId,
+    ) -> PendingCommit<Manager> {
+        self.database.enqueue_commit_reservations(
+            self.writes.drain().map(|(_, op)| op),
+            self.async_writer.take().into_iter(),
+            Some(checkpoint_to),
+            None,
+        )
+    }
 }
 
 impl<Manager> Drop for WriteSession<Manager>
@@ -195,7 +220,7 @@ where
     Manager: io::FileManager,
 {
     session: WriteSession<Manager>,
-    header_guard: EmbeddedHeaderGuard,
+    header_guard: GrainMutexGuard,
     new_embedded_header: EmbeddedHeaderUpdate,
 }
 
@@ -209,7 +234,7 @@ where
     /// [`Database::embedded_header`].
     pub fn embedded_header(&self) -> Option<GrainId> {
         match self.new_embedded_header {
-            EmbeddedHeaderUpdate::None => *self.header_guard,
+            EmbeddedHeaderUpdate::None => self.header_guard.get(),
             EmbeddedHeaderUpdate::Replace(new_value) => new_value,
         }
     }
@@ -233,16 +258,30 @@ where
         Ok(())
     }
 
+    pub fn downgrade(self) -> io::Result<WriteSession<Manager>> {
+        let Self {
+            mut session,
+            header_guard,
+            new_embedded_header,
+        } = self;
+        if let EmbeddedHeaderUpdate::Replace(header) = new_embedded_header {
+            if let Some(grain_id) = header_guard.swap(header) {
+                // We replaced an old header, archive the old grain.
+                session.archive(grain_id)?;
+            }
+        }
+        Ok(session)
+    }
+
     pub fn commit(self) -> io::Result<BatchId> {
         let Self {
             mut session,
-            mut header_guard,
+            header_guard,
             new_embedded_header,
         } = self;
 
-        let header_guard = if let EmbeddedHeaderUpdate::Replace(mut header) = new_embedded_header {
-            std::mem::swap(&mut header, &mut header_guard);
-            if let Some(grain_id) = header {
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(header) = new_embedded_header {
+            if let Some(grain_id) = header_guard.swap(header) {
                 // We replaced an old header, archive the old grain.
                 session.archive(grain_id)?;
             }
@@ -263,12 +302,15 @@ where
     pub fn commit_and_checkpoint(self, checkpoint_to: BatchId) -> io::Result<BatchId> {
         let Self {
             mut session,
-            mut header_guard,
+            header_guard,
             new_embedded_header,
         } = self;
 
-        let header_guard = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header {
-            *header_guard = new_header;
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(header) = new_embedded_header {
+            if let Some(grain_id) = header_guard.swap(header) {
+                // We replaced an old header, archive the old grain.
+                session.archive(grain_id)?;
+            }
             Some(header_guard)
         } else {
             // The header never updated.
@@ -281,6 +323,61 @@ where
             Some(checkpoint_to),
             header_guard,
         )
+    }
+
+    pub fn enqueue_commit(self) -> io::Result<PendingCommit<Manager>> {
+        let Self {
+            mut session,
+            header_guard,
+            new_embedded_header,
+        } = self;
+
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(header) = new_embedded_header {
+            if let Some(grain_id) = header_guard.swap(header) {
+                // We replaced an old header, archive the old grain.
+                session.archive(grain_id)?;
+            }
+            Some(header_guard)
+        } else {
+            // The header never updated.
+            None
+        };
+
+        Ok(session.database.enqueue_commit_reservations(
+            session.writes.drain().map(|(_, op)| op),
+            session.async_writer.take().into_iter(),
+            None,
+            header_guard,
+        ))
+    }
+
+    pub fn enqueue_commit_and_checkpoint(
+        self,
+        checkpoint_to: BatchId,
+    ) -> io::Result<PendingCommit<Manager>> {
+        let Self {
+            mut session,
+            header_guard,
+            new_embedded_header,
+        } = self;
+
+        let header_guard = if let EmbeddedHeaderUpdate::Replace(header) = new_embedded_header {
+            if let Some(grain_id) = header_guard.swap(header) {
+                // We replaced an old header, archive the old grain.
+                session.archive(grain_id)?;
+            }
+            Some(header_guard)
+        } else {
+            // The header never updated.
+            None
+        };
+
+        Ok(session.database.enqueue_commit_reservations(
+            session.writes.drain().map(|(_, op)| op),
+            session.async_writer.take().into_iter(),
+            Some(checkpoint_to),
+            header_guard,
+        ))
     }
 }
 

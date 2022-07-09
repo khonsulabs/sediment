@@ -114,6 +114,13 @@ impl io::FileManager for AnyFileManager {
             }
         }
     }
+
+    fn synchronize(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        match self {
+            AnyFileManager::Std(manager) => manager.synchronize(path),
+            AnyFileManager::Memory(manager) => manager.synchronize(path),
+        }
+    }
 }
 
 impl AnyFileManager {

@@ -207,6 +207,26 @@ impl io::FileManager for UringFileManager {
             operations_sent: 0,
         })
     }
+
+    fn synchronize(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        let (result_sender, result_receiver) = flume::bounded(1);
+        self.op_sender
+            .send(AsyncOp {
+                op: Op::Synchronize,
+                params: AsyncOpParams {
+                    path: path.clone(),
+                    position: 0,
+                    buffer: IoBuffer::default(),
+                    result_sender,
+                },
+            })
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
+
+        result_receiver
+            .recv()
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?
+            .0
+    }
 }
 
 fn uring_thread(ops: flume::Receiver<AsyncOp>) {

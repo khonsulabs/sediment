@@ -1,15 +1,15 @@
 use std::{
     collections::{HashMap, HashSet},
     iter,
-    sync::atomic::Ordering,
+    sync::{atomic::Ordering, Arc},
 };
 
-use parking_lot::{Condvar, Mutex};
+use parking_lot::{Condvar, Mutex, MutexGuard};
 
 use crate::{
     database::{
         disk::{BasinState, DiskState, GrainMapState, StratumState},
-        embedded::{EmbeddedHeaderGuard, EmbeddedHeaderUpdate},
+        embedded::{EmbeddedHeaderUpdate, GrainMutexGuard},
         page_cache::LoadedGrainMapPage,
         DatabaseState, GrainReservation,
     },
@@ -17,7 +17,7 @@ use crate::{
         crc, Allocation, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainId, GrainMapPage,
         GrainOperation, LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
-    io::{self, ext::ToIoResult, paths::PathId, File, FileManager, WriteIoBuffer},
+    io::{self, ext::ToIoResult, File, FileManager, WriteIoBuffer},
     todo_if,
     utils::Multiples,
 };
@@ -37,19 +37,34 @@ impl<AsyncFile: io::AsyncFileWriter> Default for Committer<AsyncFile> {
     }
 }
 impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
-    pub fn commit(
+    pub fn enqueue_commit(
         &self,
         batch: impl Iterator<Item = GrainBatchOperation>,
         async_writes: impl Iterator<Item = AsyncFile>,
         checkpoint_to: Option<BatchId>,
-        new_embedded_header: Option<EmbeddedHeaderGuard>,
-        database: &DatabaseState<AsyncFile::Manager>,
-        path: &PathId,
-        scratch: &mut Vec<u8>,
-    ) -> io::Result<BatchId> {
+        new_embedded_header: Option<GrainMutexGuard>,
+        database: Arc<DatabaseState<AsyncFile::Manager>>,
+    ) -> PendingCommit<AsyncFile::Manager> {
         let mut state = self.state.lock();
+        let batch_id = Self::batch_commit(
+            batch,
+            async_writes,
+            checkpoint_to,
+            new_embedded_header,
+            &mut state,
+        );
+
+        PendingCommit { database, batch_id }
+    }
+
+    fn batch_commit(
+        batch: impl Iterator<Item = GrainBatchOperation>,
+        async_writes: impl Iterator<Item = AsyncFile>,
+        checkpoint_to: Option<BatchId>,
+        new_embedded_header: Option<GrainMutexGuard>,
+        state: &mut CommitBatches<AsyncFile>,
+    ) -> GrainBatchId {
         let batch_id = state.batch_id;
-        let mut file = database.file_manager.write(path)?;
         state.batch_id.0 += 1;
         let batch = GrainBatch {
             batch_id,
@@ -60,11 +75,57 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         state.pending_batches.push(batch);
         // Take the new header value, and release the guard by consuming it with
         // map.
-        state.new_embedded_header = new_embedded_header
-            .map_or(EmbeddedHeaderUpdate::None, |guard| {
-                EmbeddedHeaderUpdate::Replace(*guard)
-            });
+        if let Some(new_embedded_header) = new_embedded_header {
+            // TODO this code needs to archive grains, but it's far enough in
+            // the process it's kind of annoying to do. Ideally, if the new
+            // header isn't used, it shouldn't be included in the batch in the
+            // first place.
+            state.new_embedded_header = EmbeddedHeaderUpdate::Replace(new_embedded_header.get());
+        }
 
+        batch_id
+    }
+
+    pub fn commit(
+        &self,
+        batch: impl Iterator<Item = GrainBatchOperation>,
+        async_writes: impl Iterator<Item = AsyncFile>,
+        checkpoint_to: Option<BatchId>,
+        new_embedded_header: Option<GrainMutexGuard>,
+        database: &DatabaseState<AsyncFile::Manager>,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<BatchId> {
+        let mut state = self.state.lock();
+        let batch_id = Self::batch_commit(
+            batch,
+            async_writes,
+            checkpoint_to,
+            new_embedded_header,
+            &mut state,
+        );
+        self.commit_or_wait(batch_id, state, database, scratch)
+    }
+
+    pub fn wait_for_batch(
+        &self,
+        pending_commit: &PendingCommit<AsyncFile::Manager>,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<BatchId> {
+        self.commit_or_wait(
+            pending_commit.batch_id,
+            self.state.lock(),
+            &pending_commit.database,
+            scratch,
+        )
+    }
+
+    fn commit_or_wait(
+        &self,
+        batch_id: GrainBatchId,
+        mut state: MutexGuard<'_, CommitBatches<AsyncFile>>,
+        database: &DatabaseState<AsyncFile::Manager>,
+        scratch: &mut Vec<u8>,
+    ) -> io::Result<BatchId> {
         loop {
             if state.committing {
                 // Wait for a commit to notify that a batch has been committed.
@@ -82,16 +143,17 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 // while we write and sync the file.
                 drop(state);
 
+                let mut file = database.file_manager.write(&database.path)?;
                 let new_batch_id = Self::commit_batches(
                     grains,
                     async_writes,
                     checkpoint_to,
                     new_embedded_header,
                     database,
-                    path,
                     &mut file,
                     scratch,
                 )?;
+                drop(file);
 
                 // Re-acquire the state to update the knowledge of committed batches
                 let mut state = self.state.lock();
@@ -117,11 +179,10 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
 
     fn commit_batches(
         mut grains: Vec<GrainBatchOperation>,
-        async_writes: Vec<AsyncFile>,
+        pending_async_writers: Vec<AsyncFile>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: EmbeddedHeaderUpdate,
         database: &DatabaseState<AsyncFile::Manager>,
-        path: &PathId,
         file: &mut <AsyncFile::Manager as io::FileManager>::File,
         scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
@@ -172,7 +233,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             scratch,
         )?;
 
-        let mut async_writer = database.file_manager.write_async(path)?;
+        let mut async_writer = database.file_manager.write_async(&database.path)?;
 
         disk_state.header.log_offset = Self::write_commit_log(
             &log_entry,
@@ -205,7 +266,10 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             scratch,
         )?;
 
-        for mut async_writer in async_writes.into_iter().chain(iter::once(async_writer)) {
+        for mut async_writer in pending_async_writers
+            .into_iter()
+            .chain(iter::once(async_writer))
+        {
             async_writer.wait()?;
         }
 
@@ -615,4 +679,23 @@ struct CommitModifications {
     modified_basins: Vec<usize>,
     grain_maps: HashSet<(usize, usize, usize)>,
     new_pages: HashSet<u64>,
+}
+
+pub struct PendingCommit<Manager>
+where
+    Manager: io::FileManager,
+{
+    database: Arc<DatabaseState<Manager>>,
+    batch_id: GrainBatchId,
+}
+
+impl<Manager> PendingCommit<Manager>
+where
+    Manager: io::FileManager,
+{
+    pub fn commit(&self) -> io::Result<BatchId> {
+        self.database
+            .committer
+            .wait_for_batch(self, &mut Vec::new())
+    }
 }

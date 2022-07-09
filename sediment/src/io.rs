@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     io::{self, ErrorKind},
     path::Path,
 };
@@ -19,7 +20,7 @@ pub mod ext;
 #[cfg(target_os = "linux")]
 mod linux;
 
-pub trait FileManager: Default + Clone + Send + Sync + 'static {
+pub trait FileManager: Debug + Default + Clone + Send + Sync + 'static {
     type File: File<Manager = Self>;
     type AsyncFile: AsyncFileWriter<Manager = Self>;
 
@@ -28,9 +29,11 @@ pub trait FileManager: Default + Clone + Send + Sync + 'static {
     fn read(&self, path: &PathId) -> io::Result<Self::File>;
     fn write(&self, path: &PathId) -> io::Result<Self::File>;
     fn write_async(&self, path: &PathId) -> io::Result<Self::AsyncFile>;
+
+    fn synchronize(&self, path: &PathId) -> io::Result<()>;
 }
 
-pub trait File: WriteIoBuffer {
+pub trait File: Debug + WriteIoBuffer {
     type Manager: FileManager<File = Self>;
     fn len(&self) -> io::Result<u64>;
     fn is_empty(&self) -> io::Result<bool> {
@@ -45,7 +48,7 @@ pub trait File: WriteIoBuffer {
     fn set_length(&mut self, new_length: u64) -> io::Result<()>;
 }
 
-pub trait AsyncFileWriter: std::fmt::Debug + WriteIoBuffer + Send + Sync {
+pub trait AsyncFileWriter: Debug + WriteIoBuffer + Send + Sync {
     type Manager: FileManager<AsyncFile = Self>;
 
     fn background_write_all(

@@ -17,7 +17,7 @@ use crate::{
         atlas::Atlas,
         committer::{Committer, GrainBatchOperation},
         disk::DiskState,
-        embedded::{EmbeddedHeaderGuard, EmbeddedHeaderState},
+        embedded::EmbeddedHeaderState,
         log::CommitLog,
         page_cache::PageCache,
     },
@@ -36,7 +36,9 @@ mod page_cache;
 mod session;
 
 pub use self::{
+    committer::PendingCommit,
     config::{Configuration, RecoveryCallback},
+    embedded::GrainMutexGuard,
     log::CommitLogSnapshot,
     session::{HeaderUpdateSession, WriteSession},
 };
@@ -46,7 +48,6 @@ pub struct Database<Manager>
 where
     Manager: io::FileManager,
 {
-    path: PathId,
     scratch: Vec<u8>,
     state: Arc<DatabaseState<Manager>>,
 }
@@ -70,15 +71,17 @@ where
         let grain_map_page_cache = PageCache::default();
 
         let state = DiskState::recover(&mut file, &mut scratch, &grain_map_page_cache)?;
+        drop(file);
+
         let atlas = Atlas::from_state(&state.disk_state);
         let embedded_header = state
             .log
             .most_recent_entry()
             .and_then(|(_, index)| index.embedded_header);
         let mut database = Self {
-            path,
             scratch,
             state: Arc::new(DatabaseState {
+                path,
                 file_manager: manager,
                 current_batch: AtomicU64::new(state.disk_state.header.batch.0),
                 checkpoint: AtomicU64::new(state.disk_state.header.checkpoint.0),
@@ -99,12 +102,14 @@ where
         Ok(database)
     }
 
+    #[must_use]
     pub fn path(&self) -> &Path {
-        &self.path.path
+        &self.state.path.path
     }
 
-    pub fn path_id(&self) -> u64 {
-        self.path.id
+    #[must_use]
+    pub fn path_id(&self) -> &PathId {
+        &self.state.path
     }
 
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self>
@@ -172,7 +177,7 @@ where
 
     pub fn get(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
         let mut atlas = self.state.atlas.lock();
-        let mut file = self.state.file_manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.state.path)?;
         let info = match atlas.grain_allocation_info(
             grain,
             self.current_batch(),
@@ -206,7 +211,7 @@ where
     }
 
     pub fn read_commit_log_entry(&mut self, entry: &LogEntryIndex) -> io::Result<Vec<u8>> {
-        let mut file = self.state.file_manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.state.path)?;
         let buffer = vec![0; usize::try_from(entry.length).to_io()?];
         let (result, buffer) = file.read_exact(buffer, entry.position);
         result?;
@@ -214,7 +219,7 @@ where
     }
 
     pub fn get_commit_log_entry(&mut self, entry: &LogEntryIndex) -> io::Result<CommitLogEntry> {
-        let mut file = self.state.file_manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.state.path)?;
         CommitLogEntry::load_from(entry, true, &mut file, &mut self.scratch)
     }
 
@@ -235,7 +240,7 @@ where
     fn new_grain(&self, length: u32) -> io::Result<GrainReservation> {
         let mut active_state = self.state.atlas.lock();
 
-        let mut file = self.state.file_manager.write(&self.path)?;
+        let mut file = self.state.file_manager.write(&self.state.path)?;
         active_state.reserve_grain(
             length,
             &self.state.grain_map_page_cache,
@@ -247,7 +252,7 @@ where
     fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {
         let mut active_state = self.state.atlas.lock();
 
-        let mut file = self.state.file_manager.read(&self.path)?;
+        let mut file = self.state.file_manager.read(&self.state.path)?;
         let info = active_state.grain_allocation_info(
             grain_id,
             self.current_batch(),
@@ -270,7 +275,7 @@ where
         reservations: impl Iterator<Item = GrainBatchOperation>,
         async_writes: impl Iterator<Item = Manager::AsyncFile>,
         checkpoint_to: Option<BatchId>,
-        new_embedded_header: Option<EmbeddedHeaderGuard>,
+        new_embedded_header: Option<GrainMutexGuard>,
     ) -> io::Result<BatchId> {
         self.state.committer.commit(
             reservations,
@@ -278,8 +283,23 @@ where
             checkpoint_to,
             new_embedded_header,
             &self.state,
-            &self.path,
             &mut self.scratch,
+        )
+    }
+
+    fn enqueue_commit_reservations(
+        &mut self,
+        reservations: impl Iterator<Item = GrainBatchOperation>,
+        async_writes: impl Iterator<Item = Manager::AsyncFile>,
+        checkpoint_to: Option<BatchId>,
+        new_embedded_header: Option<GrainMutexGuard>,
+    ) -> PendingCommit<Manager> {
+        self.state.committer.enqueue_commit(
+            reservations,
+            async_writes,
+            checkpoint_to,
+            new_embedded_header,
+            self.state.clone(),
         )
     }
 
@@ -299,7 +319,6 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            path: self.path.clone(),
             scratch: Vec::new(),
             state: self.state.clone(),
         }
@@ -319,6 +338,7 @@ struct DatabaseState<Manager>
 where
     Manager: io::FileManager,
 {
+    path: PathId,
     file_manager: Manager,
     current_batch: AtomicU64,
     checkpoint: AtomicU64,
@@ -383,6 +403,7 @@ impl GrainData {
         &*self
     }
 
+    #[must_use]
     pub fn into_raw_bytes(self) -> Vec<u8> {
         self.data
     }
@@ -696,7 +717,7 @@ crate::io_test!(isolation, {
     }
     let manager = Manager::default();
     // Create the database.
-    let mut db = Database::<Manager>::open_with_manager(&path, manager.clone()).unwrap();
+    let mut db = Database::<Manager>::open_with_manager(&path, manager).unwrap();
     let mut session = db.new_session();
     let grain_id = session.push(b"hello world").unwrap();
     println!("Wrote to {grain_id}");

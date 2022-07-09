@@ -926,7 +926,9 @@ impl CommitLogEntry {
     pub fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {
         let mut log = Self::default();
         while serialized.len() >= 10 {
-            let start = GrainId(u64::from_le_bytes(serialized[..8].try_into().unwrap()));
+            let start = GrainId(u64::from_le_bytes(
+                serialized[..8].try_into().expect("u64 is 8 bytes"),
+            ));
             let count = serialized[8];
             serialized = &serialized[9..];
             let operation = GrainOperation::deserialize_from(&mut serialized)?;
