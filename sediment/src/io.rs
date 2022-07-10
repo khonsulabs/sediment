@@ -31,6 +31,7 @@ pub trait FileManager: Debug + Default + Clone + Send + Sync + 'static {
     fn write_async(&self, path: &PathId) -> io::Result<Self::AsyncFile>;
 
     fn synchronize(&self, path: &PathId) -> io::Result<()>;
+    fn delete(&self, path: &PathId) -> io::Result<()>;
 }
 
 pub trait File: Debug + WriteIoBuffer {

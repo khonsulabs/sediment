@@ -121,6 +121,13 @@ impl io::FileManager for AnyFileManager {
             AnyFileManager::Memory(manager) => manager.synchronize(path),
         }
     }
+
+    fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        match self {
+            AnyFileManager::Std(manager) => manager.delete(path),
+            AnyFileManager::Memory(manager) => manager.delete(path),
+        }
+    }
 }
 
 impl AnyFileManager {

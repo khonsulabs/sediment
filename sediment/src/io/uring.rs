@@ -227,6 +227,10 @@ impl io::FileManager for UringFileManager {
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?
             .0
     }
+
+    fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
 }
 
 fn uring_thread(ops: flume::Receiver<AsyncOp>) {

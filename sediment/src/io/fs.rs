@@ -92,6 +92,10 @@ impl FileManager for StdFileManager {
         let file = std::fs::File::open(path)?;
         file.sync_data()
     }
+
+    fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        std::fs::remove_file(path)
+    }
 }
 
 #[derive(Debug)]

@@ -39,6 +39,15 @@ impl FileManager for MemoryFileManager {
     fn synchronize(&self, _path: &io::paths::PathId) -> std::io::Result<()> {
         Ok(())
     }
+
+    fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
+        let mut files = self.files.lock();
+        if files.remove(&path.id).is_some() {
+            Ok(())
+        } else {
+            Err(std::io::Error::from(ErrorKind::NotFound))
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
