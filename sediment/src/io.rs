@@ -32,6 +32,7 @@ pub trait FileManager: Debug + Default + Clone + Send + Sync + 'static {
 
     fn synchronize(&self, path: &PathId) -> io::Result<()>;
     fn delete(&self, path: &PathId) -> io::Result<()>;
+    fn delete_directory(&self, path: &Path) -> io::Result<()>;
 }
 
 pub trait File: Debug + WriteIoBuffer {
@@ -174,4 +175,21 @@ where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     std::io::Error::new(ErrorKind::InvalidData, message)
+}
+
+trait IgnoreNotFoundError<T> {
+    fn ignore_not_found(self) -> io::Result<T>;
+}
+
+impl<T> IgnoreNotFoundError<T> for io::Result<T>
+where
+    T: Default,
+{
+    fn ignore_not_found(self) -> io::Result<T> {
+        match self {
+            Ok(result) => Ok(result),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(T::default()),
+            Err(err) => Err(err),
+        }
+    }
 }

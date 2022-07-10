@@ -127,13 +127,12 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
         loop {
-            if state.committing {
+            // Check if our batch has been written.
+            if let Some(committed_batch_id) = state.committed_batches.remove(&batch_id) {
+                return Ok(committed_batch_id);
+            } else if state.committing {
                 // Wait for a commit to notify that a batch has been committed.
                 self.commit_sync.wait(&mut state);
-                // Check if our batch has been written.
-                if let Some(committed_batch_id) = state.committed_batches.remove(&batch_id) {
-                    return Ok(committed_batch_id);
-                }
             } else {
                 // No other thread has taken over committing, so this thread
                 // should.

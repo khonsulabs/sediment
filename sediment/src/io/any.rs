@@ -128,6 +128,13 @@ impl io::FileManager for AnyFileManager {
             AnyFileManager::Memory(manager) => manager.delete(path),
         }
     }
+
+    fn delete_directory(&self, path: &std::path::Path) -> std::io::Result<()> {
+        match self {
+            AnyFileManager::Std(manager) => manager.delete_directory(path),
+            AnyFileManager::Memory(manager) => manager.delete_directory(path),
+        }
+    }
 }
 
 impl AnyFileManager {

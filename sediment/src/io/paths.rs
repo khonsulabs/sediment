@@ -89,6 +89,16 @@ impl PathIds {
             .expect("should always return a path")
     }
 
+    #[must_use]
+    pub fn paths_with_prefix(&self, path: &Path) -> Vec<PathId> {
+        let files = self.file_ids.read();
+        files
+            .iter()
+            .filter(|p| p.path.starts_with(path))
+            .cloned()
+            .collect()
+    }
+
     // fn remove_file_id_for_path(&self, path: impl IntoPathId) -> Option<PathId> {
     //     let mut file_ids = self.file_ids.write();
     //     if path.id().is_some() {

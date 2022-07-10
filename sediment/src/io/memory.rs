@@ -42,11 +42,16 @@ impl FileManager for MemoryFileManager {
 
     fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
         let mut files = self.files.lock();
-        if files.remove(&path.id).is_some() {
-            Ok(())
-        } else {
-            Err(std::io::Error::from(ErrorKind::NotFound))
+        files.remove(&path.id);
+        Ok(())
+    }
+
+    fn delete_directory(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let mut files = self.files.lock();
+        for path in self.path_ids.paths_with_prefix(path) {
+            files.remove(&path.id);
         }
+        Ok(())
     }
 }
 

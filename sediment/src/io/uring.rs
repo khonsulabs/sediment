@@ -9,7 +9,7 @@ use tokio_uring::buf::IoBuf;
 
 use crate::io::{
     self, fs::StdFileManager, iobuffer::IoBuffer, paths::PathId, AsyncFileWriter, AsyncOpParams,
-    BufferResult, File, FileManager, WriteIoBuffer,
+    BufferResult, File, FileManager, IgnoreNotFoundError, WriteIoBuffer,
 };
 
 #[derive(Debug)]
@@ -229,7 +229,11 @@ impl io::FileManager for UringFileManager {
     }
 
     fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
-        std::fs::remove_file(path)
+        std::fs::remove_file(path).ignore_not_found()
+    }
+
+    fn delete_directory(&self, path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_dir_all(path).ignore_not_found()
     }
 }
 

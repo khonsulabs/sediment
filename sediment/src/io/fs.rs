@@ -12,7 +12,8 @@ use crate::io::{
     self,
     iobuffer::IoBuffer,
     paths::{PathId, PathIds},
-    AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, WriteIoBuffer,
+    AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, IgnoreNotFoundError,
+    WriteIoBuffer,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -94,7 +95,11 @@ impl FileManager for StdFileManager {
     }
 
     fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
-        std::fs::remove_file(path)
+        std::fs::remove_file(path).ignore_not_found()
+    }
+
+    fn delete_directory(&self, path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::remove_dir_all(path).ignore_not_found()
     }
 }
 
