@@ -104,7 +104,7 @@ impl SingleCommand {
 
                 let mut session = database.new_session();
                 let grain = session.push(&data)?;
-                let batch = session.commit()?;
+                let batch = session.commit()?.batch_id();
                 println!("New grain id: {}", grain);
                 println!("Committed in batch: {}", batch);
                 Ok(())

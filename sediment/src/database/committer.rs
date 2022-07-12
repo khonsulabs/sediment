@@ -8,6 +8,7 @@ use parking_lot::{Condvar, Mutex, MutexGuard, RwLock};
 
 use crate::{
     database::{
+        checkpoint_guard::CheckpointGuard,
         disk::{BasinState, DiskState, GrainMapState, StratumState},
         embedded::{EmbeddedHeaderUpdate, GrainMutexGuard},
         page_cache::LoadedGrainMapPage,
@@ -17,7 +18,7 @@ use crate::{
         crc, Allocation, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainId, GrainMapPage,
         GrainOperation, LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
-    io::{self, ext::ToIoResult, File, FileManager, WriteIoBuffer},
+    io::{self, ext::ToIoResult, paths::PathId, File, FileManager, WriteIoBuffer},
     todo_if,
     utils::Multiples,
 };
@@ -111,7 +112,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         new_embedded_header: Option<GrainMutexGuard>,
         database: &DatabaseState<AsyncFile::Manager>,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<BatchId> {
+    ) -> io::Result<CheckpointGuard> {
         let mut pending_reservations = self.pending_reservations.write();
         let mut state = self.state.lock();
         let batch_id = Self::batch_commit(
@@ -130,7 +131,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         &self,
         pending_commit: &PendingCommit<AsyncFile::Manager>,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<BatchId> {
+    ) -> io::Result<CheckpointGuard> {
         self.commit_or_wait(
             pending_commit.batch_id,
             self.state.lock(),
@@ -145,7 +146,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         mut state: MutexGuard<'_, CommitBatches<AsyncFile>>,
         database: &DatabaseState<AsyncFile::Manager>,
         scratch: &mut Vec<u8>,
-    ) -> io::Result<BatchId> {
+    ) -> io::Result<CheckpointGuard> {
         loop {
             // Check if our batch has been written.
             if let Some(committed_batch_id) = state.committed_batches.remove(&batch_id) {
@@ -162,6 +163,12 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 // while we write and sync the file.
                 drop(state);
 
+                let checkpoint_to = checkpoint_to.and_then(|checkpoint_to| {
+                    database
+                        .checkpoint_protector
+                        .safe_to_checkpoint_batch_id(checkpoint_to)
+                });
+
                 let mut file = database.file_manager.write(&database.path)?;
                 let new_batch_id = Self::commit_batches(
                     &mut grains,
@@ -174,13 +181,15 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 )?;
                 drop(file);
 
+                let new_batch_guard = database.checkpoint_protector.guard(new_batch_id);
+
                 // Re-acquire the state to update the knowledge of committed batches
                 let mut state = self.state.lock();
                 for id in (state.committed_batch_id.0 + 1)..=last_batch_id.0 {
                     if id != batch_id.0 {
                         state
                             .committed_batches
-                            .insert(GrainBatchId(id), new_batch_id);
+                            .insert(GrainBatchId(id), new_batch_guard.clone());
                     }
                 }
                 state.committed_batch_id = last_batch_id;
@@ -203,7 +212,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 }
                 drop(pending_reservations);
 
-                return Ok(new_batch_id);
+                return Ok(new_batch_guard);
             }
         }
     }
@@ -226,6 +235,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             Self::gather_modifications(committing_batch, database, &mut disk_state)?;
 
         let freed_log_pages = if let Some(checkpoint_to) = checkpoint_to {
+            disk_state.header.checkpoint = checkpoint_to;
             let mut log = database.log.write();
             let pages_to_remove = log.checkpoint(checkpoint_to);
 
@@ -644,7 +654,7 @@ struct CommitBatches<AsyncFile: io::AsyncFileWriter> {
     committing: bool,
     batch_id: GrainBatchId,
     committed_batch_id: GrainBatchId,
-    committed_batches: HashMap<GrainBatchId, BatchId>,
+    committed_batches: HashMap<GrainBatchId, CheckpointGuard>,
     pending_batches: Vec<GrainBatch<AsyncFile>>,
     new_embedded_header: EmbeddedHeaderUpdate,
 }
@@ -724,9 +734,14 @@ impl<Manager> PendingCommit<Manager>
 where
     Manager: io::FileManager,
 {
-    pub fn commit(&self) -> io::Result<BatchId> {
+    pub fn commit(&self) -> io::Result<CheckpointGuard> {
         self.database
             .committer
             .wait_for_batch(self, &mut Vec::new())
+    }
+
+    #[must_use]
+    pub fn path_id(&self) -> &PathId {
+        &self.database.path
     }
 }

@@ -98,7 +98,7 @@ impl CommitLog {
                     checkpoint.0.checked_sub(commit_page.page.first_batch_id.0)
                 {
                     assert!(commits_after_first < 170);
-                    Some(usize::try_from(commits_after_first).unwrap())
+                    Some(usize::try_from(commits_after_first + 1).unwrap())
                 } else {
                     None
                 }

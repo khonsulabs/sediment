@@ -15,6 +15,7 @@ use crate::{
     database::{
         allocations::{FileAllocationStatistics, FileAllocations},
         atlas::Atlas,
+        checkpoint_guard::CheckpointProtector,
         committer::{Committer, GrainBatchOperation},
         disk::DiskState,
         embedded::EmbeddedHeaderState,
@@ -27,6 +28,7 @@ use crate::{
 
 mod allocations;
 mod atlas;
+mod checkpoint_guard;
 mod committer;
 mod config;
 mod disk;
@@ -36,6 +38,7 @@ mod page_cache;
 mod session;
 
 pub use self::{
+    checkpoint_guard::CheckpointGuard,
     committer::PendingCommit,
     config::{Configuration, RecoveryCallback},
     embedded::GrainMutexGuard,
@@ -85,6 +88,7 @@ where
                 file_manager: manager,
                 current_batch: AtomicU64::new(state.disk_state.header.batch.0),
                 checkpoint: AtomicU64::new(state.disk_state.header.checkpoint.0),
+                checkpoint_protector: CheckpointProtector::default(),
                 atlas: Mutex::new(atlas),
                 log: RwLock::new(state.log),
                 disk_state: Mutex::new(state.disk_state),
@@ -232,7 +236,7 @@ where
         CommitLogEntry::load_from(entry, true, &mut file, &mut self.scratch)
     }
 
-    pub fn checkpoint_to(&self, last_entry_to_remove: BatchId) -> io::Result<BatchId> {
+    pub fn checkpoint_to(&self, last_entry_to_remove: BatchId) -> io::Result<CheckpointGuard> {
         self.new_session()
             .commit_and_checkpoint(last_entry_to_remove)
     }
@@ -290,7 +294,7 @@ where
         async_writes: impl Iterator<Item = Manager::AsyncFile>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<GrainMutexGuard>,
-    ) -> io::Result<BatchId> {
+    ) -> io::Result<CheckpointGuard> {
         self.state.committer.commit(
             reservations,
             async_writes,
@@ -357,6 +361,7 @@ where
     file_manager: Manager,
     current_batch: AtomicU64,
     checkpoint: AtomicU64,
+    checkpoint_protector: CheckpointProtector,
     atlas: Mutex<Atlas>,
     disk_state: Mutex<DiskState>,
     embedded_header: EmbeddedHeaderState,
@@ -424,10 +429,10 @@ impl GrainData {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct GrainRecord {
     pub id: GrainId,
-    pub batch: BatchId,
+    pub batch: CheckpointGuard,
 }
 
 #[derive(Debug)]
@@ -477,7 +482,8 @@ crate::io_test!(basic_op, {
     let mut session = db.new_session();
     let grain_id = session.push(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
-    let committed_batch = session.commit().unwrap();
+    let committed_batch = session.commit().unwrap().batch_id();
+    assert_eq!(db.current_batch(), committed_batch);
     println!("Batch: {committed_batch}");
 
     let grain_data = db.get(grain_id).unwrap().unwrap();
@@ -494,7 +500,7 @@ crate::io_test!(basic_op, {
     let mut session = db.new_session();
     let second_grain_id = session.push(b"hello again").unwrap();
     println!("Wrote to {second_grain_id}");
-    let committed_batch = session.commit().unwrap();
+    let committed_batch = session.commit().unwrap().batch_id();
     println!("Batch: {committed_batch}");
 
     // Reopen the database.
@@ -511,7 +517,7 @@ crate::io_test!(basic_op, {
     let mut session = db.new_session();
     let third_grain_id = session.push(b"bye for now").unwrap();
     println!("Wrote to {third_grain_id}");
-    let committed_batch = session.commit().unwrap();
+    let committed_batch = session.commit().unwrap().batch_id();
     println!("Batch: {committed_batch}");
 
     // Reopen the database.
@@ -692,7 +698,7 @@ crate::io_test!(basic_rollback, {
     let mut session = db.new_session();
     let grain_id = session.push(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
-    let committed_batch = session.commit().unwrap();
+    let committed_batch = session.commit().unwrap().batch_id();
     println!("Batch: {committed_batch}");
 
     // Close the database
@@ -758,7 +764,7 @@ crate::io_test!(grain_lifecycle, {
     let mut session = db.new_session();
     let grain_id = session.push(b"hello world").unwrap();
     println!("Wrote to {grain_id}");
-    let committed_batch = session.commit().unwrap();
+    let committed_batch = session.commit().unwrap().batch_id();
     println!("Batch: {committed_batch}");
 
     // Reopen the database.
@@ -768,7 +774,7 @@ crate::io_test!(grain_lifecycle, {
     // Archive the grain
     let mut session = db.new_session();
     session.archive(grain_id).unwrap();
-    let archiving_commit = session.commit().unwrap();
+    let archiving_commit = session.commit().unwrap().batch_id();
 
     println!("Archived at: {archiving_commit}");
 
@@ -834,7 +840,7 @@ crate::io_test!(embedded_header, {
     let mut session = db.new_session().updating_embedded_header();
     session.set_embedded_header(Some(new_grain.id)).unwrap();
     println!("Updated header to {}", new_grain.id);
-    let new_header_commit = session.commit().unwrap();
+    let new_header_commit = session.commit().unwrap().batch_id();
 
     // Ensure the new write didn't overwrite the header.
     assert_eq!(db.embedded_header(), Some(new_grain.id));

@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     database::{
+        checkpoint_guard::CheckpointGuard,
         committer::{GrainBatchOperation, PendingCommit},
         embedded::{EmbeddedHeaderUpdate, GrainMutexGuard},
         Database, GrainData,
@@ -33,6 +34,10 @@ where
             writes: HashMap::new(),
             async_writer: None,
         }
+    }
+
+    pub fn database(&self) -> &Database<Manager> {
+        &self.database
     }
 
     /// Locks access to the current embedded header value. Only one session per
@@ -155,7 +160,7 @@ where
         Ok(())
     }
 
-    pub fn commit(mut self) -> io::Result<BatchId> {
+    pub fn commit(mut self) -> io::Result<CheckpointGuard> {
         self.database.commit_reservations(
             self.writes.drain().map(|(_, op)| op),
             self.async_writer.take().into_iter(),
@@ -164,7 +169,7 @@ where
         )
     }
 
-    pub fn commit_and_checkpoint(mut self, checkpoint_to: BatchId) -> io::Result<BatchId> {
+    pub fn commit_and_checkpoint(mut self, checkpoint_to: BatchId) -> io::Result<CheckpointGuard> {
         self.database.commit_reservations(
             self.writes.drain().map(|(_, op)| op),
             self.async_writer.take().into_iter(),
@@ -228,6 +233,10 @@ impl<Manager> HeaderUpdateSession<Manager>
 where
     Manager: io::FileManager,
 {
+    pub fn database(&self) -> &Database<Manager> {
+        &self.session.database
+    }
+
     /// Returns the embedded header [`GrainId`], if one is present. This returns
     /// the current in-memory state of the value and may not be persisted to
     /// disk yet. To read the current header's value, use
@@ -273,7 +282,7 @@ where
         Ok(session)
     }
 
-    pub fn commit(self) -> io::Result<BatchId> {
+    pub fn commit(self) -> io::Result<CheckpointGuard> {
         let Self {
             mut session,
             header_guard,
@@ -299,7 +308,7 @@ where
         )
     }
 
-    pub fn commit_and_checkpoint(self, checkpoint_to: BatchId) -> io::Result<BatchId> {
+    pub fn commit_and_checkpoint(self, checkpoint_to: BatchId) -> io::Result<CheckpointGuard> {
         let Self {
             mut session,
             header_guard,
