@@ -133,9 +133,10 @@ impl Atlas {
             self.allocate_new_grain_map(length, page_cache, file, file_allocations)?
         };
 
-        let offset = self
-            .map_stratum_for_grain(grain_id, |stratum| -> io::Result<u64> {
-                let grains_needed = (length + 8).ceil_div_by(stratum.grain_length);
+        let (offset, grain_count) = self
+            .map_stratum_for_grain(grain_id, |stratum| -> io::Result<(u64, u8)> {
+                let grains_needed =
+                    u8::try_from((length + 8).ceil_div_by(stratum.grain_length)).to_io()?;
 
                 let (offset, grain_map_index) =
                     stratum.offset_and_index_of_grain_data(grain_id.grain_index())?;
@@ -145,7 +146,7 @@ impl Atlas {
                     local_grain_index..local_grain_index + u64::from(grains_needed),
                     Allocation::Allocated,
                 );
-                Ok(offset)
+                Ok((offset, grains_needed))
             })
             .expect("reserved bad grain")?;
 
@@ -154,6 +155,7 @@ impl Atlas {
             offset,
             length,
             crc: None,
+            grain_count,
         })
     }
 

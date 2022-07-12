@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use parking_lot::{Condvar, Mutex, MutexGuard};
+use parking_lot::{Condvar, Mutex, MutexGuard, RwLock};
 
 use crate::{
     database::{
@@ -26,6 +26,7 @@ use crate::{
 pub(super) struct Committer<AsyncFile: io::AsyncFileWriter> {
     commit_sync: Condvar,
     state: Mutex<CommitBatches<AsyncFile>>,
+    pending_reservations: RwLock<HashMap<GrainId, GrainReservation>>,
 }
 
 impl<AsyncFile: io::AsyncFileWriter> Default for Committer<AsyncFile> {
@@ -33,10 +34,16 @@ impl<AsyncFile: io::AsyncFileWriter> Default for Committer<AsyncFile> {
         Self {
             commit_sync: Condvar::default(),
             state: Mutex::default(),
+            pending_reservations: RwLock::default(),
         }
     }
 }
 impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
+    pub fn pending_grain_reservation(&self, grain_id: GrainId) -> Option<GrainReservation> {
+        let pending_reservations = self.pending_reservations.read();
+        pending_reservations.get(&grain_id).copied()
+    }
+
     pub fn enqueue_commit(
         &self,
         batch: impl Iterator<Item = GrainBatchOperation>,
@@ -45,12 +52,14 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         new_embedded_header: Option<GrainMutexGuard>,
         database: Arc<DatabaseState<AsyncFile::Manager>>,
     ) -> PendingCommit<AsyncFile::Manager> {
+        let mut pending_reservations = self.pending_reservations.write();
         let mut state = self.state.lock();
         let batch_id = Self::batch_commit(
             batch,
             async_writes,
             checkpoint_to,
             new_embedded_header,
+            &mut pending_reservations,
             &mut state,
         );
 
@@ -62,6 +71,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         async_writes: impl Iterator<Item = AsyncFile>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<GrainMutexGuard>,
+        pending_reservations: &mut HashMap<GrainId, GrainReservation>,
         state: &mut CommitBatches<AsyncFile>,
     ) -> GrainBatchId {
         let batch_id = state.batch_id;
@@ -69,7 +79,14 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         let batch = GrainBatch {
             batch_id,
             checkpoint_to,
-            grains: batch.collect(),
+            grains: batch
+                .map(|op| {
+                    if let GrainBatchOperation::Allocate(reservation) = &op {
+                        pending_reservations.insert(reservation.grain_id, *reservation);
+                    }
+                    op
+                })
+                .collect(),
             async_writers: async_writes.collect(),
         };
         state.pending_batches.push(batch);
@@ -95,14 +112,17 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         database: &DatabaseState<AsyncFile::Manager>,
         scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
+        let mut pending_reservations = self.pending_reservations.write();
         let mut state = self.state.lock();
         let batch_id = Self::batch_commit(
             batch,
             async_writes,
             checkpoint_to,
             new_embedded_header,
+            &mut pending_reservations,
             &mut state,
         );
+        drop(pending_reservations);
         self.commit_or_wait(batch_id, state, database, scratch)
     }
 
@@ -136,7 +156,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             } else {
                 // No other thread has taken over committing, so this thread
                 // should.
-                let (last_batch_id, checkpoint_to, new_embedded_header, grains, async_writes) =
+                let (last_batch_id, checkpoint_to, new_embedded_header, mut grains, async_writes) =
                     state.become_commit_thread();
                 // Release the mutex, allowing other threads to queue batches
                 // while we write and sync the file.
@@ -144,7 +164,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
 
                 let mut file = database.file_manager.write(&database.path)?;
                 let new_batch_id = Self::commit_batches(
-                    grains,
+                    &mut grains,
                     async_writes,
                     checkpoint_to,
                     new_embedded_header,
@@ -171,13 +191,25 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 // be waiting.
                 self.commit_sync.notify_all();
 
+                let mut pending_reservations = self.pending_reservations.write();
+                for reservation in grains.into_iter().filter_map(|op| {
+                    if let GrainBatchOperation::Allocate(reservation) = op {
+                        Some(reservation)
+                    } else {
+                        None
+                    }
+                }) {
+                    pending_reservations.remove(&reservation.grain_id);
+                }
+                drop(pending_reservations);
+
                 return Ok(new_batch_id);
             }
         }
     }
 
     fn commit_batches(
-        mut grains: Vec<GrainBatchOperation>,
+        grains: &mut Vec<GrainBatchOperation>,
         pending_async_writers: Vec<AsyncFile>,
         checkpoint_to: Option<BatchId>,
         new_embedded_header: EmbeddedHeaderUpdate,
@@ -224,7 +256,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         grains.sort_by_key(GrainBatchOperation::grain_id);
 
         let (mut modified_pages, log_entry) = Self::update_grain_map_pages(
-            &grains,
+            grains,
             &mut modifications,
             database,
             &mut disk_state,
@@ -587,7 +619,7 @@ struct GrainBatch<File: io::AsyncFileWriter> {
     pub async_writers: Vec<File>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum GrainBatchOperation {
     Allocate(GrainReservation),
     Archive { grain_id: GrainId, count: u8 },

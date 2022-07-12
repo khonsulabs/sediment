@@ -176,8 +176,17 @@ where
     }
 
     pub fn get(&mut self, grain: GrainId) -> io::Result<Option<GrainData>> {
-        let mut atlas = self.state.atlas.lock();
         let mut file = self.state.file_manager.read(&self.state.path)?;
+        if let Some(reservation) = self.state.committer.pending_grain_reservation(grain) {
+            // This grain is pending being written.
+            // TODO if this was an async write, we need to wait.
+            let data = vec![0; usize::try_from(reservation.length + 8).to_io()?];
+            let (result, data) = file.read_exact(data, reservation.offset);
+            result?;
+            return Ok(Some(GrainData::from_bytes(data)));
+        }
+
+        let mut atlas = self.state.atlas.lock();
         let info = match atlas.grain_allocation_info(
             grain,
             self.current_batch(),
@@ -250,6 +259,11 @@ where
     }
 
     fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {
+        if let Some(pending_reservation) = self.state.committer.pending_grain_reservation(grain_id)
+        {
+            return Ok(pending_reservation.grain_count);
+        }
+
         let mut active_state = self.state.atlas.lock();
 
         let mut file = self.state.file_manager.read(&self.state.path)?;
@@ -325,12 +339,13 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct GrainReservation {
     pub grain_id: GrainId,
     pub offset: u64,
     pub length: u32,
     crc: Option<u32>,
+    grain_count: u8,
 }
 
 #[derive(Debug)]

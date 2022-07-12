@@ -118,9 +118,10 @@ impl PageCache {
             if first_byte.map_or(false, |first_byte| first_byte > grains_allocated) {
                 // The previous byte contained a larger number, which means this
                 // `GrainId` points at the middle of an allocation.
-                return Err(io::invalid_data_error(
-                    "invalid GrainId - points inside of another allocation",
-                ));
+                return Err(io::invalid_data_error(format!(
+                    "invalid GrainId - points inside of another allocation {} - {grains_allocated}",
+                    first_byte.unwrap()
+                )));
             }
 
             Ok(grains_allocated)

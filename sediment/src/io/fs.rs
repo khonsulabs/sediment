@@ -239,8 +239,8 @@ impl WriteIoBuffer for StdFile {
 pub struct StdAsyncFileWriter {
     path: PathId,
     op_sender: flume::Sender<AsyncOpParams>,
-    result_sender: flume::Sender<BufferResult<()>>,
-    result_receiver: flume::Receiver<BufferResult<()>>,
+    result_sender: flume::Sender<io::Result<()>>,
+    result_receiver: flume::Receiver<io::Result<()>>,
     operations_sent: usize,
 }
 
@@ -256,7 +256,7 @@ impl AsyncFileWriter for StdAsyncFileWriter {
             .send(AsyncOpParams {
                 path: self.path.clone(),
                 buffer: buffer.into(),
-                result_sender: self.result_sender.clone(),
+                result_sender: io::AsyncOpResultSender::Io(self.result_sender.clone()),
                 position,
             })
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
@@ -266,11 +266,9 @@ impl AsyncFileWriter for StdAsyncFileWriter {
 
     fn wait(&mut self) -> std::io::Result<()> {
         for _ in 0..self.operations_sent {
-            let (result, _) = self
-                .result_receiver
+            self.result_receiver
                 .recv()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
-            result?;
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))??;
         }
         Ok(())
     }
@@ -312,7 +310,7 @@ fn async_writer(
         }
 
         let result = async_write(&manager, &write.path, write.buffer, write.position);
-        drop(write.result_sender.send(result));
+        write.result_sender.send_result(result);
     }
 }
 

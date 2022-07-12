@@ -39,7 +39,7 @@ impl io::File for UringFile {
                 path: self.path.clone(),
                 position,
                 buffer: buffer.into(),
-                result_sender: self.result_sender.clone(),
+                result_sender: io::AsyncOpResultSender::Buffer(self.result_sender.clone()),
             },
         }) {
             Ok(_) => match self.result_receiver.recv() {
@@ -82,7 +82,7 @@ impl io::File for UringFile {
                 path: self.path.clone(),
                 position,
                 buffer: buffer.into(),
-                result_sender: self.result_sender.clone(),
+                result_sender: io::AsyncOpResultSender::Buffer(self.result_sender.clone()),
             },
         }) {
             Ok(_) => match self.result_receiver.recv() {
@@ -123,7 +123,7 @@ impl io::File for UringFile {
                     path: self.path.clone(),
                     position: 0,
                     buffer: Vec::new().into(),
-                    result_sender: self.result_sender.clone(),
+                    result_sender: io::AsyncOpResultSender::Buffer(self.result_sender.clone()),
                 },
             })
             .map_err(|err| std::io::Error::new(ErrorKind::BrokenPipe, err))?;
@@ -217,7 +217,7 @@ impl io::FileManager for UringFileManager {
                     path: path.clone(),
                     position: 0,
                     buffer: IoBuffer::default(),
-                    result_sender,
+                    result_sender: io::AsyncOpResultSender::Io(result_sender),
                 },
             })
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
@@ -225,7 +225,6 @@ impl io::FileManager for UringFileManager {
         result_receiver
             .recv()
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?
-            .0
     }
 
     fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
@@ -269,7 +268,7 @@ fn uring_thread(ops: flume::Receiver<AsyncOp>) {
                                 perform_async_sync(op.params.path, &open_files).await
                             }
                         };
-                        drop(op.params.result_sender.send(result));
+                        op.params.result_sender.send_result(result);
                     });
                 }
             })
@@ -281,8 +280,8 @@ fn uring_thread(ops: flume::Receiver<AsyncOp>) {
 pub struct AsyncUringFile {
     path: PathId,
     manager: UringFileManager,
-    result_sender: flume::Sender<BufferResult<()>>,
-    result_receiver: flume::Receiver<BufferResult<()>>,
+    result_sender: flume::Sender<io::Result<()>>,
+    result_receiver: flume::Receiver<io::Result<()>>,
     operations_sent: usize,
 }
 
@@ -304,7 +303,7 @@ impl io::AsyncFileWriter for AsyncUringFile {
                     path,
                     position,
                     buffer,
-                    result_sender: self.result_sender.clone(),
+                    result_sender: io::AsyncOpResultSender::Io(self.result_sender.clone()),
                 },
             })
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
@@ -314,11 +313,9 @@ impl io::AsyncFileWriter for AsyncUringFile {
 
     fn wait(&mut self) -> std::io::Result<()> {
         for _ in 0..self.operations_sent {
-            let (result, _) = self
-                .result_receiver
+            self.result_receiver
                 .recv()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
-            result?;
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))??;
         }
         Ok(())
     }

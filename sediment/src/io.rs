@@ -69,7 +69,22 @@ pub struct AsyncOpParams {
     path: PathId,
     position: u64,
     buffer: IoBuffer,
-    result_sender: flume::Sender<BufferResult<()>>,
+    result_sender: AsyncOpResultSender,
+}
+
+#[derive(Debug)]
+pub enum AsyncOpResultSender {
+    Buffer(flume::Sender<BufferResult<()>>),
+    Io(flume::Sender<io::Result<()>>),
+}
+
+impl AsyncOpResultSender {
+    pub(crate) fn send_result(&self, result: BufferResult<()>) {
+        match self {
+            AsyncOpResultSender::Buffer(sender) => drop(sender.send(result)),
+            AsyncOpResultSender::Io(sender) => drop(sender.send(result.0)),
+        }
+    }
 }
 
 #[cfg(test)]
