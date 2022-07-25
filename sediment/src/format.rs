@@ -7,6 +7,7 @@ use std::{
 };
 
 use bitvec::prelude::BitVec;
+use rebytes::{Allocator, Buffer};
 
 use crate::{
     io::{self, ext::ToIoResult},
@@ -59,11 +60,9 @@ impl Header {
         &self,
         offset: u64,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<()> {
-        let mut buffer = Vec::new();
-        std::mem::swap(&mut buffer, scratch);
-        buffer.resize(PAGE_SIZE, 0);
+        let mut buffer = Buffer::with_len(PAGE_SIZE, allocator.clone());
 
         if self.basins.len() > 254 {
             return Err(io::invalid_data_error("too many basins"));
@@ -83,8 +82,7 @@ impl Header {
         let crc = crc(&buffer[4..length]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
 
-        let (result, buffer) = file.write_all(buffer, offset);
-        *scratch = buffer;
+        let (result, _) = file.write_all(buffer, offset);
         result
     }
 
@@ -167,8 +165,9 @@ impl Basin {
         &self,
         offset: u64,
         file: &mut File,
+        allocator: &Allocator,
     ) -> io::Result<()> {
-        let mut buffer = vec![0; PAGE_SIZE];
+        let mut buffer = Buffer::with_len(PAGE_SIZE, allocator.clone());
 
         if self.strata.len() > 254 {
             return Err(io::invalid_data_error("too many strata"));
@@ -370,14 +369,14 @@ impl GrainMap {
         file: &mut File,
         offset: u64,
         grain_count: u64,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         validate: bool,
     ) -> io::Result<Self> {
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(
+        let buffer = Buffer::with_len(
             usize::try_from(Self::unaligned_header_length_for_grain_count(grain_count)).to_io()?,
-            0,
+            allocator.clone(),
         );
+
         let (result, buffer) = file.read_exact(buffer, offset);
         result?;
 
@@ -393,7 +392,6 @@ impl GrainMap {
         // Because we always encode in chunks of 8, we may have additional bits
         // after restoring from the file.
         allocation_state.truncate(usize::try_from(grain_count).to_io()?);
-        *scratch = buffer;
         Ok(Self {
             written_at,
             allocation_state,
@@ -403,23 +401,23 @@ impl GrainMap {
     pub fn write_to<File: io::WriteIoBuffer>(
         &self,
         offset: u64,
+        allocator: &Allocator,
         file: &mut File,
     ) -> io::Result<()> {
-        let mut buffer = Vec::with_capacity(PAGE_SIZE);
+        let mut buffer = Buffer::with_capacity(PAGE_SIZE, allocator.clone());
 
-        buffer.extend(&[0; 4]); // Reserve space for CRC
+        buffer.extend([0; 4]); // Reserve space for CRC
         buffer.extend(self.written_at.to_le_bytes());
         buffer.extend_from_slice(self.allocation_state.as_raw_slice());
 
         // Calculate the CRC of everything after the CRC
         let crc = crc(&buffer[4..]);
         buffer[..4].copy_from_slice(&crc.to_le_bytes());
-        buffer.resize(
+        buffer.set_len(
             buffer
                 .len()
                 .round_to_multiple_of(PAGE_SIZE)
                 .expect("too large"),
-            0,
         );
 
         file.write_all_at(buffer, offset)
@@ -506,8 +504,9 @@ impl GrainMapPage {
         &self,
         offset: u64,
         file: &mut File,
+        allocator: &Allocator,
     ) -> io::Result<()> {
-        let mut buffer = vec![0; PAGE_SIZE];
+        let mut buffer = Buffer::with_len(PAGE_SIZE, allocator.clone());
 
         buffer[4..12].copy_from_slice(&self.written_at.to_le_bytes());
         buffer[12..].copy_from_slice(&self.consecutive_allocations);
@@ -697,6 +696,7 @@ impl GrainId {
         }
     }
 
+    #[inline]
     pub fn from_parts(
         basin_index: usize,
         stratum_index: usize,
@@ -781,8 +781,8 @@ impl LogPage {
         }
     }
 
-    pub fn serialize_into(&self, buffer: &mut Vec<u8>) {
-        buffer.resize(PAGE_SIZE, 0);
+    pub fn serialize_into(&self, buffer: &mut Buffer) {
+        buffer.set_len(PAGE_SIZE);
 
         buffer[..8].copy_from_slice(&self.previous_offset.to_le_bytes());
         buffer[8..16].copy_from_slice(&self.first_batch_id.to_le_bytes());
@@ -891,7 +891,7 @@ pub struct CommitLogEntry {
 }
 
 impl CommitLogEntry {
-    pub fn serialize_into(&self, buffer: &mut Vec<u8>) -> io::Result<()> {
+    pub fn serialize_into(&self, buffer: &mut Buffer) -> io::Result<()> {
         buffer.clear();
         for change in &self.grain_changes {
             buffer.extend(change.start.0.to_le_bytes());
@@ -905,22 +905,20 @@ impl CommitLogEntry {
         entry: &LogEntryIndex,
         verify_crc: bool,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<Self> {
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(usize::try_from(entry.length).to_io()?, 0);
+        let buffer = Buffer::with_len(usize::try_from(entry.length).to_io()?, allocator.clone());
         let (result, buffer) = file.read_exact(buffer, entry.position);
-        *scratch = buffer;
         result?;
 
         if verify_crc {
-            let calculated_crc = crc(scratch);
+            let calculated_crc = crc(&buffer);
             if calculated_crc != entry.crc {
                 return Err(io::invalid_data_error(format!("Commit Log Entry CRC Check Failed (Stored: {:x} != Calculated: {calculated_crc:x}", entry.crc)));
             }
         }
 
-        Self::deserialize_from(scratch)
+        Self::deserialize_from(&buffer)
     }
 
     pub fn deserialize_from(mut serialized: &[u8]) -> io::Result<Self> {

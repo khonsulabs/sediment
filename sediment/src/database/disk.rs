@@ -1,3 +1,5 @@
+use rebytes::{Allocator, Buffer};
+
 use crate::{
     database::{allocations::FileAllocations, log::CommitLog, page_cache::PageCache, GrainData},
     format::{
@@ -26,24 +28,22 @@ pub struct DiskState {
 impl DiskState {
     pub fn recover<File: io::File>(
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         page_cache: &PageCache,
     ) -> io::Result<RecoveredState> {
         let (first_header, second_header) = if file.is_empty()? {
             // Initialize the an empty database.
             let header = Header::default();
-            header.write_to(0, file, scratch)?;
-            header.write_to(PAGE_SIZE_U64, file, scratch)?;
+            header.write_to(0, file, allocator)?;
+            header.write_to(PAGE_SIZE_U64, file, allocator)?;
             file.synchronize()?;
             (Ok(header.clone()), Ok(header))
         } else {
-            let mut buffer = std::mem::take(scratch);
-            buffer.resize(PAGE_SIZE * 2, 0);
+            let buffer = Buffer::with_len(PAGE_SIZE * 2, allocator.clone());
             let (result, buffer) = file.read_exact(buffer, 0);
-            *scratch = buffer;
             result?;
-            let first_header = Header::deserialize_from(&scratch[..PAGE_SIZE], true);
-            let second_header = Header::deserialize_from(&scratch[PAGE_SIZE..], true);
+            let first_header = Header::deserialize_from(&buffer[..PAGE_SIZE], true);
+            let second_header = Header::deserialize_from(&buffer[PAGE_SIZE..], true);
 
             (first_header, second_header)
         };
@@ -63,7 +63,7 @@ impl DiskState {
         };
 
         match current.and_then(|header| {
-            Self::load_from_header(header, current_is_first, file, scratch, page_cache)
+            Self::load_from_header(header, current_is_first, file, allocator, page_cache)
         }) {
             Ok((state, log, file_allocations)) => Ok(RecoveredState {
                 recovered_from_error: None,
@@ -73,11 +73,11 @@ impl DiskState {
             }),
             Err(first_header_error) => {
                 match previous.and_then(|header| {
-                    Self::load_from_header(header, !current_is_first, file, scratch, page_cache)
+                    Self::load_from_header(header, !current_is_first, file, allocator, page_cache)
                 }) {
 
                     Ok((mut state, log, file_allocations)) => {
-                        state.overwrite_rolled_back_commit(file, scratch, page_cache)?;
+                        state.overwrite_rolled_back_commit(file, allocator, page_cache)?;
 
                         Ok(RecoveredState {
                         recovered_from_error: Some(first_header_error),
@@ -114,7 +114,7 @@ impl DiskState {
     fn overwrite_rolled_back_commit<File: io::File>(
         &mut self,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         page_cache: &PageCache,
     ) -> io::Result<()> {
         self.header.write_to(
@@ -124,7 +124,7 @@ impl DiskState {
                 0
             },
             file,
-            scratch,
+            allocator,
         )?;
 
         for (basin_index, basin) in self.basins.iter().enumerate() {
@@ -136,6 +136,7 @@ impl DiskState {
                         0
                     },
                 file,
+                allocator,
             )?;
 
             for (stratum_index, stratum) in basin.strata.iter().enumerate() {
@@ -147,6 +148,7 @@ impl DiskState {
                             } else {
                                 0
                             },
+                        allocator,
                         file,
                     )?;
 
@@ -155,8 +157,8 @@ impl DiskState {
                             + basin.header.strata[stratum_index].total_header_length()
                             + PAGE_SIZE_U64 * 2 * page;
                         let mut loaded_page =
-                            page_cache.fetch(offset, self.header.batch, file, scratch)?;
-                        loaded_page.write_to(offset, self.header.batch, file)?;
+                            page_cache.fetch(offset, self.header.batch, file, allocator)?;
+                        loaded_page.write_to(offset, self.header.batch, file, allocator)?;
                     }
                 }
             }
@@ -169,21 +171,21 @@ impl DiskState {
         header: Header,
         is_first_header: bool,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         page_cache: &PageCache,
     ) -> io::Result<(Self, CommitLog, FileAllocations)> {
         let file_allocations = FileAllocations::new(file.len()?);
         // Allocate the file header
         file_allocations.set(0..PAGE_SIZE_U64 * 2, Allocation::Allocated);
 
-        let mut basins = Vec::new();
+        let mut basins = Vec::with_capacity(header.basins.len());
         for basin in &header.basins {
             basins.push(Self::load_basin_state(
                 basin,
                 &header,
                 &file_allocations,
                 file,
-                scratch,
+                allocator,
             )?);
         }
 
@@ -191,7 +193,7 @@ impl DiskState {
             CommitLog::read_from(
                 header.log_offset,
                 file,
-                scratch,
+                allocator,
                 header.checkpoint,
                 &file_allocations,
             )?
@@ -205,7 +207,7 @@ impl DiskState {
             basins,
         };
 
-        Self::validate_last_log_entry(&log, &state, file, scratch, page_cache)?;
+        Self::validate_last_log_entry(&log, &state, file, allocator, page_cache)?;
 
         Ok((state, log, file_allocations))
     }
@@ -215,7 +217,7 @@ impl DiskState {
         header: &Header,
         file_allocations: &FileAllocations,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<StratumState> {
         assert_eq!(stratum.grain_map_count, 1, "need to support multiple maps");
         file_allocations.set(
@@ -229,14 +231,14 @@ impl DiskState {
             file,
             stratum.grain_map_location,
             stratum.grains_per_map(),
-            scratch,
+            allocator,
             true,
         );
         let second_map = GrainMap::read_from(
             file,
             stratum.grain_map_location + header_length,
             stratum.grains_per_map(),
-            scratch,
+            allocator,
             true,
         );
 
@@ -276,21 +278,21 @@ impl DiskState {
         header: &Header,
         file_allocations: &FileAllocations,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<BasinState> {
         file_allocations.set(
             basin.file_offset..basin.file_offset + PAGE_SIZE_U64 * 2,
             Allocation::Allocated,
         );
 
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(PAGE_SIZE * 2, 0);
+        let buffer = Buffer::with_len(PAGE_SIZE * 2, allocator.clone());
+
         let (result, buffer) = file.read_exact(buffer, basin.file_offset);
-        *scratch = buffer;
+
         result?;
 
-        let first_basin = Basin::deserialize_from(&scratch[..PAGE_SIZE], true);
-        let second_basin = Basin::deserialize_from(&scratch[PAGE_SIZE..], true);
+        let first_basin = Basin::deserialize_from(&buffer[..PAGE_SIZE], true);
+        let second_basin = Basin::deserialize_from(&buffer[PAGE_SIZE..], true);
 
         let (basin_header, first_is_current) = match (first_basin, second_basin) {
             (Ok(first_basin), _) if first_basin.written_at == basin.last_written_at => {
@@ -317,7 +319,7 @@ impl DiskState {
                 header,
                 file_allocations,
                 file,
-                scratch,
+                allocator,
             )?);
         }
         Ok(BasinState {
@@ -331,14 +333,14 @@ impl DiskState {
         log: &CommitLog,
         state: &DiskState,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         page_cache: &PageCache,
     ) -> io::Result<()> {
         if let Some((batch_id, entry_index)) = log.most_recent_entry() {
-            let entry = CommitLogEntry::load_from(entry_index, true, file, scratch)?;
+            let entry = CommitLogEntry::load_from(entry_index, true, file, allocator)?;
 
             for change in &entry.grain_changes {
-                Self::validate_grain_change(change, batch_id, state, file, scratch, page_cache)?;
+                Self::validate_grain_change(change, batch_id, state, file, allocator, page_cache)?;
             }
         }
 
@@ -350,7 +352,7 @@ impl DiskState {
         batch_id: BatchId,
         state: &DiskState,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         page_cache: &PageCache,
     ) -> io::Result<()> {
         let basin = state
@@ -411,7 +413,7 @@ impl DiskState {
         let grain_data_offset = grain_map_offset
             + stratum_info.grain_map_data_offset()
             + local_grain_index * u64::from(stratum_info.grain_length());
-        let loaded_page = page_cache.fetch(page_offset, state.header.batch, file, scratch)?;
+        let loaded_page = page_cache.fetch(page_offset, state.header.batch, file, allocator)?;
 
         let local_grain_index = usize::try_from(local_grain_index).to_io()?;
 
@@ -441,23 +443,22 @@ impl DiskState {
         // expecting, and that the data validates the CRC.
         if let Some(check_crc) = check_crc {
             // Verify the data's CRC to ensure the data is fully present.
-            let mut buffer = std::mem::take(scratch);
             let total_length = usize::try_from(
                 u64::from(loaded_page.page.consecutive_allocations[local_grain_index])
                     * u64::from(stratum_info.grain_length()),
             )
             .to_io()?;
-            buffer.resize(total_length, 0);
+            let buffer = Buffer::with_len(total_length, allocator.clone());
+
             let (result, buffer) = file.read_exact(buffer, grain_data_offset);
             result?;
 
-            let grain_data = GrainData::from_bytes(buffer);
+            let grain_data = GrainData::borrowed(&buffer);
             if !grain_data.is_crc_valid() || grain_data.crc != check_crc {
                 return Err(io::invalid_data_error(
                     "log validation failed: grain crc check failed",
                 ));
             }
-            *scratch = grain_data.data;
         }
 
         Ok(())

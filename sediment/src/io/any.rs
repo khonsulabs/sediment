@@ -1,6 +1,7 @@
 use crate::io::{
     self,
     fs::{StdAsyncFileWriter, StdFile, StdFileManager},
+    iobuffer::{AnyBacking, Backing},
     memory::{MemoryFile, MemoryFileManager},
     AsyncFileWriter, File, WriteIoBuffer,
 };
@@ -21,22 +22,22 @@ impl io::File for AnyFile {
         }
     }
 
-    fn read_exact(
+    fn read_exact<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> io::BufferResult<()> {
+    ) -> io::BufferResult<(), B> {
         match self {
             AnyFile::Std(file) => file.read_exact(buffer, position),
             AnyFile::Memory(file) => file.read_exact(buffer, position),
         }
     }
 
-    fn write_all(
+    fn write_all<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> io::BufferResult<()> {
+    ) -> io::BufferResult<(), B> {
         match self {
             AnyFile::Std(file) => file.write_all(buffer, position),
             AnyFile::Memory(file) => file.write_all(buffer, position),
@@ -59,12 +60,12 @@ impl io::File for AnyFile {
 }
 
 impl WriteIoBuffer for AnyFile {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
-        let (result, _) = self.write_all(buffer, position);
+        let (result, _) = self.write_all(buffer.into().map_any(), position);
         result
     }
 }
@@ -158,9 +159,9 @@ pub enum AnyAsyncFileWriter {
 impl AsyncFileWriter for AnyAsyncFileWriter {
     type Manager = AnyFileManager;
 
-    fn background_write_all(
+    fn background_write_all<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
         match self {
@@ -178,9 +179,9 @@ impl AsyncFileWriter for AnyAsyncFileWriter {
 }
 
 impl WriteIoBuffer for AnyAsyncFileWriter {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
         self.background_write_all(buffer, position)

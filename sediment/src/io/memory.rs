@@ -2,7 +2,12 @@ use std::{collections::HashMap, io::ErrorKind, sync::Arc};
 
 use parking_lot::{Mutex, RwLock};
 
-use crate::io::{self, paths::PathIds, AsyncFileWriter, File, FileManager, WriteIoBuffer};
+use crate::io::{
+    self,
+    iobuffer::{AnyBacking, Backing},
+    paths::PathIds,
+    AsyncFileWriter, File, FileManager, WriteIoBuffer,
+};
 
 #[derive(Debug, Default, Clone)]
 pub struct MemoryFileManager {
@@ -66,11 +71,11 @@ impl File for MemoryFile {
         Ok(u64::try_from(file.len()).unwrap())
     }
 
-    fn read_exact(
+    fn read_exact<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<super::iobuffer::IoBuffer>,
+        buffer: impl Into<super::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> super::BufferResult<()> {
+    ) -> super::BufferResult<(), B> {
         let file = self.0.read();
         let mut buffer = buffer.into();
         let position = match usize::try_from(position) {
@@ -94,11 +99,11 @@ impl File for MemoryFile {
         }
     }
 
-    fn write_all(
+    fn write_all<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<super::iobuffer::IoBuffer>,
+        buffer: impl Into<super::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> super::BufferResult<()> {
+    ) -> super::BufferResult<(), B> {
         let mut file = self.0.write();
         let buffer = buffer.into();
         let position = match usize::try_from(position) {
@@ -140,12 +145,12 @@ impl File for MemoryFile {
 }
 
 impl WriteIoBuffer for MemoryFile {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
-        let (result, _) = self.write_all(buffer, position);
+        let (result, _) = self.write_all(buffer.into().map_any(), position);
         result
     }
 }
@@ -153,12 +158,12 @@ impl WriteIoBuffer for MemoryFile {
 impl AsyncFileWriter for MemoryFile {
     type Manager = MemoryFileManager;
 
-    fn background_write_all(
+    fn background_write_all<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
-        let (result, _) = self.write_all(buffer, position);
+        let (result, _) = self.write_all(buffer.into().map_any(), position);
         result
     }
 

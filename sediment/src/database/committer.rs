@@ -5,6 +5,7 @@ use std::{
 };
 
 use parking_lot::{Condvar, Mutex, MutexGuard, RwLock};
+use rebytes::{Allocator, Buffer};
 
 use crate::{
     database::{
@@ -77,6 +78,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
     ) -> GrainBatchId {
         let batch_id = state.batch_id;
         state.batch_id.0 += 1;
+        pending_reservations.reserve(batch.size_hint().0);
         let batch = GrainBatch {
             batch_id,
             checkpoint_to,
@@ -111,7 +113,6 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         checkpoint_to: Option<BatchId>,
         new_embedded_header: Option<GrainMutexGuard>,
         database: &DatabaseState<AsyncFile::Manager>,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<CheckpointGuard> {
         let mut pending_reservations = self.pending_reservations.write();
         let mut state = self.state.lock();
@@ -124,19 +125,17 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             &mut state,
         );
         drop(pending_reservations);
-        self.commit_or_wait(batch_id, state, database, scratch)
+        self.commit_or_wait(batch_id, state, database)
     }
 
     pub fn wait_for_batch(
         &self,
         pending_commit: &PendingCommit<AsyncFile::Manager>,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<CheckpointGuard> {
         self.commit_or_wait(
             pending_commit.batch_id,
             self.state.lock(),
             &pending_commit.database,
-            scratch,
         )
     }
 
@@ -145,7 +144,6 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         batch_id: GrainBatchId,
         mut state: MutexGuard<'_, CommitBatches<AsyncFile>>,
         database: &DatabaseState<AsyncFile::Manager>,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<CheckpointGuard> {
         loop {
             // Check if our batch has been written.
@@ -177,7 +175,6 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                     new_embedded_header,
                     database,
                     &mut file,
-                    scratch,
                 )?;
                 drop(file);
 
@@ -199,6 +196,11 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 // Even if we didn't commit multiple, another thread could still
                 // be waiting.
                 self.commit_sync.notify_all();
+
+                // Publish freed grains to the atlas
+                let mut atlas = database.atlas.lock();
+                atlas.free_grains(&grains)?;
+                drop(atlas);
 
                 let mut pending_reservations = self.pending_reservations.write();
                 for reservation in grains.into_iter().filter_map(|op| {
@@ -224,7 +226,6 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         new_embedded_header: EmbeddedHeaderUpdate,
         database: &DatabaseState<AsyncFile::Manager>,
         file: &mut <AsyncFile::Manager as io::FileManager>::File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<BatchId> {
         let mut disk_state = database.disk_state.lock();
 
@@ -245,7 +246,8 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                         break;
                     }
 
-                    let entry = CommitLogEntry::load_from(entry, true, file, scratch)?;
+                    let entry =
+                        CommitLogEntry::load_from(entry, true, file, &database.buffer_allocator)?;
                     for archive_change in entry
                         .grain_changes
                         .iter()
@@ -271,10 +273,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             database,
             &mut disk_state,
             file,
-            scratch,
         )?;
-
-        let mut async_writer = database.file_manager.write_async(&database.path)?;
 
         disk_state.header.log_offset = Self::write_commit_log(
             &log_entry,
@@ -282,18 +281,18 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             new_embedded_header,
             database,
             file,
-            &mut async_writer,
         )?;
 
         for (offset, grain_map_page) in &mut modified_pages {
-            grain_map_page.write_to(*offset, committing_batch, &mut async_writer)?;
+            grain_map_page.write_to(*offset, committing_batch, file, &database.buffer_allocator)?;
         }
 
         Self::write_modified(
             &mut modifications,
             committing_batch,
             &mut disk_state,
-            &mut async_writer,
+            &database.buffer_allocator,
+            file,
         )?;
 
         disk_state.header.batch = committing_batch;
@@ -304,13 +303,10 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 0
             },
             file,
-            scratch,
+            &database.buffer_allocator,
         )?;
 
-        for mut async_writer in pending_async_writers
-            .into_iter()
-            .chain(iter::once(async_writer))
-        {
+        for mut async_writer in pending_async_writers {
             async_writer.wait()?;
         }
 
@@ -349,10 +345,11 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         Ok(committing_batch)
     }
 
-    fn write_modified<File: io::AsyncFileWriter>(
+    fn write_modified<File: io::WriteIoBuffer>(
         modifications: &mut CommitModifications,
         committing_batch: BatchId,
         disk_state: &mut DiskState,
+        allocator: &Allocator,
         file: &mut File,
     ) -> io::Result<()> {
         for (basin_index, stratum_index, grain_map_index) in modifications.grain_maps.drain() {
@@ -360,7 +357,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 [grain_map_index];
             grain_map.map.written_at = committing_batch;
             let offset = grain_map.offset_to_write_at();
-            grain_map.map.write_to(offset, file)?;
+            grain_map.map.write_to(offset, allocator, file)?;
             grain_map.first_is_current = !grain_map.first_is_current;
         }
 
@@ -374,7 +371,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             }
 
             basin.header.written_at = committing_batch;
-            basin.header.write_to(offset, file)?;
+            basin.header.write_to(offset, file, allocator)?;
             basin.first_is_current = !basin.first_is_current;
         }
 
@@ -461,7 +458,6 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         database: &DatabaseState<File::Manager>,
         disk_state: &mut DiskState,
         file: &mut File,
-        scratch: &mut Vec<u8>,
     ) -> io::Result<(Vec<(u64, LoadedGrainMapPage)>, CommitLogEntry)> {
         let mut modified_pages = Vec::<(u64, LoadedGrainMapPage)>::new();
         let mut grain_changes = Vec::with_capacity(grains.len());
@@ -526,7 +522,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                             grain_map_page_offset,
                             disk_state.header.batch,
                             file,
-                            scratch,
+                            &database.buffer_allocator,
                         )?
                     };
                     modified_pages.push((grain_map_page_offset, page));
@@ -582,19 +578,18 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         new_embedded_header: EmbeddedHeaderUpdate,
         database: &DatabaseState<Manager>,
         file: &mut Manager::File,
-        async_file: &mut Manager::AsyncFile,
     ) -> io::Result<u64> {
         // Write the commit log for these changes.
-        let mut buffer = Vec::with_capacity(PAGE_SIZE);
+        let mut buffer = Buffer::with_capacity(PAGE_SIZE, database.buffer_allocator.clone());
         log_entry.serialize_into(&mut buffer)?;
         let log_entry_crc = crc(&buffer);
         let log_entry_len = u32::try_from(buffer.len()).to_io()?;
         // pad the entry to the next page size
-        buffer.resize(buffer.len().round_to_multiple_of(PAGE_SIZE).unwrap(), 0);
+        buffer.set_len(buffer.len().round_to_multiple_of(PAGE_SIZE).unwrap());
         let log_entry_offset = database
             .file_allocations
             .allocate(u64::try_from(buffer.len()).to_io()?, file)?;
-        async_file.write_all_at(buffer, log_entry_offset)?;
+        file.write_all(buffer, log_entry_offset).0?;
 
         let embedded_header = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header
         {
@@ -614,7 +609,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 embedded_header,
             },
         );
-        log.write_to(&database.file_allocations, file, async_file)?;
+        log.write_to(&database.file_allocations, &database.buffer_allocator, file)?;
         let offset = log.position().unwrap();
         drop(log);
         Ok(offset)
@@ -735,9 +730,7 @@ where
     Manager: io::FileManager,
 {
     pub fn commit(&self) -> io::Result<CheckpointGuard> {
-        self.database
-            .committer
-            .wait_for_batch(self, &mut Vec::new())
+        self.database.committer.wait_for_batch(self)
     }
 
     #[must_use]

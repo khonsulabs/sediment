@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 
 use crate::io::{
     self,
-    iobuffer::IoBuffer,
+    iobuffer::{AnyBacking, Backing, IoBuffer},
     paths::{PathId, PathIds},
     AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, IgnoreNotFoundError,
     WriteIoBuffer,
@@ -124,11 +124,11 @@ impl File for StdFile {
         self.file().metadata().map(|metadata| metadata.len())
     }
 
-    fn read_exact(
+    fn read_exact<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<super::iobuffer::IoBuffer>,
+        buffer: impl Into<super::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> BufferResult<()> {
+    ) -> BufferResult<(), B> {
         let mut buffer = buffer.into();
         if position != self.location {
             if let Err(err) = self.file().seek(SeekFrom::Start(position)) {
@@ -150,11 +150,11 @@ impl File for StdFile {
         (Ok(()), buffer.buffer)
     }
 
-    fn write_all(
+    fn write_all<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<super::iobuffer::IoBuffer>,
+        buffer: impl Into<super::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> BufferResult<()> {
+    ) -> BufferResult<(), B> {
         let mut buffer = buffer.into();
         if position != self.location {
             if let Err(err) = self.file().seek(SeekFrom::Start(position)) {
@@ -225,11 +225,13 @@ impl Drop for StdFile {
 }
 
 impl WriteIoBuffer for StdFile {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
+        let buffer = buffer.into();
+        let buffer = buffer.map_any();
         let (result, _) = self.write_all(buffer, position);
         result
     }
@@ -247,15 +249,15 @@ pub struct StdAsyncFileWriter {
 impl AsyncFileWriter for StdAsyncFileWriter {
     type Manager = StdFileManager;
 
-    fn background_write_all(
+    fn background_write_all<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<IoBuffer>,
+        buffer: impl Into<IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
         self.op_sender
             .send(AsyncOpParams {
                 path: self.path.clone(),
-                buffer: buffer.into(),
+                buffer: buffer.into().map_any(),
                 result_sender: io::AsyncOpResultSender::Io(self.result_sender.clone()),
                 position,
             })
@@ -275,9 +277,9 @@ impl AsyncFileWriter for StdAsyncFileWriter {
 }
 
 impl WriteIoBuffer for StdAsyncFileWriter {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
         self.background_write_all(buffer, position)
@@ -317,9 +319,9 @@ fn async_writer(
 fn async_write(
     manager: &StdFileManager,
     path: &PathId,
-    buffer: IoBuffer,
+    buffer: IoBuffer<AnyBacking>,
     position: u64,
-) -> BufferResult<()> {
+) -> BufferResult<(), AnyBacking> {
     let mut file = match manager.write(path) {
         Ok(file) => file,
         Err(err) => return (Err(err), buffer.buffer),

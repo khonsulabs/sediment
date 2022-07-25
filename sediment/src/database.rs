@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     io::ErrorKind,
     ops::Deref,
@@ -10,6 +11,7 @@ use std::{
 };
 
 use parking_lot::{Mutex, RwLock};
+use rebytes::Allocator;
 
 use crate::{
     database::{
@@ -51,7 +53,6 @@ pub struct Database<Manager>
 where
     Manager: io::FileManager,
 {
-    scratch: Vec<u8>,
     state: Arc<DatabaseState<Manager>>,
 }
 
@@ -70,10 +71,14 @@ where
         let path = manager.resolve_path(path);
         let mut file = manager.write(&path)?;
 
-        let mut scratch = Vec::new();
         let grain_map_page_cache = PageCache::default();
 
-        let state = DiskState::recover(&mut file, &mut scratch, &grain_map_page_cache)?;
+        let buffer_allocator = Allocator::build()
+            .minimum_allocation_size(4096)
+            .finish()
+            .unwrap();
+
+        let state = DiskState::recover(&mut file, &buffer_allocator, &grain_map_page_cache)?;
         drop(file);
 
         let atlas = Atlas::from_state(&state.disk_state);
@@ -82,20 +87,20 @@ where
             .most_recent_entry()
             .and_then(|(_, index)| index.embedded_header);
         let mut database = Self {
-            scratch,
             state: Arc::new(DatabaseState {
                 path,
                 file_manager: manager,
                 current_batch: AtomicU64::new(state.disk_state.header.batch.0),
                 checkpoint: AtomicU64::new(state.disk_state.header.checkpoint.0),
                 checkpoint_protector: CheckpointProtector::default(),
-                atlas: Mutex::new(atlas),
+                atlas,
                 log: RwLock::new(state.log),
                 disk_state: Mutex::new(state.disk_state),
                 embedded_header: EmbeddedHeaderState::new(embedded_header),
                 committer: Committer::default(),
                 grain_map_page_cache,
                 file_allocations: state.file_allocations,
+                buffer_allocator,
             }),
         };
 
@@ -196,7 +201,7 @@ where
             self.current_batch(),
             &self.state.grain_map_page_cache,
             &mut file,
-            &mut self.scratch,
+            &self.state.buffer_allocator,
         )? {
             Some(info) if info.allocated_length == 0 => return Ok(None),
             Some(result) => result,
@@ -233,7 +238,7 @@ where
 
     pub fn get_commit_log_entry(&mut self, entry: &LogEntryIndex) -> io::Result<CommitLogEntry> {
         let mut file = self.state.file_manager.read(&self.state.path)?;
-        CommitLogEntry::load_from(entry, true, &mut file, &mut self.scratch)
+        CommitLogEntry::load_from(entry, true, &mut file, &self.state.buffer_allocator)
     }
 
     pub fn checkpoint_to(&self, last_entry_to_remove: BatchId) -> io::Result<CheckpointGuard> {
@@ -251,10 +256,8 @@ where
     /// commit, the Stratum is not updated with the new information until the
     /// commit phase.
     fn new_grain(&self, length: u32) -> io::Result<GrainReservation> {
-        let mut active_state = self.state.atlas.lock();
-
         let mut file = self.state.file_manager.write(&self.state.path)?;
-        active_state.reserve_grain(
+        self.state.atlas.reserve_grain(
             length,
             &self.state.grain_map_page_cache,
             &mut file,
@@ -265,7 +268,7 @@ where
     fn archive(&mut self, grain_id: GrainId) -> io::Result<u8> {
         if let Some(pending_reservation) = self.state.committer.pending_grain_reservation(grain_id)
         {
-            return Ok(pending_reservation.grain_count);
+            return Ok(dbg!(pending_reservation.grain_count));
         }
 
         let mut active_state = self.state.atlas.lock();
@@ -276,11 +279,11 @@ where
             self.current_batch(),
             &self.state.grain_map_page_cache,
             &mut file,
-            &mut self.scratch,
+            &self.state.buffer_allocator,
         )?;
 
         if let Some(info) = info {
-            Ok(info.count)
+            Ok(dbg!(info.count))
         } else {
             Err(std::io::Error::from(ErrorKind::NotFound))
         }
@@ -301,7 +304,6 @@ where
             checkpoint_to,
             new_embedded_header,
             &self.state,
-            &mut self.scratch,
         )
     }
 
@@ -337,7 +339,6 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            scratch: Vec::new(),
             state: self.state.clone(),
         }
     }
@@ -362,29 +363,30 @@ where
     current_batch: AtomicU64,
     checkpoint: AtomicU64,
     checkpoint_protector: CheckpointProtector,
-    atlas: Mutex<Atlas>,
+    atlas: Atlas,
     disk_state: Mutex<DiskState>,
     embedded_header: EmbeddedHeaderState,
     log: RwLock<CommitLog>,
     committer: Committer<Manager::AsyncFile>,
     grain_map_page_cache: PageCache,
     file_allocations: FileAllocations,
+    buffer_allocator: Allocator,
 }
 
 #[derive(Debug, Eq)]
-pub struct GrainData {
+pub struct GrainData<'a> {
     pub crc: u32,
     length: usize,
-    data: Vec<u8>,
+    data: Cow<'a, [u8]>,
 }
 
-impl PartialEq for GrainData {
+impl<'a> PartialEq for GrainData<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.crc == other.crc && self.as_bytes() == other.as_bytes()
     }
 }
 
-impl Deref for GrainData {
+impl<'a> Deref for GrainData<'a> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -392,19 +394,35 @@ impl Deref for GrainData {
     }
 }
 
-impl AsRef<[u8]> for GrainData {
+impl<'a> AsRef<[u8]> for GrainData<'a> {
     fn as_ref(&self) -> &[u8] {
         &*self
     }
 }
 
-impl GrainData {
-    pub const HEADER_BYTES: usize = 8;
+impl GrainData<'static> {
     pub(crate) fn from_bytes(data: Vec<u8>) -> Self {
         Self {
             crc: u32::from_le_bytes(data[0..4].try_into().unwrap()),
             length: usize::try_from(u32::from_le_bytes(data[4..8].try_into().unwrap())).unwrap(),
-            data,
+            data: Cow::Owned(data),
+        }
+    }
+
+    #[must_use]
+    pub fn into_raw_bytes(self) -> Vec<u8> {
+        self.data.into_owned()
+    }
+}
+
+impl<'a> GrainData<'a> {
+    pub const HEADER_BYTES: usize = 8;
+
+    pub(crate) fn borrowed(data: &'a [u8]) -> Self {
+        Self {
+            crc: u32::from_le_bytes(data[0..4].try_into().unwrap()),
+            length: usize::try_from(u32::from_le_bytes(data[4..8].try_into().unwrap())).unwrap(),
+            data: Cow::Borrowed(data),
         }
     }
 
@@ -421,11 +439,6 @@ impl GrainData {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &*self
-    }
-
-    #[must_use]
-    pub fn into_raw_bytes(self) -> Vec<u8> {
-        self.data
     }
 }
 
@@ -707,7 +720,7 @@ crate::io_test!(basic_rollback, {
     // Break the file header for the new commit by overwriting a byte in the
     // first header.
     let mut file = manager.write(&manager.resolve_path(&path)).unwrap();
-    let buffer = vec![0xFE; 1];
+    let buffer = vec![0xFE_u8; 1];
     let (result, _buffer) = file.write_all(buffer, 10);
     result.unwrap();
 

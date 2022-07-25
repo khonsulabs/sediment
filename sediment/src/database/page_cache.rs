@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use lrumap::LruHashMap;
 use parking_lot::{Mutex, RwLock};
+use rebytes::{Allocator, Buffer};
 
 use crate::{
     format::{BatchId, GrainMapPage, PAGE_SIZE, PAGE_SIZE_U64},
@@ -26,7 +27,7 @@ impl PageCache {
         page_offset: u64,
         current_batch: BatchId,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         map: F,
     ) -> io::Result<R> {
         let mut data = self.data.lock();
@@ -36,7 +37,7 @@ impl PageCache {
                 drop(data);
                 let _guard = sync.read();
                 // Once we acquire the read, the page should now be available.
-                self.map(page_offset, current_batch, file, scratch, map)
+                self.map(page_offset, current_batch, file, allocator, map)
             }
             Some(CacheEntry::Loaded(page)) => Ok(map(page)),
             None => {
@@ -56,10 +57,10 @@ impl PageCache {
                         page_offset,
                         first_is_active,
                         file,
-                        scratch,
+                        allocator,
                     )?
                 } else {
-                    LoadedGrainMapPage::read_from(page_offset, current_batch, file, scratch)?
+                    LoadedGrainMapPage::read_from(page_offset, current_batch, file, allocator)?
                 };
                 if loaded_page.page.written_at > current_batch {
                     return Err(io::invalid_data_error("both grain map pages are invalid"));
@@ -93,9 +94,9 @@ impl PageCache {
         page_offset: u64,
         current_batch: BatchId,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<LoadedGrainMapPage> {
-        self.map(page_offset, current_batch, file, scratch, |page| {
+        self.map(page_offset, current_batch, file, allocator, |page| {
             page.clone()
         })
     }
@@ -106,11 +107,11 @@ impl PageCache {
         local_grain_index: usize,
         current_batch: BatchId,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<u8> {
         assert!(local_grain_index < GrainMapPage::GRAINS);
 
-        self.map(page_offset, current_batch, file, scratch, |loaded_page| {
+        self.map(page_offset, current_batch, file, allocator, |loaded_page| {
             let first_byte = local_grain_index
                 .checked_sub(1)
                 .map(|previous_index| loaded_page.page.consecutive_allocations[previous_index]);
@@ -174,6 +175,7 @@ impl LoadedGrainMapPage {
         offset: u64,
         new_batch: BatchId,
         file: &mut File,
+        allocator: &Allocator,
     ) -> io::Result<()> {
         let page_offset = if self.is_first {
             offset + PAGE_SIZE_U64
@@ -182,7 +184,7 @@ impl LoadedGrainMapPage {
         };
 
         self.page.written_at = new_batch;
-        self.page.write_to(page_offset, file)?;
+        self.page.write_to(page_offset, file, allocator)?;
         self.is_first = !self.is_first;
 
         Ok(())
@@ -192,16 +194,15 @@ impl LoadedGrainMapPage {
         page_offset: u64,
         current_batch: BatchId,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<Self> {
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(PAGE_SIZE * 2, 0);
+        let buffer = Buffer::with_len(PAGE_SIZE * 2, allocator.clone());
+
         let (result, buffer) = file.read_exact(buffer, page_offset);
         result?;
 
         let first_page = GrainMapPage::deserialize(&buffer[..PAGE_SIZE], true);
         let second_page = GrainMapPage::deserialize(&buffer[PAGE_SIZE..], true);
-        *scratch = buffer;
 
         match (first_page, second_page) {
             (Ok(first_page), Ok(second_page)) => {
@@ -241,10 +242,9 @@ impl LoadedGrainMapPage {
         page_offset: u64,
         first_page: bool,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
     ) -> io::Result<Self> {
-        let mut buffer = std::mem::take(scratch);
-        buffer.resize(PAGE_SIZE, 0);
+        let buffer = Buffer::with_len(PAGE_SIZE, allocator.clone());
         let (result, buffer) = file.read_exact(
             buffer,
             page_offset + (!first_page).then(|| 4096).unwrap_or_default(),

@@ -3,6 +3,8 @@ use std::{
     ops::{Deref, RangeInclusive},
 };
 
+use rebytes::{Allocator, Buffer};
+
 use crate::{
     database::{allocations::FileAllocations, Database},
     format::{Allocation, BatchId, LogEntryIndex, LogPage, PAGE_SIZE, PAGE_SIZE_U64},
@@ -54,24 +56,22 @@ impl CommitLog {
     pub fn read_from<File: io::File>(
         mut offset: u64,
         file: &mut File,
-        scratch: &mut Vec<u8>,
+        allocator: &Allocator,
         checkpoint: BatchId,
         file_allocations: &FileAllocations,
     ) -> io::Result<Self> {
         let mut pages = VecDeque::new();
         let mut reached_checkpoint = false;
-        scratch.resize(PAGE_SIZE, 0);
         while offset != 0 && !reached_checkpoint {
             // TODO add a sanity check that offset is page-aligned
             file_allocations.set(offset..offset + PAGE_SIZE_U64, Allocation::Allocated);
 
-            let mut buffer = std::mem::take(scratch);
-            buffer.resize(PAGE_SIZE, 0);
+            let buffer = Buffer::with_len(PAGE_SIZE, allocator.clone());
+
             let (result, buffer) = file.read_exact(buffer, offset);
-            *scratch = buffer;
             result?;
 
-            let page = LogPage::deserialize_from(scratch)?;
+            let page = LogPage::deserialize_from(&buffer)?;
             for entry in &page.entries {
                 if entry.position > 0 {
                     file_allocations.set(
@@ -131,11 +131,11 @@ impl CommitLog {
             head_insert_index,
         })
     }
-    pub fn write_to<File: io::File, Writer: io::AsyncFileWriter>(
+    pub fn write_to<File: io::File>(
         &mut self,
         allocations: &FileAllocations,
+        allocator: &Allocator,
         file: &mut File,
-        writer: &mut Writer,
     ) -> io::Result<()> {
         let last_index = self.pages.len() - 1;
         let mut last_page_offset = 0;
@@ -156,9 +156,10 @@ impl CommitLog {
                 };
 
                 page_state.page.previous_offset = last_page_offset;
-                let mut buffer = Vec::new();
+                let mut buffer = Buffer::new(allocator.clone());
                 page_state.page.serialize_into(&mut buffer);
-                writer.write_all_at(buffer, offset)?;
+                let (result, _) = file.write_all(buffer, offset);
+                result?;
 
                 offset
             } else {

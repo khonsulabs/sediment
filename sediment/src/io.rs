@@ -6,7 +6,10 @@ use std::{
 
 pub use io::Result;
 
-use crate::io::{iobuffer::IoBuffer, paths::PathId};
+use crate::io::{
+    iobuffer::{AnyBacking, Backing, IoBuffer},
+    paths::PathId,
+};
 
 pub mod fs;
 pub mod iobuffer;
@@ -42,9 +45,17 @@ pub trait File: Debug + WriteIoBuffer {
         self.len().map(|len| len == 0)
     }
 
-    fn read_exact(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> BufferResult<()>;
+    fn read_exact<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
+        &mut self,
+        buffer: impl Into<IoBuffer<B>>,
+        position: u64,
+    ) -> BufferResult<(), B>;
 
-    fn write_all(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> BufferResult<()>;
+    fn write_all<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
+        &mut self,
+        buffer: impl Into<IoBuffer<B>>,
+        position: u64,
+    ) -> BufferResult<(), B>;
 
     fn synchronize(&mut self) -> io::Result<()>;
     fn set_length(&mut self, new_length: u64) -> io::Result<()>;
@@ -53,33 +64,33 @@ pub trait File: Debug + WriteIoBuffer {
 pub trait AsyncFileWriter: Debug + WriteIoBuffer + Send + Sync {
     type Manager: FileManager<AsyncFile = Self>;
 
-    fn background_write_all(
+    fn background_write_all<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<IoBuffer>,
+        buffer: impl Into<IoBuffer<B>>,
         position: u64,
     ) -> io::Result<()>;
 
     fn wait(&mut self) -> io::Result<()>;
 }
 
-pub type BufferResult<T> = (io::Result<T>, Vec<u8>);
+pub type BufferResult<T, B> = (io::Result<T>, B);
 
 #[derive(Debug)]
 pub struct AsyncOpParams {
     path: PathId,
     position: u64,
-    buffer: IoBuffer,
+    buffer: IoBuffer<AnyBacking>,
     result_sender: AsyncOpResultSender,
 }
 
 #[derive(Debug)]
 pub enum AsyncOpResultSender {
-    Buffer(flume::Sender<BufferResult<()>>),
+    Buffer(flume::Sender<BufferResult<(), AnyBacking>>),
     Io(flume::Sender<io::Result<()>>),
 }
 
 impl AsyncOpResultSender {
-    pub(crate) fn send_result(&self, result: BufferResult<()>) {
+    pub(crate) fn send_result(&self, result: BufferResult<(), AnyBacking>) {
         match self {
             AsyncOpResultSender::Buffer(sender) => drop(sender.send(result)),
             AsyncOpResultSender::Io(sender) => drop(sender.send(result.0)),
@@ -97,8 +108,7 @@ macro_rules! io_test {
             use std::path::PathBuf;
 
             use $crate::io::{
-                fs::StdFileManager, iobuffer::IoBufferExt, memory::MemoryFileManager, File,
-                FileManager,
+                fs::StdFileManager, iobuffer::Backing, memory::MemoryFileManager, File, FileManager,
             };
 
             use super::*;
@@ -146,7 +156,11 @@ macro_rules! io_test {
 }
 
 pub trait WriteIoBuffer {
-    fn write_all_at(&mut self, buffer: impl Into<IoBuffer>, position: u64) -> std::io::Result<()>;
+    fn write_all_at<B: Into<AnyBacking>>(
+        &mut self,
+        buffer: impl Into<IoBuffer<B>>,
+        position: u64,
+    ) -> std::io::Result<()>;
 }
 
 #[cfg(test)]

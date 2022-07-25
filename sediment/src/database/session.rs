@@ -3,6 +3,8 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use rebytes::Buffer;
+
 use crate::{
     database::{
         checkpoint_guard::CheckpointGuard,
@@ -11,7 +13,7 @@ use crate::{
         Database, GrainData,
     },
     format::{BatchId, GrainId},
-    io::{self, ext::ToIoResult, iobuffer::IoBufferExt, File, WriteIoBuffer},
+    io::{self, ext::ToIoResult, iobuffer::Backing, File, WriteIoBuffer},
 };
 
 #[derive(Debug)]
@@ -64,8 +66,10 @@ where
         crc = crc32c::crc32c_append(crc, data);
         reservation.crc = Some(crc);
 
-        let mut scratch = std::mem::take(&mut self.database.scratch);
-        scratch.resize((data.len() + 8).min(4 * 16_384), 0);
+        let mut scratch = Buffer::with_len(
+            (data.len() + 8).min(4 * 16_384),
+            self.database.state.buffer_allocator.clone(),
+        );
         scratch[0..4].copy_from_slice(&crc.to_le_bytes());
         scratch[4..8].copy_from_slice(&length.to_le_bytes());
         let mut write_at = reservation.offset;

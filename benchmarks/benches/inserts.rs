@@ -1,6 +1,6 @@
 use std::{any::type_name, num::NonZeroUsize, ops::Range, path::Path, sync::Arc};
 
-use rand::{thread_rng, Rng};
+use rand::{prelude::StdRng, thread_rng, Rng, SeedableRng};
 use sediment::{
     database::Database,
     format::BatchId,
@@ -34,7 +34,7 @@ fn main() {
 
     let source = vec![0; 4096];
     let mut ranges = Vec::new();
-    let mut rng = thread_rng();
+    let mut rng = StdRng::from_seed([0; 32]);
     for _ in 0..ITERS {
         let mut batch = Vec::with_capacity(rng.gen_range(1..INSERTS_PER_BATCH));
         for _ in 0..batch.capacity() {
@@ -51,7 +51,7 @@ fn main() {
         .max(4);
 
     let mut benchmark = Benchmark::for_config(Arc::new(ThreadedInsertsData { source, ranges }))
-        .with_each_number_of_threads([threads * 4, threads * 2, threads]);
+        .with_each_number_of_threads([threads * 4, threads * 2, threads, 1]);
 
     #[cfg(feature = "iouring")]
     {

@@ -8,15 +8,19 @@ use parking_lot::Mutex;
 use tokio_uring::buf::IoBuf;
 
 use crate::io::{
-    self, fs::StdFileManager, iobuffer::IoBuffer, paths::PathId, AsyncFileWriter, AsyncOpParams,
-    BufferResult, File, FileManager, IgnoreNotFoundError, WriteIoBuffer,
+    self,
+    fs::StdFileManager,
+    iobuffer::{AnyBacking, Backing, IoBuffer},
+    paths::PathId,
+    AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, IgnoreNotFoundError,
+    WriteIoBuffer,
 };
 
 #[derive(Debug)]
 pub struct UringFile {
     path: PathId,
-    result_sender: flume::Sender<BufferResult<()>>,
-    result_receiver: flume::Receiver<BufferResult<()>>,
+    result_sender: flume::Sender<BufferResult<(), AnyBacking>>,
+    result_receiver: flume::Receiver<BufferResult<(), AnyBacking>>,
     manager: UringFileManager,
 }
 
@@ -28,90 +32,60 @@ impl io::File for UringFile {
         file.len()
     }
 
-    fn read_exact(
+    fn read_exact<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> io::BufferResult<()> {
+    ) -> io::BufferResult<(), B> {
         match self.manager.op_sender.send(AsyncOp {
             op: Op::Read,
             params: AsyncOpParams {
                 path: self.path.clone(),
                 position,
-                buffer: buffer.into(),
+                buffer: buffer.into().map_any(),
                 result_sender: io::AsyncOpResultSender::Buffer(self.result_sender.clone()),
             },
         }) {
             Ok(_) => match self.result_receiver.recv() {
-                Ok(result) => result,
+                Ok((result, backing)) => (result, backing.into()),
                 Err(disconnected) => (
                     Err(std::io::Error::new(ErrorKind::BrokenPipe, disconnected)),
-                    Vec::new(),
+                    B::default(),
                 ),
             },
             Err(disconnected) => (
                 Err(std::io::Error::new(ErrorKind::BrokenPipe, disconnected)),
-                Vec::new(),
+                B::default(),
             ),
         }
-        // .block_on(async {
-        //     {
-        //         let buffer = buffer.into();
-
-        //         let (result, buf) = if let Some(range) = buffer.range {
-        //             self.file
-        //                 .read_at(buffer.buffer.slice(range), position)
-        //                 .await
-        //         } else {
-        //             self.file.read_at(buffer.buffer.slice(..), position).await
-        //         };
-
-        //         (result, buf.into_inner())
-        //     }
-        // })
     }
 
-    fn write_all(
+    fn write_all<B: Backing + Default + From<AnyBacking> + Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
-    ) -> io::BufferResult<()> {
+    ) -> io::BufferResult<(), B> {
         match self.manager.op_sender.send(AsyncOp {
             op: Op::Write,
             params: AsyncOpParams {
                 path: self.path.clone(),
                 position,
-                buffer: buffer.into(),
+                buffer: buffer.into().map_any(),
                 result_sender: io::AsyncOpResultSender::Buffer(self.result_sender.clone()),
             },
         }) {
             Ok(_) => match self.result_receiver.recv() {
-                Ok(result) => result,
+                Ok((result, backing)) => (result, backing.into()),
                 Err(disconnected) => (
                     Err(std::io::Error::new(ErrorKind::BrokenPipe, disconnected)),
-                    Vec::new(),
+                    B::default(),
                 ),
             },
             Err(disconnected) => (
                 Err(std::io::Error::new(ErrorKind::BrokenPipe, disconnected)),
-                Vec::new(),
+                B::default(),
             ),
         }
-        // self.manager.runtime.block_on(async {
-        //     {
-        //         let buffer = buffer.into();
-
-        //         let (result, buf) = if let Some(range) = buffer.range {
-        //             self.file
-        //                 .write_at(buffer.buffer.slice(range), position)
-        //                 .await
-        //         } else {
-        //             self.file.write_at(buffer.buffer.slice(..), position).await
-        //         };
-
-        //         (result, buf.into_inner())
-        //     }
-        // })
     }
 
     fn synchronize(&mut self) -> std::io::Result<()> {
@@ -122,7 +96,7 @@ impl io::File for UringFile {
                 params: AsyncOpParams {
                     path: self.path.clone(),
                     position: 0,
-                    buffer: Vec::new().into(),
+                    buffer: AnyBacking::default().into(),
                     result_sender: io::AsyncOpResultSender::Buffer(self.result_sender.clone()),
                 },
             })
@@ -141,12 +115,12 @@ impl io::File for UringFile {
 }
 
 impl WriteIoBuffer for UringFile {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
-        let (result, _) = self.write_all(buffer, position);
+        let (result, _) = self.write_all(buffer.into().map_any(), position);
         result
     }
 }
@@ -288,13 +262,13 @@ pub struct AsyncUringFile {
 impl io::AsyncFileWriter for AsyncUringFile {
     type Manager = UringFileManager;
 
-    fn background_write_all(
+    fn background_write_all<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
         let path = self.path.clone();
-        let buffer: IoBuffer = buffer.into();
+        let buffer = buffer.into().map_any();
         self.manager
             .op_sender
             .send(AsyncOp {
@@ -322,9 +296,9 @@ impl io::AsyncFileWriter for AsyncUringFile {
 }
 
 impl WriteIoBuffer for AsyncUringFile {
-    fn write_all_at(
+    fn write_all_at<B: Into<AnyBacking>>(
         &mut self,
-        buffer: impl Into<io::iobuffer::IoBuffer>,
+        buffer: impl Into<io::iobuffer::IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
         self.background_write_all(buffer, position)
@@ -343,11 +317,11 @@ enum Op {
 }
 
 async fn perform_async_write_all(
-    buffer: IoBuffer,
+    buffer: IoBuffer<AnyBacking>,
     mut position: u64,
     path: PathId,
     open_files: &OpenFiles,
-) -> (io::Result<()>, Vec<u8>) {
+) -> (io::Result<()>, AnyBacking) {
     let file = match open_files.open(&path).await {
         Ok(file) => file,
         Err(err) => return (Err(err), buffer.buffer),
@@ -386,11 +360,11 @@ async fn perform_async_write_all(
 }
 
 async fn perform_async_read_all(
-    buffer: IoBuffer,
+    buffer: IoBuffer<AnyBacking>,
     mut position: u64,
     path: PathId,
     open_files: &OpenFiles,
-) -> (io::Result<()>, Vec<u8>) {
+) -> (io::Result<()>, AnyBacking) {
     let file = match open_files.open(&path).await {
         Ok(file) => file,
         Err(err) => return (Err(err), buffer.buffer),
@@ -427,14 +401,14 @@ async fn perform_async_read_all(
     (Ok(()), buffer.into_inner())
 }
 
-async fn perform_async_sync(path: PathId, open_files: &OpenFiles) -> (io::Result<()>, Vec<u8>) {
+async fn perform_async_sync(path: PathId, open_files: &OpenFiles) -> (io::Result<()>, AnyBacking) {
     let file = match open_files.open(&path).await {
         Ok(file) => file,
-        Err(err) => return (Err(err), Vec::new()),
+        Err(err) => return (Err(err), AnyBacking::default()),
     };
     let result = file.sync_data().await;
     open_files.return_file(&path, file);
-    (result, Vec::new())
+    (result, AnyBacking::default())
 }
 
 #[derive(Clone, Default)]
@@ -463,5 +437,40 @@ impl OpenFiles {
     fn return_file(&self, path: &PathId, file: tokio_uring::fs::File) {
         let mut files = self.0.lock();
         files.get_mut(&path.id).unwrap().push_front(file);
+    }
+}
+
+#[allow(unsafe_code)]
+unsafe impl tokio_uring::buf::IoBuf for AnyBacking {
+    fn stable_ptr(&self) -> *const u8 {
+        match self {
+            AnyBacking::Vec(vec) => vec.as_ptr(),
+            AnyBacking::Buffer(buffer) => buffer.as_ptr(),
+        }
+    }
+
+    fn bytes_init(&self) -> usize {
+        self.len()
+    }
+
+    fn bytes_total(&self) -> usize {
+        self.capacity()
+    }
+}
+
+#[allow(unsafe_code)]
+unsafe impl tokio_uring::buf::IoBufMut for AnyBacking {
+    fn stable_mut_ptr(&mut self) -> *mut u8 {
+        match self {
+            AnyBacking::Vec(vec) => vec.as_mut_ptr(),
+            AnyBacking::Buffer(buffer) => buffer.as_mut_ptr(),
+        }
+    }
+
+    unsafe fn set_init(&mut self, pos: usize) {
+        match self {
+            AnyBacking::Vec(vec) => vec.set_len(pos),
+            AnyBacking::Buffer(buf) => buf.set_len(pos),
+        }
     }
 }

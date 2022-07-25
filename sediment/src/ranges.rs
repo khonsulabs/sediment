@@ -277,6 +277,7 @@ pub struct Iter<'a, Tag> {
 impl<'a, Tag> Iterator for Iter<'a, Tag> {
     type Item = (RangeInclusive<u64>, &'a Tag);
 
+    #[allow(clippy::range_minus_one)] // Fixed type due to iterator implementation
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(index) = self.index {
             if let Some(span) = self.ranges.get(index) {
@@ -284,7 +285,7 @@ impl<'a, Tag> Iterator for Iter<'a, Tag> {
                 let result = if let Some(next_span) =
                     next_index.and_then(|index| self.ranges.spans.get(index))
                 {
-                    (span.start..=next_span.start.saturating_sub(1), &span.tag)
+                    (span.start..=next_span.start - 1, &span.tag)
                 } else if let Some(maximum) = self.ranges.maximum {
                     (span.start..=maximum, &span.tag)
                 } else {
