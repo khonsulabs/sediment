@@ -1,6 +1,6 @@
 use std::{any::type_name, num::NonZeroUsize, ops::Range, path::Path, sync::Arc};
 
-use rand::{prelude::StdRng, thread_rng, Rng, SeedableRng};
+use rand::{prelude::StdRng, Rng, SeedableRng};
 use sediment::{
     database::Database,
     format::BatchId,

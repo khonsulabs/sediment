@@ -162,7 +162,7 @@ where
                         .or_insert_with(GrainStatistics::default);
 
                     for allocated in &grain_map.map.allocation_state {
-                        if *allocated {
+                        if allocated {
                             grain_stats.allocated += 1;
                         } else {
                             grain_stats.free += 1;

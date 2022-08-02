@@ -30,7 +30,6 @@ crc32c = "0.6.3"
 tinyvec = "1.6.0"
 libc = { version = "0.2.126", optional = true }
 num-traits = "0.2"
-bitvec = "1.0.0"
 rebytes = { path = "../../rebytes" }
 tokio-uring = { version = "0.3.0", optional = true }
 tokio = { version = "1.19.2", features = ["rt"], optional = true }

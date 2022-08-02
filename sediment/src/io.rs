@@ -2,9 +2,11 @@ use std::{
     fmt::Debug,
     io::{self, ErrorKind},
     path::Path,
+    sync::Arc,
 };
 
 pub use io::Result;
+use parking_lot::{Condvar, Mutex};
 
 use crate::io::{
     iobuffer::{AnyBacking, Backing, IoBuffer},
@@ -86,16 +88,75 @@ pub struct AsyncOpParams {
 #[derive(Debug)]
 pub enum AsyncOpResultSender {
     Buffer(flume::Sender<BufferResult<(), AnyBacking>>),
-    Io(flume::Sender<io::Result<()>>),
+    Signal(AsyncOpSignal),
 }
 
 impl AsyncOpResultSender {
     pub(crate) fn send_result(&self, result: BufferResult<(), AnyBacking>) {
         match self {
             AsyncOpResultSender::Buffer(sender) => drop(sender.send(result)),
-            AsyncOpResultSender::Io(sender) => drop(sender.send(result.0)),
+            AsyncOpResultSender::Signal(sender) => {
+                if let Err(err) = result.0 {
+                    sender.op_error(err);
+                } else {
+                    sender.op_complete();
+                }
+            }
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AsyncOpSignal {
+    data: Arc<AsyncOpSignalData>,
+}
+
+impl AsyncOpSignal {
+    pub fn op_queued(&self) {
+        let mut data = self.data.pending_writes.lock();
+        data.0 += 1;
+    }
+
+    pub fn op_complete(&self) {
+        let mut data = self.data.pending_writes.lock();
+        data.0 -= 1;
+        let signal = data.0 == 0;
+        drop(data);
+
+        if signal {
+            self.data.sync.notify_one();
+        }
+    }
+
+    pub fn op_error(&self, err: std::io::Error) {
+        let mut data = self.data.pending_writes.lock();
+        data.0 -= 1;
+        if data.1.is_none() {
+            data.1 = Some(err);
+            drop(data);
+            self.data.sync.notify_one();
+        }
+    }
+
+    pub fn wait_all(&self) -> Result<()> {
+        let mut data = self.data.pending_writes.lock();
+
+        while data.0 > 0 && data.1.is_none() {
+            self.data.sync.wait(&mut data);
+        }
+
+        if let Some(err) = data.1.take() {
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct AsyncOpSignalData {
+    pending_writes: Mutex<(usize, Option<std::io::Error>)>,
+    sync: Condvar,
 }
 
 #[cfg(test)]

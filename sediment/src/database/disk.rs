@@ -396,7 +396,10 @@ impl DiskState {
             None
         };
         for index in grain_map_local_index..grain_map_local_index + u64::from(change.count) {
-            let allocated = grain_map.map.allocation_state[usize::try_from(index).to_io()?];
+            let allocated = grain_map
+                .map
+                .allocation_state
+                .get(usize::try_from(index).to_io()?);
             if allocated != should_be_allocated {
                 return Err(io::invalid_data_error(
                     "log validation failed: grain map allocation state inconsistency",
@@ -485,12 +488,12 @@ pub struct GrainMapState {
     pub map: GrainMap,
 }
 impl GrainMapState {
-    pub fn new(offset: u64, grain_count: u64) -> io::Result<Self> {
+    pub fn new(offset: u64, grain_count: u64, allocator: &Allocator) -> io::Result<Self> {
         Ok(Self {
             offset,
             first_is_current: false,
             header_length: GrainMap::header_length_for_grain_count(grain_count),
-            map: GrainMap::new(grain_count)?,
+            map: GrainMap::new(grain_count, allocator)?,
         })
     }
 

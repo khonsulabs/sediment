@@ -19,7 +19,7 @@ use crate::{
         crc, Allocation, BasinIndex, BatchId, CommitLogEntry, GrainChange, GrainId, GrainMapPage,
         GrainOperation, LogEntryIndex, StratumIndex, PAGE_SIZE, PAGE_SIZE_U64,
     },
-    io::{self, ext::ToIoResult, paths::PathId, File, FileManager, WriteIoBuffer},
+    io::{self, ext::ToIoResult, paths::PathId, File, FileManager},
     todo_if,
     utils::Multiples,
 };
@@ -267,6 +267,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         // time.
         grains.sort_by_key(GrainBatchOperation::grain_id);
 
+        let mut async_writer = database.file_manager.write_async(&database.path)?;
         let (mut modified_pages, log_entry) = Self::update_grain_map_pages(
             grains,
             &mut modifications,
@@ -281,10 +282,16 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             new_embedded_header,
             database,
             file,
+            &mut async_writer,
         )?;
 
         for (offset, grain_map_page) in &mut modified_pages {
-            grain_map_page.write_to(*offset, committing_batch, file, &database.buffer_allocator)?;
+            grain_map_page.write_to(
+                *offset,
+                committing_batch,
+                &mut async_writer,
+                &database.buffer_allocator,
+            )?;
         }
 
         Self::write_modified(
@@ -292,7 +299,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             committing_batch,
             &mut disk_state,
             &database.buffer_allocator,
-            file,
+            &mut async_writer,
         )?;
 
         disk_state.header.batch = committing_batch;
@@ -306,7 +313,10 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
             &database.buffer_allocator,
         )?;
 
-        for mut async_writer in pending_async_writers {
+        for mut async_writer in pending_async_writers
+            .into_iter()
+            .chain(iter::once(async_writer))
+        {
             async_writer.wait()?;
         }
 
@@ -426,6 +436,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                         grain_maps: vec![GrainMapState::new(
                             stratum_atlas.grain_maps[0].offset,
                             stratum_atlas.grains_per_map,
+                            &database.buffer_allocator,
                         )?],
                     });
                     modified_grain_maps.insert((basin_index, stratum_index, 0));
@@ -530,9 +541,13 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                     &mut modified_pages.last_mut().unwrap().1
                 }
             };
-            stratum.grain_maps[grain_map_index].map.allocation_state
-                [local_grain_index..local_grain_index + usize::from(grain_count)]
-                .fill(allocation_state);
+            stratum.grain_maps[grain_map_index]
+                .map
+                .allocation_state
+                .set(
+                    local_grain_index..local_grain_index + usize::from(grain_count),
+                    allocation_state,
+                );
 
             if allocation_state {
                 for (allocation_index, local_grain_index) in
@@ -578,6 +593,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         new_embedded_header: EmbeddedHeaderUpdate,
         database: &DatabaseState<Manager>,
         file: &mut Manager::File,
+        async_file: &mut AsyncFile,
     ) -> io::Result<u64> {
         // Write the commit log for these changes.
         let mut buffer = Buffer::with_capacity(PAGE_SIZE, database.buffer_allocator.clone());
@@ -589,7 +605,7 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
         let log_entry_offset = database
             .file_allocations
             .allocate(u64::try_from(buffer.len()).to_io()?, file)?;
-        file.write_all(buffer, log_entry_offset).0?;
+        async_file.write_all_at(buffer, log_entry_offset)?;
 
         let embedded_header = if let EmbeddedHeaderUpdate::Replace(new_header) = new_embedded_header
         {
@@ -609,7 +625,12 @@ impl<AsyncFile: io::AsyncFileWriter> Committer<AsyncFile> {
                 embedded_header,
             },
         );
-        log.write_to(&database.file_allocations, &database.buffer_allocator, file)?;
+        log.write_to(
+            &database.file_allocations,
+            &database.buffer_allocator,
+            file,
+            async_file,
+        )?;
         let offset = log.position().unwrap();
         drop(log);
         Ok(offset)

@@ -12,8 +12,8 @@ use crate::io::{
     self,
     iobuffer::{AnyBacking, Backing, IoBuffer},
     paths::{PathId, PathIds},
-    AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, IgnoreNotFoundError,
-    WriteIoBuffer,
+    AsyncFileWriter, AsyncOpParams, AsyncOpSignal, BufferResult, File, FileManager,
+    IgnoreNotFoundError, WriteIoBuffer,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -65,7 +65,6 @@ impl FileManager for StdFileManager {
     }
 
     fn write_async(&self, path: &PathId) -> std::io::Result<Self::AsyncFile> {
-        let (result_sender, result_receiver) = flume::unbounded();
         let mut thread_pool = self.data.thread_pool.lock();
         if thread_pool.is_none() {
             // TODO maybe this shouldn't be unbounded?
@@ -83,9 +82,7 @@ impl FileManager for StdFileManager {
         Ok(StdAsyncFileWriter {
             path: path.clone(),
             op_sender: thread_pool.as_ref().cloned().unwrap(),
-            result_sender,
-            result_receiver,
-            operations_sent: 0,
+            signal: AsyncOpSignal::default(),
         })
     }
 
@@ -241,9 +238,7 @@ impl WriteIoBuffer for StdFile {
 pub struct StdAsyncFileWriter {
     path: PathId,
     op_sender: flume::Sender<AsyncOpParams>,
-    result_sender: flume::Sender<io::Result<()>>,
-    result_receiver: flume::Receiver<io::Result<()>>,
-    operations_sent: usize,
+    signal: AsyncOpSignal,
 }
 
 impl AsyncFileWriter for StdAsyncFileWriter {
@@ -254,25 +249,20 @@ impl AsyncFileWriter for StdAsyncFileWriter {
         buffer: impl Into<IoBuffer<B>>,
         position: u64,
     ) -> std::io::Result<()> {
+        self.signal.op_queued();
         self.op_sender
             .send(AsyncOpParams {
                 path: self.path.clone(),
                 buffer: buffer.into().map_any(),
-                result_sender: io::AsyncOpResultSender::Io(self.result_sender.clone()),
+                result_sender: io::AsyncOpResultSender::Signal(self.signal.clone()),
                 position,
             })
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
-        self.operations_sent += 1;
         Ok(())
     }
 
     fn wait(&mut self) -> std::io::Result<()> {
-        for _ in 0..self.operations_sent {
-            self.result_receiver
-                .recv()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))??;
-        }
-        Ok(())
+        self.signal.wait_all()
     }
 }
 

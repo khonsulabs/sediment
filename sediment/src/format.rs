@@ -3,10 +3,10 @@ use std::{
     fmt::{Debug, Display},
     io::{ErrorKind, Write},
     num::ParseIntError,
+    ops::RangeBounds,
     str::FromStr,
 };
 
-use bitvec::prelude::BitVec;
 use rebytes::{Allocator, Buffer};
 
 use crate::{
@@ -340,13 +340,17 @@ pub struct GrainMap {
     pub written_at: BatchId,
     /// A collection of bits representing whether each grain is allocated or
     /// not.
-    pub allocation_state: BitVec<u8>,
+    pub allocation_state: BitBuffer,
 }
 
 impl GrainMap {
-    pub fn new(grain_count: u64) -> io::Result<Self> {
-        let mut allocation_state = BitVec::new();
-        allocation_state.resize(usize::try_from(grain_count).to_io()?, false);
+    pub fn new(grain_count: u64, allocator: &Allocator) -> io::Result<Self> {
+        let allocation_state = BitBuffer::with_size_and_default(
+            usize::try_from(grain_count).to_io()?,
+            allocator.clone(),
+            false,
+        );
+
         Ok(Self {
             written_at: BatchId::default(),
             allocation_state,
@@ -388,10 +392,11 @@ impl GrainMap {
             }
         }
         let written_at = BatchId::from_le_bytes_slice(&buffer[4..12]);
-        let mut allocation_state = BitVec::from_vec(buffer[12..].to_vec());
-        // Because we always encode in chunks of 8, we may have additional bits
-        // after restoring from the file.
-        allocation_state.truncate(usize::try_from(grain_count).to_io()?);
+        let allocation_state = BitBuffer::from_bytes(
+            &buffer[12..],
+            usize::try_from(grain_count).to_io()?,
+            allocator.clone(),
+        );
         Ok(Self {
             written_at,
             allocation_state,
@@ -408,7 +413,7 @@ impl GrainMap {
 
         buffer.extend([0; 4]); // Reserve space for CRC
         buffer.extend(self.written_at.to_le_bytes());
-        buffer.extend_from_slice(self.allocation_state.as_raw_slice());
+        buffer.extend_from_slice(self.allocation_state.as_bytes());
 
         // Calculate the CRC of everything after the CRC
         let crc = crc(&buffer[4..]);
@@ -998,5 +1003,169 @@ impl GrainOperation {
         *bytes = &bytes[bytes_read..];
 
         Ok(result)
+    }
+}
+
+#[derive(Debug, Default)]
+#[must_use]
+pub struct BitBuffer {
+    buffer: Buffer,
+    bits: usize,
+}
+
+impl BitBuffer {
+    pub fn new(allocator: Allocator) -> Self {
+        Self {
+            buffer: Buffer::new(allocator),
+            bits: 0,
+        }
+    }
+
+    pub fn with_size(bit_count: usize, allocator: Allocator) -> Self {
+        let bytes_needed = bit_count.ceil_div_by(8);
+        Self {
+            buffer: Buffer::with_len(bytes_needed, allocator),
+            bits: bit_count,
+        }
+    }
+
+    pub fn with_size_and_default(bit_count: usize, allocator: Allocator, default: bool) -> Self {
+        let mut buffer = Self::with_size(bit_count, allocator);
+        buffer.set(.., default);
+        buffer
+    }
+
+    pub fn from_bytes(bytes: &[u8], bit_count: usize, allocator: Allocator) -> Self {
+        let mut buffer = Self::with_size(bit_count, allocator);
+        buffer.buffer.copy_from_slice(bytes);
+        buffer
+    }
+
+    pub fn set(&mut self, range: impl RangeBounds<usize>, value: bool) {
+        let (start_byte, start_bit) = match range.start_bound() {
+            std::ops::Bound::Included(bit) => Self::bit_to_byte(*bit),
+            std::ops::Bound::Excluded(bit) => {
+                let (mut byte, mut bit) = Self::bit_to_byte(*bit);
+                if bit < 7 {
+                    bit += 1;
+                } else {
+                    byte += 1;
+                    bit = 0;
+                }
+                (byte, bit)
+            }
+            std::ops::Bound::Unbounded => (0, 0),
+        };
+
+        let (end_byte, end_bit) = match range.end_bound() {
+            std::ops::Bound::Included(bit) => Self::bit_to_byte(*bit),
+            std::ops::Bound::Excluded(bit) => {
+                let (mut byte, mut bit) = Self::bit_to_byte(*bit);
+                if bit > 0 {
+                    bit -= 1;
+                } else {
+                    byte -= 1;
+                    bit = 7;
+                }
+                (byte, bit)
+            }
+            std::ops::Bound::Unbounded => Self::bit_to_byte(self.bits.saturating_sub(1)),
+        };
+
+        let byte_mask = if value { u8::MAX } else { 0 };
+        for byte in start_byte..=end_byte {
+            if byte == start_byte && start_bit != 0 {
+                // Partial set starting after the first bit. Start by clearing
+                // the bits we are going to set.
+                self.buffer[byte] &= u8::MAX << (8 - start_bit);
+                if value {
+                    self.buffer[byte] |= (1 << (8 - start_bit)) - 1;
+                }
+            } else if byte == end_byte && end_bit != 7 {
+                // Partial set ending before the final bit. Start by clearing
+                // the bits we are going to set.
+                self.buffer[byte] &= u8::MAX >> (end_bit + 1);
+                if value {
+                    self.buffer[byte] |= byte_mask << (7 - end_bit);
+                }
+            } else {
+                // Full byte set
+                self.buffer[byte] = byte_mask;
+            }
+        }
+    }
+
+    pub fn iter(&self) -> BitBufferIter<'_> {
+        self.into_iter()
+    }
+
+    #[must_use]
+    pub fn get(&self, index: usize) -> bool {
+        assert!(index < self.bits);
+        let (byte, bit) = Self::bit_to_byte(index);
+        (self.buffer[byte] & 1 << (7 - bit)) != 0
+    }
+
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    fn bit_to_byte(bit: usize) -> (usize, usize) {
+        let byte = bit / 8;
+        let bit = bit % 8;
+        (byte, bit)
+    }
+}
+
+#[must_use]
+pub struct BitBufferIter<'a> {
+    buffer: &'a BitBuffer,
+    current_bit: usize,
+    end_bit: usize,
+}
+
+impl<'a> Iterator for BitBufferIter<'a> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_bit < self.end_bit {
+            let value = self.buffer.get(self.current_bit);
+            self.current_bit += 1;
+
+            Some(value)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a BitBuffer {
+    type Item = bool;
+
+    type IntoIter = BitBufferIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BitBufferIter {
+            buffer: self,
+            current_bit: 0,
+            end_bit: self.bits,
+        }
+    }
+}
+
+#[test]
+fn bit_buffer_tests() {
+    let mut bits = BitBuffer::with_size_and_default(68, Allocator::default(), false);
+    bits.set(0..8, true);
+    bits.set(16..=25, true);
+    bits.set(33..43, true);
+    bits.set(67.., true);
+    for (bit, value) in bits.iter().enumerate() {
+        if bit < 8 || (16..=25).contains(&bit) || (33..43).contains(&bit) || bit == 67 {
+            assert!(value, "bit {bit} was false");
+        } else {
+            assert!(!value, "bit {bit} was true");
+        }
     }
 }

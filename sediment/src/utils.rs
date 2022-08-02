@@ -31,7 +31,7 @@ where
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn ceil_div_by(self, divisor: Self) -> Self {
         assert!(divisor > T::zero());
         (self + divisor - T::one()) / divisor
@@ -82,7 +82,7 @@ impl<T> RangeLength<T> for RangeInclusive<T>
 where
     T: Sub<T, Output = T> + Copy,
 {
-    #[inline(always)]
+    #[inline]
     fn len(&self) -> T {
         *self.end() - *self.start()
     }

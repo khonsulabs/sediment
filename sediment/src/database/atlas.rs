@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use parking_lot::{Condvar, Mutex, MutexGuard};
 use rebytes::Allocator;
@@ -105,7 +105,7 @@ impl AtlasData {
                             .allocation_state
                             .iter()
                             .map(|bit| {
-                                if *bit {
+                                if bit {
                                     if longest_free.is_none()
                                         || longest_free.unwrap() < counting_free
                                     {

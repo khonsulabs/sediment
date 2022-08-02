@@ -12,8 +12,8 @@ use crate::io::{
     fs::StdFileManager,
     iobuffer::{AnyBacking, Backing, IoBuffer},
     paths::PathId,
-    AsyncFileWriter, AsyncOpParams, BufferResult, File, FileManager, IgnoreNotFoundError,
-    WriteIoBuffer,
+    AsyncFileWriter, AsyncOpParams, AsyncOpSignal, BufferResult, File, FileManager,
+    IgnoreNotFoundError, WriteIoBuffer,
 };
 
 #[derive(Debug)]
@@ -172,18 +172,16 @@ impl io::FileManager for UringFileManager {
     }
 
     fn write_async(&self, path: &io::paths::PathId) -> std::io::Result<Self::AsyncFile> {
-        let (result_sender, result_receiver) = flume::unbounded();
         Ok(AsyncUringFile {
             path: path.clone(),
             manager: self.clone(),
-            result_sender,
-            result_receiver,
-            operations_sent: 0,
+            signal: AsyncOpSignal::default(),
         })
     }
 
     fn synchronize(&self, path: &io::paths::PathId) -> std::io::Result<()> {
-        let (result_sender, result_receiver) = flume::bounded(1);
+        let signal = AsyncOpSignal::default();
+        signal.op_queued();
         self.op_sender
             .send(AsyncOp {
                 op: Op::Synchronize,
@@ -191,14 +189,12 @@ impl io::FileManager for UringFileManager {
                     path: path.clone(),
                     position: 0,
                     buffer: IoBuffer::default(),
-                    result_sender: io::AsyncOpResultSender::Io(result_sender),
+                    result_sender: io::AsyncOpResultSender::Signal(signal.clone()),
                 },
             })
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
 
-        result_receiver
-            .recv()
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?
+        signal.wait_all()
     }
 
     fn delete(&self, path: &io::paths::PathId) -> std::io::Result<()> {
@@ -254,9 +250,7 @@ fn uring_thread(ops: flume::Receiver<AsyncOp>) {
 pub struct AsyncUringFile {
     path: PathId,
     manager: UringFileManager,
-    result_sender: flume::Sender<io::Result<()>>,
-    result_receiver: flume::Receiver<io::Result<()>>,
-    operations_sent: usize,
+    signal: AsyncOpSignal,
 }
 
 impl io::AsyncFileWriter for AsyncUringFile {
@@ -269,6 +263,7 @@ impl io::AsyncFileWriter for AsyncUringFile {
     ) -> std::io::Result<()> {
         let path = self.path.clone();
         let buffer = buffer.into().map_any();
+        self.signal.op_queued();
         self.manager
             .op_sender
             .send(AsyncOp {
@@ -277,21 +272,15 @@ impl io::AsyncFileWriter for AsyncUringFile {
                     path,
                     position,
                     buffer,
-                    result_sender: io::AsyncOpResultSender::Io(self.result_sender.clone()),
+                    result_sender: io::AsyncOpResultSender::Signal(self.signal.clone()),
                 },
             })
             .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))?;
-        self.operations_sent += 1;
         Ok(())
     }
 
     fn wait(&mut self) -> std::io::Result<()> {
-        for _ in 0..self.operations_sent {
-            self.result_receiver
-                .recv()
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::BrokenPipe, err))??;
-        }
-        Ok(())
+        self.signal.wait_all()
     }
 }
 
@@ -305,11 +294,13 @@ impl WriteIoBuffer for AsyncUringFile {
     }
 }
 
+#[derive(Debug)]
 struct AsyncOp {
     op: Op,
     params: AsyncOpParams,
 }
 
+#[derive(Debug)]
 enum Op {
     Write,
     Read,
