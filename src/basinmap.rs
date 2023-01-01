@@ -20,6 +20,13 @@ impl<T> BasinMap<T> {
 
         self[index].as_mut().expect("always initialized above")
     }
+
+    pub fn get_or_default(&mut self, index: BasinId) -> &mut T
+    where
+        T: Default,
+    {
+        self.get_or_insert_with(index, T::default)
+    }
 }
 
 impl<T> Default for BasinMap<T> {

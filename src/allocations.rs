@@ -1,4 +1,6 @@
-use crate::format::{GrainAllocationStatus, GrainIndex, LocalGrainId, StratumHeader};
+use crate::format::{
+    GrainAllocationInfo, GrainAllocationStatus, GrainIndex, LocalGrainId, StratumHeader,
+};
 
 #[derive(Debug)]
 pub struct FreeLocations {
@@ -24,7 +26,7 @@ impl FreeLocations {
 
         let mut index = 0;
         while index < 16_372 {
-            let index_status = stratum.grains[index];
+            let index_status = stratum.grain_info(index);
             let count = index_status.count();
             let free = matches!(
                 index_status.status().expect("invalid header"),
@@ -38,7 +40,7 @@ impl FreeLocations {
                     .enumerate()
                     .find_map(|(index, info)| {
                         matches!(
-                            info.status().expect("invalid header"),
+                            GrainAllocationInfo(*info).status().expect("invalid header"),
                             GrainAllocationStatus::Allocated | GrainAllocationStatus::Archived
                         )
                         .then_some(index)

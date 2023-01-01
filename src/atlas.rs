@@ -1,7 +1,9 @@
 use std::{
     collections::{HashMap, VecDeque},
-    io::Read,
-    sync::{Mutex, PoisonError},
+    fs::{File, OpenOptions},
+    io::{BufReader, Read, Seek},
+    path::PathBuf,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use okaywal::{ChunkReader, LogPosition, WriteAheadLog};
@@ -10,8 +12,9 @@ use tinyvec::ArrayVec;
 use crate::{
     allocations::FreeLocations,
     basinmap::BasinMap,
-    format::{BasinId, GrainId, StratumHeader, StratumId},
+    format::{BasinAndStratum, BasinId, GrainId, StratumHeader, StratumId},
     store::{BasinState, Store},
+    util::{u32_to_usize, usize_to_u32},
     Result,
 };
 
@@ -32,10 +35,20 @@ impl Atlas {
 
         Self {
             data: Mutex::new(Data {
+                directory: store.directory.clone(),
+                index: IndexMetadata {
+                    commit_log_head: disk_state.index.active.commit_log_head,
+                    embedded_header_data: disk_state.index.active.embedded_header_data,
+                },
                 basins,
                 uncheckpointed_grains: HashMap::new(),
             }),
         }
+    }
+
+    pub fn current_index_metadata(&self) -> IndexMetadata {
+        let data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+        data.index
     }
 
     pub fn find(&self, grain: GrainId, wal: &WriteAheadLog) -> Result<Option<GrainReader>> {
@@ -55,7 +68,46 @@ impl Atlas {
 
                 Ok(Some(GrainReader::InWal(chunk_reader)))
             }
-            None => todo!("find grain in stratum"),
+            None => {
+                // TODO we should verify this grain id is actually valid, without blocking for the disk state.
+                let file_path = data.basins[grain.basin_id()].as_ref().and_then(|basin| {
+                    basin
+                        .strata
+                        .get(grain.stratum_id().as_usize())
+                        .map(|stratum| stratum.path.clone())
+                });
+
+                // Remove the lock before we do any file operations.
+                drop(data);
+
+                if let Some(file_path) = file_path {
+                    let mut file = OpenOptions::new().read(true).open(file_path.as_ref())?;
+                    // The grain data starts with the transaction id, followed
+                    // by the byte length.
+                    file.seek(std::io::SeekFrom::Start(grain.file_position() + 8))?;
+                    let mut file = BufReader::new(file);
+                    let mut length = [0; 4];
+                    file.read_exact(&mut length)?;
+                    let length = u32::from_be_bytes(length);
+
+                    // We can perform a sanity check here to make sure this
+                    // *looks* like valid grain data: is the length smaller than
+                    // the total grain allocation?
+                    if length
+                        > grain.basin_id().grain_stripe_bytes() * u32::from(grain.grain_count())
+                    {
+                        todo!("invalid grain id")
+                    }
+
+                    return Ok(Some(GrainReader::InStratum(StratumGrainReader {
+                        file,
+                        length,
+                        bytes_remaining: length,
+                    })));
+                }
+
+                Ok(None)
+            }
         }
     }
 
@@ -94,7 +146,7 @@ impl Atlas {
             ));
         }
 
-        eligible_basins.sort_by(|a, b| b.4.cmp(&a.4));
+        eligible_basins.sort_by(|a, b| a.4.cmp(&b.4));
 
         // Now we have a list of basins to consider.
         for (basin_id, number_of_grains_needed, _, _, _) in eligible_basins
@@ -135,7 +187,11 @@ impl Atlas {
         }
         let basin = data.basins[*basin_id].as_mut().expect("just allocated");
         let new_id = StratumId::new(basin.strata.len() as u64).expect("valid stratum id");
-        basin.strata.push(Stratum::default());
+        basin
+            .strata
+            .push(Stratum::default_for(data.directory.join(
+                BasinAndStratum::from_parts(*basin_id, new_id).to_string(),
+            )));
         basin.free_strata.push(new_id);
         Ok(allocate_grain_within_stratum(
             basin.strata.last_mut().expect("just pushed"),
@@ -149,12 +205,23 @@ impl Atlas {
 
     pub fn note_grains_written(
         &self,
+        new_metadata: IndexMetadata,
         written_grains: impl IntoIterator<Item = (GrainId, LogPosition)>,
     ) {
         let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
         for (grain, log_position) in written_grains {
             data.uncheckpointed_grains
                 .insert(grain, UncheckpointedGrain::InWal(log_position));
+        }
+    }
+
+    pub fn note_grains_checkpointed<'a>(
+        &self,
+        checkpointed_grains: impl IntoIterator<Item = &'a GrainId>,
+    ) {
+        let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+        for grain in checkpointed_grains {
+            data.uncheckpointed_grains.remove(grain);
         }
     }
 
@@ -177,6 +244,8 @@ impl Atlas {
 
 #[derive(Debug)]
 struct Data {
+    directory: Arc<PathBuf>,
+    index: IndexMetadata,
     basins: BasinMap<Basin>,
     uncheckpointed_grains: HashMap<GrainId, UncheckpointedGrain>,
 }
@@ -209,7 +278,7 @@ impl<'a> From<&'a BasinState> for Basin {
         let mut strata = Vec::new();
         let mut free_strata = StratumIdRing::default();
         for stratum in &state.stratum {
-            let stratum = Stratum::from(&stratum.active);
+            let stratum = Stratum::from_stratum(stratum.path.clone(), &stratum.header.active);
 
             if !stratum.allocations.is_full() {
                 free_strata.push(StratumId::new(strata.len() as u64).expect("valid stratum id"));
@@ -225,28 +294,38 @@ impl<'a> From<&'a BasinState> for Basin {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Stratum {
+    path: Arc<PathBuf>,
     allocations: FreeLocations,
 }
 
-impl<'a> From<&'a StratumHeader> for Stratum {
-    fn from(state: &'a StratumHeader) -> Self {
+impl Stratum {
+    fn from_stratum(path: Arc<PathBuf>, state: &StratumHeader) -> Self {
         let allocations = FreeLocations::from_stratum(state);
 
-        Self { allocations }
+        Self { path, allocations }
+    }
+
+    fn default_for(path: PathBuf) -> Self {
+        Self {
+            path: Arc::new(path),
+            allocations: FreeLocations::default(),
+        }
     }
 }
 
 #[derive(Debug)]
 pub enum GrainReader {
     InWal(ChunkReader),
+    InStratum(StratumGrainReader),
 }
 
 impl GrainReader {
     pub const fn bytes_remaining(&self) -> u32 {
         match self {
             GrainReader::InWal(reader) => reader.bytes_remaining(),
+            GrainReader::InStratum(reader) => reader.bytes_remaining,
         }
     }
 }
@@ -255,20 +334,28 @@ impl Read for GrainReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             GrainReader::InWal(reader) => reader.read(buf),
+            GrainReader::InStratum(reader) => {
+                let bytes_remaining = u32_to_usize(reader.bytes_remaining)?;
+                let bytes_to_read = buf.len().min(bytes_remaining);
+                let bytes_read = reader.file.read(&mut buf[..bytes_to_read])?;
+                reader.bytes_remaining -= usize_to_u32(bytes_read)?;
+                Ok(bytes_read)
+            }
         }
     }
+}
+
+#[derive(Debug)]
+pub struct StratumGrainReader {
+    file: BufReader<File>,
+    length: u32,
+    bytes_remaining: u32,
 }
 
 #[derive(Debug)]
 enum UncheckpointedGrain {
     PendingCommit,
     InWal(LogPosition),
-}
-
-#[derive(Debug)]
-enum GrainPosition {
-    InWal(LogPosition),
-    InStratum,
 }
 
 #[derive(Debug, Default)]
@@ -321,4 +408,10 @@ impl<'a> StratumIdIter<'a> {
         self.ring.0.pop_front();
         self.iterated -= 1;
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IndexMetadata {
+    pub embedded_header_data: Option<GrainId>,
+    pub commit_log_head: Option<GrainId>,
 }

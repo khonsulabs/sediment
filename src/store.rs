@@ -1,19 +1,23 @@
 use std::{
     fs::{self, File, OpenOptions},
+    io::{self, Seek},
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
 use crate::{
     basinmap::BasinMap,
-    format::{BasinAndStratum, IndexFile, IndexHeader, StratumFileHeader, StratumHeader},
+    format::{
+        BasinAndStratum, BasinId, IndexFile, IndexHeader, StratumFileHeader, StratumHeader,
+        StratumId, TransactionId,
+    },
     Result,
 };
 
 #[derive(Debug)]
 pub struct Store {
-    directory: PathBuf,
+    pub directory: Arc<PathBuf>,
     disk_state: Mutex<DiskState>,
 }
 
@@ -21,7 +25,7 @@ impl Store {
     pub fn recover(path: &Path) -> Result<Self> {
         let disk_state = DiskState::recover(path)?;
         Ok(Self {
-            directory: path.to_path_buf(),
+            directory: Arc::new(path.to_path_buf()),
             disk_state: Mutex::new(disk_state),
         })
     }
@@ -92,14 +96,20 @@ impl DiskState {
                     }
                 };
 
-                let basin = basins.get_or_insert_with(stratum.id.basin(), BasinState::default);
+                let basin = basins.get_or_insert_with(stratum.id.basin(), || {
+                    BasinState::default_for(stratum.id.basin())
+                });
                 assert_eq!(
                     basin.stratum.len(),
                     stratum.id.stratum().as_usize(),
                     "strata are non-sequential"
                 );
 
-                basin.stratum.push(header);
+                basin.stratum.push(StratumState {
+                    path: Arc::new(path.join(stratum.id.to_string())),
+                    header,
+                    file: Some(stratum.file),
+                });
             }
 
             Ok(Self {
@@ -108,6 +118,7 @@ impl DiskState {
                 basins,
             })
         } else {
+            // TODO fsync directory
             let mut index_writer = OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -132,6 +143,16 @@ impl DiskState {
             }
         }
     }
+
+    pub fn write_header(&mut self, transaction_id: TransactionId) -> Result<()> {
+        self.index.active.transaction_id = transaction_id;
+        self.index.write_to(&mut self.index_writer)?;
+
+        // TODO this should be backgrounded.
+        self.index_writer.sync_data()?;
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -140,9 +161,57 @@ pub struct Duplicated<T> {
     pub first_is_active: bool,
 }
 
-#[derive(Debug, Default)]
+impl<T> Duplicated<T>
+where
+    T: Duplicable,
+{
+    pub fn write_to(&mut self, file: &mut File) -> Result<()> {
+        let offset = if self.first_is_active { T::BYTES } else { 0 };
+
+        file.seek(io::SeekFrom::Start(offset))?;
+        self.active.write_to(file)?;
+        self.first_is_active = !self.first_is_active;
+
+        Ok(())
+    }
+}
+
+pub trait Duplicable: Sized {
+    const BYTES: u64;
+
+    fn write_to<W: io::Write>(&mut self, writer: &mut W) -> Result<()>;
+}
+
+#[derive(Debug)]
 pub struct BasinState {
-    pub stratum: Vec<Duplicated<StratumHeader>>,
+    pub id: BasinId,
+    pub stratum: Vec<StratumState>,
+}
+
+impl BasinState {
+    pub fn default_for(id: BasinId) -> Self {
+        Self {
+            id,
+            stratum: Vec::new(),
+        }
+    }
+
+    pub fn get_or_allocate_stratum(
+        &mut self,
+        id: StratumId,
+        directory: &Path,
+    ) -> &mut StratumState {
+        while id.as_usize() >= self.stratum.len() {
+            let new_id =
+                StratumId::new(u64::try_from(self.stratum.len()).expect("too large of a database"))
+                    .expect("invalid id");
+            self.stratum.push(StratumState::default_for(
+                directory.join(format!("{}{}", self.id, new_id)),
+            ))
+        }
+
+        &mut self.stratum[id.as_usize()]
+    }
 }
 
 fn discover_strata(path: &Path, scratch: &mut Vec<u8>) -> Result<Vec<UnverifiedStratum>> {
@@ -164,6 +233,52 @@ fn discover_strata(path: &Path, scratch: &mut Vec<u8>) -> Result<Vec<UnverifiedS
     discovered.sort_by(|a, b| a.id.cmp(&b.id));
 
     Ok(discovered)
+}
+
+#[derive(Debug)]
+pub struct StratumState {
+    pub path: Arc<PathBuf>,
+    pub header: Duplicated<StratumHeader>,
+    pub file: Option<File>,
+}
+
+impl StratumState {
+    fn default_for(path: PathBuf) -> Self {
+        Self {
+            path: Arc::new(path),
+            header: Duplicated::default(),
+            file: None,
+        }
+    }
+
+    pub fn get_or_open_file(&mut self) -> Result<&mut File> {
+        if self.file.is_none() {
+            // TODO fsync directory
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(self.path.as_ref())?;
+
+            self.file = Some(file);
+        }
+
+        Ok(self.file.as_mut().expect("file always allocated above"))
+    }
+
+    pub fn write_header(&mut self, new_transaction_id: TransactionId) -> io::Result<()> {
+        let file = self
+            .file
+            .as_mut()
+            .expect("shouldn't ever write a file header if no data was written");
+
+        self.header.active.transaction_id = new_transaction_id;
+        self.header.write_to(file)?;
+
+        // TODO this should be moved to a threaded operation to allow multiple
+        // strata to sync at the same time.
+        file.sync_data()
+    }
 }
 
 struct UnverifiedStratum {

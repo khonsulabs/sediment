@@ -1,23 +1,22 @@
-use std::{
-    fmt::{Display, Write as _, },
-    str::FromStr, io::{Write, Read}, ops::AddAssign, 
-};
 use crc32c::crc32c;
 use okaywal::EntryId;
+use std::{
+    fmt::{Display, Write as _},
+    io::{BufWriter, Error, ErrorKind, Read, Write},
+    ops::AddAssign,
+    str::FromStr,
+};
 
-use crate::Result;
+use crate::{store::Duplicable, Result};
 
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct GrainId(u64);
 
 impl GrainId {
     pub const NONE: Self = Self(u64::MAX);
 
     pub const fn new(basin: BasinId, stratum: StratumId, id: LocalGrainId) -> Self {
-        
-            Self((basin.0 as u64) << 61 | stratum.0 << 20 | id.0)
-        
+        Self((basin.0 as u64) << 61 | stratum.0 << 20 | id.0)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
@@ -29,11 +28,11 @@ impl GrainId {
         }
     }
 
-    pub fn to_bytes(self) -> [u8; 8] {
+    pub const fn to_bytes(self) -> [u8; 8] {
         self.0.to_be_bytes()
     }
 
-    pub fn basin_id(self) -> BasinId {
+    pub const fn basin_id(self) -> BasinId {
         BasinId((self.0 >> 61) as u8)
     }
 
@@ -41,24 +40,32 @@ impl GrainId {
         LocalGrainId(self.0 & 0xF_FFFF)
     }
 
-    pub fn local_grain_index(self) -> GrainIndex {
+    pub const fn local_grain_index(self) -> GrainIndex {
         GrainIndex(((self.0 >> 6) & 0x3FFF) as u16)
     }
 
-    pub fn grain_count(self) -> u8 {
+    pub const fn grain_count(self) -> u8 {
         (self.0 & 0x3f) as u8
     }
 
-    pub fn basin_and_stratum(self) -> BasinAndStratum {
+    pub const fn basin_and_stratum(self) -> BasinAndStratum {
         BasinAndStratum(self.0 >> 20)
     }
 
-    pub fn stratum_id(self) -> StratumId {
-        StratumId((self.0 >> 20) & 0x1fff_ffff_ffff)
+    pub const fn stratum_id(self) -> StratumId {
+        StratumId((self.0 >> 20) & 0x1ff_ffff_ffff)
     }
 
-    pub fn sequential_grains(self) -> u8 {
+    pub const fn sequential_grains(self) -> u8 {
         (self.0 & 0x3f) as u8
+    }
+
+    pub(crate) const fn file_position(self) -> u64 {
+        let grain_size = self.basin_id().grain_stripe_bytes() as u64;
+        let index = self.local_grain_index().as_u16() as u64;
+        let header_size = StratumFileHeader::BYTES * 2;
+
+        header_size + index * grain_size
     }
 }
 
@@ -74,13 +81,19 @@ impl FromStr for GrainId {
         }
 
         let basin_and_stratum = BasinAndStratum::from_str(basin_and_stratum)?;
-            
-        let index_and_count = u64::from_str_radix(index, 16).map_err(|_| GrainIdError::InvalidGrainIndex)?;
+
+        let index_and_count =
+            u64::from_str_radix(index, 16).map_err(|_| GrainIdError::InvalidGrainIndex)?;
         let count = (index_and_count & 0x3f) as u8;
-        let index = GrainIndex::new((index_and_count >> 6) as u16).ok_or(GrainIdError::InvalidGrainIndex)?;
+        let index = GrainIndex::new((index_and_count >> 6) as u16)
+            .ok_or(GrainIdError::InvalidGrainIndex)?;
         let id = LocalGrainId::from_parts(index, count).ok_or(GrainIdError::InvalidGrainIndex)?;
 
-        Ok(Self::new(basin_and_stratum.basin(), basin_and_stratum.stratum(), id))
+        Ok(Self::new(
+            basin_and_stratum.basin(),
+            basin_and_stratum.stratum(),
+            id,
+        ))
     }
 }
 
@@ -160,7 +173,6 @@ impl BasinId {
     }
 }
 
-
 impl Display for BasinId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_char(self.to_char())
@@ -168,7 +180,7 @@ impl Display for BasinId {
 }
 
 impl BasinId {
-    pub fn grain_stripe_bytes(self) -> u32 {
+    pub const fn grain_stripe_bytes(self) -> u32 {
         match self.0 {
             0 => 2_u32.pow(5),
             1 => 2_u32.pow(8),
@@ -178,7 +190,7 @@ impl BasinId {
             5 => 2_u32.pow(24),
             6 => 2_u32.pow(28),
             7 => 2_u32.pow(31),
-            _ => unreachable!("invalid basin id")
+            _ => unreachable!(),
         }
     }
 }
@@ -195,12 +207,16 @@ impl BasinAndStratum {
         }
     }
 
+    pub const fn from_parts(basin: BasinId, stratum: StratumId) -> Self {
+        Self((basin.0 as u64) << 41 | stratum.0)
+    }
+
     pub fn basin(self) -> BasinId {
         BasinId((self.0 >> 41) as u8)
     }
 
     pub fn stratum(self) -> StratumId {
-        StratumId(self.0 & 0x1fff_ffff_ffff)
+        StratumId(self.0 & 0x1ff_ffff_ffff)
     }
 }
 
@@ -302,7 +318,10 @@ fn grain_id_strings() {
     assert_eq!(zero.to_string(), "00-0");
     let none = GrainId::NONE;
     assert_eq!(none.to_string(), "7fffffffffff-fffff");
-    assert_eq!(GrainId::from_str("7fffffffffff-fffff").unwrap(), GrainId::NONE);
+    assert_eq!(
+        GrainId::from_str("7fffffffffff-fffff").unwrap(),
+        GrainId::NONE
+    );
     assert!(GrainId::from_str("72fffffffffff-fffff").is_err());
     assert!(GrainId::from_str("71fffffffffff-1fffff").is_err());
     assert!(GrainId::from_str("81fffffffffff-3fff").is_err());
@@ -310,6 +329,16 @@ fn grain_id_strings() {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Default)]
 pub struct TransactionId(EntryId);
+
+impl TransactionId {
+    pub fn to_be_bytes(self) -> [u8; 8] {
+        self.0 .0.to_be_bytes()
+    }
+
+    pub const fn from_be_bytes(bytes: [u8; 8]) -> Self {
+        Self(EntryId(u64::from_be_bytes(bytes)))
+    }
+}
 
 impl From<EntryId> for TransactionId {
     fn from(id: EntryId) -> Self {
@@ -334,7 +363,7 @@ impl From<EntryId> for TransactionId {
 /// [`TransactionId`].
 pub struct IndexFile {
     pub first_header: IndexHeader,
-    pub second_header: IndexHeader
+    pub second_header: IndexHeader,
 }
 
 impl IndexFile {
@@ -342,7 +371,8 @@ impl IndexFile {
         let first_header = IndexHeader::read_from(file, scratch)?;
         let second_header = IndexHeader::read_from(file, scratch)?;
         Ok(Self {
-            first_header,second_header
+            first_header,
+            second_header,
         })
     }
 }
@@ -365,12 +395,26 @@ pub struct IndexHeader {
     pub crc32: u32,
 }
 
-impl IndexHeader {
-    pub fn write_to<W: Write>(&mut self, writer: &mut W) -> Result<()> {
+impl Duplicable for IndexHeader {
+    const BYTES: u64 = 28;
+
+    fn write_to<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         let mut writer = ChecksumWriter::new(writer);
-        writer.write_all(&self.transaction_id.0.0.to_be_bytes())?;
-        writer.write_all(&self.embedded_header_data.unwrap_or(GrainId::NONE).0.to_be_bytes())?;
-        writer.write_all(&self.commit_log_head.unwrap_or(GrainId::NONE).0.to_be_bytes())?;
+        writer.write_all(&self.transaction_id.0 .0.to_be_bytes())?;
+        writer.write_all(
+            &self
+                .embedded_header_data
+                .unwrap_or(GrainId::NONE)
+                .0
+                .to_be_bytes(),
+        )?;
+        writer.write_all(
+            &self
+                .commit_log_head
+                .unwrap_or(GrainId::NONE)
+                .0
+                .to_be_bytes(),
+        )?;
         let (_, crc32) = writer.write_crc32_and_finish()?;
         self.crc32 = crc32;
 
@@ -387,12 +431,17 @@ impl IndexHeader {
         if crc32 != computed_crc {
             todo!("crc error")
         }
-        
-        let transaction_id = TransactionId(EntryId(u64::from_be_bytes(scratch[..8].try_into().expect("u64 is 8 bytes"))));
+
+        let transaction_id = TransactionId(EntryId(u64::from_be_bytes(
+            scratch[..8].try_into().expect("u64 is 8 bytes"),
+        )));
         let embedded_header_data = GrainId::from_bytes(&scratch[8..16]);
         let commit_log_head = GrainId::from_bytes(&scratch[16..24]);
         Ok(Self {
-            transaction_id,embedded_header_data,commit_log_head,crc32
+            transaction_id,
+            embedded_header_data,
+            commit_log_head,
+            crc32,
         })
     }
 }
@@ -440,6 +489,7 @@ pub struct StratumFileHeader {
 }
 
 impl StratumFileHeader {
+    const BYTES: u64 = StratumHeader::BYTES * 2;
     pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
         let first_header = StratumHeader::read_from(file, scratch)?;
         let second_header = StratumHeader::read_from(file, scratch)?;
@@ -464,27 +514,41 @@ impl StratumFileHeader {
 #[derive(Debug)]
 pub struct StratumHeader {
     pub transaction_id: TransactionId,
-    pub grains: [GrainAllocationInfo; 16372],
+    pub grains: [u8; 16372],
     pub crc32: u32,
 }
 
 impl StratumHeader {
+    pub const fn grain_info(&self, index: usize) -> GrainAllocationInfo {
+        GrainAllocationInfo(self.grains[index])
+    }
+
     pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
         scratch.resize(16_384, 0);
         file.read_exact(scratch)?;
+
+        let mut grains = [0; 16_372];
+
         let crc32 = u32::from_be_bytes(scratch[16_380..].try_into().expect("u32 is 4 bytes"));
-        let computed_crc = crc32c(&scratch[..16_380]);
+        let computed_crc = dbg!(crc32c(&scratch[..16_380]));
         if crc32 != computed_crc {
-            todo!("crc error")
+            if scratch.iter().all(|b| b == &0) {
+                return Ok(Self {
+                    transaction_id: TransactionId::default(),
+                    grains,
+                    crc32: 0,
+                });
+            }
+
+            return Err(Error::new(ErrorKind::InvalidData, "crc check failed"));
         }
-        
-        let transaction_id = TransactionId(EntryId(u64::from_be_bytes(scratch[..8].try_into().expect("u64 is 8 bytes"))));
-        
-        let mut grains = [GrainAllocationInfo::free(); 16_372];
-        for index in 0..16_372 {
-            grains[index] = GrainAllocationInfo(scratch[index + 8]);
-        }
-        
+
+        let transaction_id = TransactionId(EntryId(u64::from_be_bytes(
+            scratch[..8].try_into().expect("u64 is 8 bytes"),
+        )));
+
+        grains.copy_from_slice(&scratch[8..16_372 + 8]);
+
         Ok(Self {
             transaction_id,
             grains,
@@ -493,18 +557,33 @@ impl StratumHeader {
     }
 }
 
+impl Duplicable for StratumHeader {
+    const BYTES: u64 = 16_384;
+
+    fn write_to<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+        let mut writer = ChecksumWriter::new(BufWriter::new(writer));
+        writer.write_all(&self.transaction_id.0 .0.to_be_bytes())?;
+        writer.write_all(&self.grains)?;
+        self.crc32 = dbg!(writer.crc32());
+        writer.write_all(&self.crc32.to_be_bytes())?;
+
+        writer.flush()
+    }
+}
+
 impl Default for StratumHeader {
     fn default() -> Self {
         Self {
             transaction_id: Default::default(),
-            grains: [GrainAllocationInfo::free(); 16372],
+            grains: [0; 16372],
             crc32: Default::default(),
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
-pub struct GrainAllocationInfo(u8);
+#[repr(transparent)]
+pub struct GrainAllocationInfo(pub u8);
 
 impl GrainAllocationInfo {
     pub const fn free() -> Self {
@@ -536,7 +615,7 @@ pub enum GrainAllocationStatus {
     Free,
 }
 
-trait ByteUtil {
+pub trait ByteUtil {
     fn to_be_bytes(&self) -> [u8; 8];
     fn from_be_bytes(bytes: [u8; 8]) -> Self;
 }
@@ -574,15 +653,15 @@ impl ByteUtil for Option<GrainId> {
 
 pub struct ChecksumWriter<W> {
     writer: W,
-    crc32: u32
+    crc32: u32,
 }
 
-impl<W>ChecksumWriter<W> where W: Write {
+impl<W> ChecksumWriter<W>
+where
+    W: Write,
+{
     pub fn new(writer: W) -> Self {
-        Self {
-            writer,
-            crc32: 0,
-        }
+        Self { writer, crc32: 0 }
     }
     pub fn crc32(&self) -> u32 {
         self.crc32
@@ -594,7 +673,10 @@ impl<W>ChecksumWriter<W> where W: Write {
     }
 }
 
-impl<W> Write for ChecksumWriter<W> where W: Write {
+impl<W> Write for ChecksumWriter<W>
+where
+    W: Write,
+{
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let bytes_written = self.writer.write(buf)?;
         if bytes_written > 0 {
