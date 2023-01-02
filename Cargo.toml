@@ -9,3 +9,5 @@ edition = "2021"
 okaywal = { path = "../okaywal2" }
 crc32c = "0.6.3"
 tinyvec = "1.6.0"
+thiserror = "1.0.38"
+flume = "0.10.14"

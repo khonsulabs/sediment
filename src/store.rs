@@ -12,6 +12,7 @@ use crate::{
         BasinAndStratum, BasinId, IndexFile, IndexHeader, StratumFileHeader, StratumHeader,
         StratumId, TransactionId,
     },
+    fsync::{FSyncBatch, FSyncManager},
     Result,
 };
 
@@ -19,6 +20,7 @@ use crate::{
 pub struct Store {
     pub directory: Arc<PathBuf>,
     disk_state: Mutex<DiskState>,
+    pub syncer: FSyncManager,
 }
 
 impl Store {
@@ -27,6 +29,7 @@ impl Store {
         Ok(Self {
             directory: Arc::new(path.to_path_buf()),
             disk_state: Mutex::new(disk_state),
+            syncer: FSyncManager::default(),
         })
     }
 
@@ -39,6 +42,8 @@ impl Store {
 
 #[derive(Debug)]
 pub struct DiskState {
+    pub needs_directory_sync: bool,
+    pub directory: File,
     pub index: Duplicated<IndexHeader>,
     pub index_writer: File,
     pub basins: BasinMap<BasinState>,
@@ -49,6 +54,8 @@ impl DiskState {
         if !path.exists() {
             fs::create_dir_all(path)?;
         }
+
+        let directory = OpenOptions::new().read(true).open(path)?;
 
         let index_path = path.join("index");
 
@@ -113,12 +120,13 @@ impl DiskState {
             }
 
             Ok(Self {
+                needs_directory_sync: false,
+                directory,
                 index,
                 index_writer,
                 basins,
             })
         } else {
-            // TODO fsync directory
             let mut index_writer = OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -129,8 +137,14 @@ impl DiskState {
             empty_header.write_to(&mut index_writer)?;
             empty_header.write_to(&mut index_writer)?;
 
+            // Ensure the file is fully persisted to disk.
+            index_writer.sync_all()?;
+            directory.sync_all()?;
+
             if discovered_strata.is_empty() {
                 Ok(Self {
+                    needs_directory_sync: false,
+                    directory,
                     index: Duplicated {
                         active: empty_header,
                         first_is_active: false,
@@ -144,12 +158,11 @@ impl DiskState {
         }
     }
 
-    pub fn write_header(&mut self, transaction_id: TransactionId) -> Result<()> {
+    pub fn write_header(&mut self, transaction_id: TransactionId, sync: &FSyncBatch) -> Result<()> {
         self.index.active.transaction_id = transaction_id;
         self.index.write_to(&mut self.index_writer)?;
 
-        // TODO this should be backgrounded.
-        self.index_writer.sync_data()?;
+        sync.queue_fsync_data(self.index_writer.try_clone()?)?;
 
         Ok(())
     }
@@ -251,9 +264,12 @@ impl StratumState {
         }
     }
 
-    pub fn get_or_open_file(&mut self) -> Result<&mut File> {
+    pub fn get_or_open_file(&mut self, needs_directory_sync: &mut bool) -> Result<&mut File> {
         if self.file.is_none() {
-            // TODO fsync directory
+            // If this file doesn't exist, we need to do a directory sync to
+            // ensure the file is persisted.
+            *needs_directory_sync |= !self.path.exists();
+
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
@@ -266,7 +282,11 @@ impl StratumState {
         Ok(self.file.as_mut().expect("file always allocated above"))
     }
 
-    pub fn write_header(&mut self, new_transaction_id: TransactionId) -> io::Result<()> {
+    pub fn write_header(
+        &mut self,
+        new_transaction_id: TransactionId,
+        sync_batch: &FSyncBatch,
+    ) -> io::Result<()> {
         let file = self
             .file
             .as_mut()
@@ -275,9 +295,10 @@ impl StratumState {
         self.header.active.transaction_id = new_transaction_id;
         self.header.write_to(file)?;
 
-        // TODO this should be moved to a threaded operation to allow multiple
-        // strata to sync at the same time.
-        file.sync_data()
+        let file_to_sync = file.try_clone()?;
+        sync_batch.queue_fsync_data(file_to_sync)?;
+
+        Ok(())
     }
 }
 

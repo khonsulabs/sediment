@@ -1,7 +1,8 @@
 use std::{
     io::{self},
+    num::TryFromIntError,
     path::Path,
-    sync::Arc,
+    sync::{Arc, PoisonError},
 };
 
 use okaywal::WriteAheadLog;
@@ -21,12 +22,11 @@ mod basinmap;
 mod commit_log;
 pub mod config;
 pub mod format;
+mod fsync;
 mod store;
 mod transaction;
 mod util;
 mod wal;
-
-pub type Result<T, E = io::Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -63,7 +63,10 @@ impl Database {
     }
 
     pub fn shutdown(self) -> Result<()> {
-        self.wal.shutdown()
+        self.wal.shutdown()?;
+        self.data.store.syncer.shutdown()?;
+
+        Ok(())
     }
 }
 
@@ -79,6 +82,39 @@ impl PartialEq for Database {
 struct Data {
     store: Store,
     atlas: Atlas,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("a poisoned lock was encountered, the database must be closed and reopened")]
+    LockPoisoned,
+    #[error("a thread was not able to be joined")]
+    ThreadJoin,
+    #[error("crc32 checksum mismatch")]
+    ChecksumFailed,
+    #[error("value too large for target: {0}")]
+    ValueOutOfBounds(#[from] TryFromIntError),
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("the service has shut down")]
+    Shutdown,
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+impl From<Error> for io::Error {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::Io(err) => err,
+            other => io::Error::new(io::ErrorKind::Other, other),
+        }
+    }
+}
+
+impl<T> From<PoisonError<T>> for Error {
+    fn from(_: PoisonError<T>) -> Self {
+        Self::LockPoisoned
+    }
 }
 
 #[test]

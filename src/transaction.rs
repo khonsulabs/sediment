@@ -99,7 +99,9 @@ impl<'db> Transaction<'db> {
             .atlas
             .rollback_grains(self.written_grains.drain(..).map(|(g, _)| g));
 
-        result
+        result?;
+
+        Ok(())
     }
 }
 

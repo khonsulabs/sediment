@@ -2,12 +2,12 @@ use crc32c::crc32c;
 use okaywal::EntryId;
 use std::{
     fmt::{Display, Write as _},
-    io::{BufWriter, Error, ErrorKind, Read, Write},
+    io::{BufWriter, Read, Write},
     ops::AddAssign,
     str::FromStr,
 };
 
-use crate::{store::Duplicable, Result};
+use crate::{store::Duplicable, Result, Error};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct GrainId(u64);
@@ -540,7 +540,7 @@ impl StratumHeader {
                 });
             }
 
-            return Err(Error::new(ErrorKind::InvalidData, "crc check failed"));
+            return Err(Error::ChecksumFailed);
         }
 
         let transaction_id = TransactionId(EntryId(u64::from_be_bytes(
@@ -567,7 +567,9 @@ impl Duplicable for StratumHeader {
         self.crc32 = dbg!(writer.crc32());
         writer.write_all(&self.crc32.to_be_bytes())?;
 
-        writer.flush()
+        writer.flush()?;
+
+        Ok(())
     }
 }
 

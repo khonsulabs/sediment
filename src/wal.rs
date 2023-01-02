@@ -1,5 +1,5 @@
 use std::{
-    io::{BufWriter, Read, Seek, SeekFrom, Write},
+    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
     sync::{Arc, Weak},
 };
 
@@ -28,7 +28,7 @@ impl Manager {
 }
 
 impl LogManager for Manager {
-    fn recover(&mut self, entry: &mut okaywal::Entry<'_>) -> Result<()> {
+    fn recover(&mut self, entry: &mut okaywal::Entry<'_>) -> io::Result<()> {
         if let Some(database) = self.db.upgrade() {
             let mut written_grains = Vec::new();
             let mut index_metadata = database.atlas.current_index_metadata();
@@ -77,8 +77,10 @@ impl LogManager for Manager {
         checkpointed_entries: &mut okaywal::SegmentReader,
     ) -> std::io::Result<()> {
         if let Some(database) = self.db.upgrade() {
+            let fsyncs = database.store.syncer.new_batch()?;
             let latest_tx_id = TransactionId::from(last_checkpointed_id);
             let mut store = database.store.lock();
+            let mut needs_directory_sync = store.needs_directory_sync;
             let mut all_new_grains = Vec::new();
             let mut latest_commit_log_entry = store.index.active.commit_log_head;
             let mut latest_embedded_header_data = store.index.active.embedded_header_data;
@@ -109,7 +111,9 @@ impl LogManager for Manager {
                                 id.stratum_id(),
                                 &database.store.directory,
                             );
-                            let mut file = BufWriter::new(stratum.get_or_open_file()?);
+                            let mut file = BufWriter::new(
+                                stratum.get_or_open_file(&mut needs_directory_sync)?,
+                            );
 
                             // Write the grain data to disk.
                             file.seek(SeekFrom::Start(id.file_position()))?;
@@ -170,12 +174,19 @@ impl LogManager for Manager {
                         _ => break,
                     }
                 }
-                stratum.write_header(latest_tx_id)?;
+                stratum.write_header(latest_tx_id, &fsyncs)?;
             }
 
             store.index.active.commit_log_head = latest_commit_log_entry;
             store.index.active.embedded_header_data = latest_embedded_header_data;
-            store.write_header(latest_tx_id)?;
+            store.write_header(latest_tx_id, &fsyncs)?;
+
+            if needs_directory_sync {
+                store.needs_directory_sync = false;
+                fsyncs.queue_fsync_all(store.directory.try_clone()?)?;
+            }
+
+            fsyncs.wait_all()?;
 
             database.atlas.note_grains_checkpointed(&all_new_grains);
 
