@@ -237,6 +237,10 @@ impl<'a> WalChunk<'a> {
         Ok(())
     }
 
+    pub const fn new_grain_length(data_length: u32) -> u32 {
+        data_length + 9
+    }
+
     pub fn write_transaction_tail<W: Write>(
         commit_log_entry_id: GrainId,
         embedded_header: Option<GrainId>,

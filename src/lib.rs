@@ -130,6 +130,7 @@ fn checkpoint() {
     let mut contents = Vec::new();
     reader.read_to_end(&mut contents).unwrap();
     assert_eq!(contents, b"hello, world");
+    drop(reader);
 
     db.shutdown().unwrap();
 

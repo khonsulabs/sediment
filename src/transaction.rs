@@ -36,12 +36,12 @@ impl<'db> Transaction<'db> {
     pub fn write(&mut self, data: &[u8]) -> Result<GrainId> {
         let data_length = usize_to_u32(data.len())?;
         let grain_id = self.database.data.atlas.reserve(data_length)?;
-        self.scratch.clear();
-        // TODO this shouldn't require an extra buffer -- okaywal should allow
-        // serializing directly to its own buffered writer.
-        WalChunk::write_new_grain(grain_id, data, &mut self.scratch)?;
+
         let entry = self.entry.as_mut().expect("entry missing");
-        let record = entry.write_chunk(&self.scratch)?;
+        let mut chunk = entry.begin_chunk(WalChunk::new_grain_length(data_length))?;
+        WalChunk::write_new_grain(grain_id, data, &mut chunk)?;
+        let record = chunk.finish()?;
+
         self.written_grains.push((grain_id, record.position));
         self.log_entry.new_grains.push(NewGrain {
             id: grain_id,

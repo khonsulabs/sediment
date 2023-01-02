@@ -51,7 +51,11 @@ impl Atlas {
         data.index
     }
 
-    pub fn find(&self, grain: GrainId, wal: &WriteAheadLog) -> Result<Option<GrainReader>> {
+    pub fn find<'wal>(
+        &self,
+        grain: GrainId,
+        wal: &'wal WriteAheadLog,
+    ) -> Result<Option<GrainReader<'wal>>> {
         let data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
         match data.uncheckpointed_grains.get(&grain) {
             Some(UncheckpointedGrain::PendingCommit) => Ok(None),
@@ -209,6 +213,7 @@ impl Atlas {
         written_grains: impl IntoIterator<Item = (GrainId, LogPosition)>,
     ) {
         let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+        data.index = new_metadata;
         for (grain, log_position) in written_grains {
             data.uncheckpointed_grains
                 .insert(grain, UncheckpointedGrain::InWal(log_position));
@@ -316,12 +321,12 @@ impl Stratum {
 }
 
 #[derive(Debug)]
-pub enum GrainReader {
-    InWal(ChunkReader),
+pub enum GrainReader<'a> {
+    InWal(ChunkReader<'a>),
     InStratum(StratumGrainReader),
 }
 
-impl GrainReader {
+impl<'a> GrainReader<'a> {
     pub const fn bytes_remaining(&self) -> u32 {
         match self {
             GrainReader::InWal(reader) => reader.bytes_remaining(),
@@ -330,7 +335,7 @@ impl GrainReader {
     }
 }
 
-impl Read for GrainReader {
+impl<'a> Read for GrainReader<'a> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             GrainReader::InWal(reader) => reader.read(buf),
