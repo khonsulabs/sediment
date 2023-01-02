@@ -21,16 +21,16 @@ pub struct Transaction<'db> {
 }
 
 impl<'db> Transaction<'db> {
-    pub(super) fn new(database: &'db Database, entry: EntryWriter<'db>) -> Self {
-        let index = database.data.atlas.current_index_metadata();
-        Self {
+    pub(super) fn new(database: &'db Database, entry: EntryWriter<'db>) -> Result<Self> {
+        let index = database.data.atlas.current_index_metadata()?;
+        Ok(Self {
             database,
             written_grains: Vec::new(),
             embedded_header_data: index.embedded_header_data,
             log_entry: CommitLogEntry::new(TransactionId::from(entry.id()), index.commit_log_head),
             entry: Some(entry),
             scratch: Vec::new(),
-        }
+        })
     }
 
     pub fn write(&mut self, data: &[u8]) -> Result<GrainId> {
@@ -76,7 +76,7 @@ impl<'db> Transaction<'db> {
         self.database
             .data
             .atlas
-            .note_grains_written(new_metadata, self.written_grains.drain(..));
+            .note_grains_written(new_metadata, self.written_grains.drain(..))?;
 
         Ok(transaction_id)
     }
@@ -97,7 +97,7 @@ impl<'db> Transaction<'db> {
         self.database
             .data
             .atlas
-            .rollback_grains(self.written_grains.drain(..).map(|(g, _)| g));
+            .rollback_grains(self.written_grains.drain(..).map(|(g, _)| g))?;
 
         result?;
 

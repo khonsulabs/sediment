@@ -3,7 +3,7 @@ use std::{
     io::{self, Seek},
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use crate::{
@@ -33,10 +33,8 @@ impl Store {
         })
     }
 
-    pub fn lock(&self) -> MutexGuard<'_, DiskState> {
-        self.disk_state
-            .lock()
-            .map_or_else(PoisonError::into_inner, |a| a)
+    pub fn lock(&self) -> Result<MutexGuard<'_, DiskState>> {
+        Ok(self.disk_state.lock()?)
     }
 }
 

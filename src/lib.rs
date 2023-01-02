@@ -55,7 +55,7 @@ impl Database {
     pub fn begin_transaction(&self) -> Result<Transaction<'_>> {
         let wal_entry = self.wal.begin_entry()?;
 
-        Ok(Transaction::new(self, wal_entry))
+        Transaction::new(self, wal_entry)
     }
 
     pub fn read(&self, grain: GrainId) -> Result<Option<GrainReader>> {

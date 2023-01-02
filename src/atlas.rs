@@ -3,7 +3,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{BufReader, Read, Seek},
     path::PathBuf,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{Arc, Mutex},
 };
 
 use okaywal::{ChunkReader, LogPosition, WriteAheadLog};
@@ -25,7 +25,7 @@ pub struct Atlas {
 
 impl Atlas {
     pub fn new(store: &Store) -> Self {
-        let disk_state = store.lock();
+        let disk_state = store.lock().expect("unable to lock store");
 
         let mut basins = BasinMap::new();
 
@@ -46,9 +46,9 @@ impl Atlas {
         }
     }
 
-    pub fn current_index_metadata(&self) -> IndexMetadata {
-        let data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
-        data.index
+    pub fn current_index_metadata(&self) -> Result<IndexMetadata> {
+        let data = self.data.lock()?;
+        Ok(data.index)
     }
 
     pub fn find<'wal>(
@@ -56,7 +56,7 @@ impl Atlas {
         grain: GrainId,
         wal: &'wal WriteAheadLog,
     ) -> Result<Option<GrainReader<'wal>>> {
-        let data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+        let data = self.data.lock()?;
         match data.uncheckpointed_grains.get(&grain) {
             Some(UncheckpointedGrain::PendingCommit) => Ok(None),
             Some(UncheckpointedGrain::InWal(location)) => {
@@ -122,7 +122,7 @@ impl Atlas {
         // grains would waste 48 bytes in one case and waste 0 bytes in the
         // other.
         let length_with_grain_info = length.checked_add(16).expect("grain too large"); // TODO error
-        let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+        let mut data = self.data.lock()?;
         // Accessing fields through MutexGuard's DerefMut causes issues with the
         // borrow checker extending the lifetime of the borrow across both
         // basins and uncheckpointed_grains. So, we perform the DerefMut to get
@@ -211,27 +211,29 @@ impl Atlas {
         &self,
         new_metadata: IndexMetadata,
         written_grains: impl IntoIterator<Item = (GrainId, LogPosition)>,
-    ) {
-        let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+    ) -> Result<()> {
+        let mut data = self.data.lock()?;
         data.index = new_metadata;
         for (grain, log_position) in written_grains {
             data.uncheckpointed_grains
                 .insert(grain, UncheckpointedGrain::InWal(log_position));
         }
+        Ok(())
     }
 
     pub fn note_grains_checkpointed<'a>(
         &self,
         checkpointed_grains: impl IntoIterator<Item = &'a GrainId>,
-    ) {
-        let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+    ) -> Result<()> {
+        let mut data = self.data.lock()?;
         for grain in checkpointed_grains {
             data.uncheckpointed_grains.remove(grain);
         }
+        Ok(())
     }
 
-    pub fn rollback_grains(&self, written_grains: impl IntoIterator<Item = GrainId>) {
-        let mut data = self.data.lock().map_or_else(PoisonError::into_inner, |a| a);
+    pub fn rollback_grains(&self, written_grains: impl IntoIterator<Item = GrainId>) -> Result<()> {
+        let mut data = self.data.lock()?;
         for grain in written_grains {
             data.uncheckpointed_grains.remove(&grain);
             let basin = data.basins[grain.basin_id()]
@@ -244,6 +246,7 @@ impl Atlas {
 
             stratum.allocations.free_grain(grain.local_grain_id());
         }
+        Ok(())
     }
 }
 

@@ -7,7 +7,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::{store::Duplicable, Result, Error};
+use crate::{store::Duplicable, Error, Result};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct GrainId(u64);
@@ -233,7 +233,7 @@ impl FromStr for BasinAndStratum {
 
     fn from_str(basin_and_stratum: &str) -> Result<Self, Self::Err> {
         let (basin, stratum) = basin_and_stratum.split_at(1);
-        let Some(basin) = BasinId::from_char(basin.as_bytes()[0] as char) 
+        let Some(basin) = BasinId::from_char(basin.as_bytes()[0] as char)
             else { return Err(GrainIdError::InvalidBasinId) };
 
         let stratum = u64::from_str_radix(stratum, 16).map_err(|_| GrainIdError::InvalidStratum)?;

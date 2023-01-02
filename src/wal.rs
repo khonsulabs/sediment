@@ -31,7 +31,7 @@ impl LogManager for Manager {
     fn recover(&mut self, entry: &mut okaywal::Entry<'_>) -> io::Result<()> {
         if let Some(database) = self.db.upgrade() {
             let mut written_grains = Vec::new();
-            let mut index_metadata = database.atlas.current_index_metadata();
+            let mut index_metadata = database.atlas.current_index_metadata()?;
             loop {
                 match entry.read_chunk()? {
                     ReadChunkResult::Chunk(mut chunk) => {
@@ -65,7 +65,7 @@ impl LogManager for Manager {
 
             database
                 .atlas
-                .note_grains_written(index_metadata, written_grains);
+                .note_grains_written(index_metadata, written_grains)?;
         }
 
         Ok(())
@@ -79,7 +79,7 @@ impl LogManager for Manager {
         if let Some(database) = self.db.upgrade() {
             let fsyncs = database.store.syncer.new_batch()?;
             let latest_tx_id = TransactionId::from(last_checkpointed_id);
-            let mut store = database.store.lock();
+            let mut store = database.store.lock()?;
             let mut needs_directory_sync = store.needs_directory_sync;
             let mut all_new_grains = Vec::new();
             let mut latest_commit_log_entry = store.index.active.commit_log_head;
@@ -188,7 +188,7 @@ impl LogManager for Manager {
 
             fsyncs.wait_all()?;
 
-            database.atlas.note_grains_checkpointed(&all_new_grains);
+            database.atlas.note_grains_checkpointed(&all_new_grains)?;
 
             Ok(())
         } else {
