@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-okaywal = { path = "../okaywal2" }
+okaywal = "0.1.0"
 crc32c = "0.6.3"
 tinyvec = "1.6.0"
 thiserror = "1.0.38"
