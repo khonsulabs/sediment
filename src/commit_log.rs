@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use crate::{
     format::{ByteUtil, GrainId, TransactionId},
     util::{u32_to_usize, usize_to_u32},
-    Result,
+    Database, Result,
 };
 
 #[derive(Debug)]
@@ -103,6 +103,16 @@ impl CommitLogEntry {
             archived_grains,
             freed_grains,
         })
+    }
+
+    pub fn next_entry(&self, database: &Database) -> Result<Option<Self>> {
+        if let Some(entry_id) = self.next_entry {
+            if let Some(mut reader) = database.read(entry_id)? {
+                return Self::read_from(&mut reader).map(Some);
+            }
+        }
+
+        Ok(None)
     }
 }
 

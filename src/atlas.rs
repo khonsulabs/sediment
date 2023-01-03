@@ -337,6 +337,22 @@ impl<'a> GrainReader<'a> {
             GrainReader::InStratum(reader) => reader.bytes_remaining,
         }
     }
+
+    pub const fn length(&self) -> u32 {
+        match self {
+            GrainReader::InWal(reader) => reader.chunk_length(),
+            GrainReader::InStratum(reader) => reader.length,
+        }
+    }
+
+    pub fn read_all_data(mut self) -> Result<Vec<u8>> {
+        let mut data = Vec::new();
+        self.read_to_end(&mut data)?;
+
+        // TODO offer a way to do a crc check?
+
+        Ok(data)
+    }
 }
 
 impl<'a> Read for GrainReader<'a> {

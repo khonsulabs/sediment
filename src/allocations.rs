@@ -133,7 +133,8 @@ impl FreeLocations {
     }
 
     #[must_use]
-    pub fn allocate_grain(&mut self, grain_id: LocalGrainId) -> bool {
+    #[cfg(test)] // This was originally written for more than testing. We should probably just rewrite the tests and delete this.
+    fn allocate_grain(&mut self, grain_id: LocalGrainId) -> bool {
         let start = grain_id.grain_index();
         let count = u16::from(grain_id.grain_count());
         let end = start.as_u16() + count;

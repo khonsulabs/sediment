@@ -233,7 +233,7 @@ fn discover_strata(path: &Path, scratch: &mut Vec<u8>) -> Result<Vec<UnverifiedS
         if let Some(name) = entry.file_name().to_str() {
             if let Ok(basin_and_stratum) = BasinAndStratum::from_str(name) {
                 discovered.push(UnverifiedStratum::read_from(
-                    entry.path(),
+                    &entry.path(),
                     basin_and_stratum,
                     scratch,
                 )?);
@@ -301,21 +301,15 @@ impl StratumState {
 }
 
 struct UnverifiedStratum {
-    path: PathBuf,
     id: BasinAndStratum,
     header: StratumFileHeader,
     file: File,
 }
 
 impl UnverifiedStratum {
-    pub fn read_from(path: PathBuf, id: BasinAndStratum, scratch: &mut Vec<u8>) -> Result<Self> {
-        let mut file = OpenOptions::new().read(true).write(true).open(&path)?;
+    pub fn read_from(path: &Path, id: BasinAndStratum, scratch: &mut Vec<u8>) -> Result<Self> {
+        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
         let header = StratumFileHeader::read_from(&mut file, scratch)?;
-        Ok(Self {
-            id,
-            path,
-            header,
-            file,
-        })
+        Ok(Self { id, header, file })
     }
 }
