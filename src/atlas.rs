@@ -215,8 +215,9 @@ impl Atlas {
         let mut data = self.data.lock()?;
         data.index = new_metadata;
         for (grain, log_position) in written_grains {
-            data.uncheckpointed_grains
-                .insert(grain, UncheckpointedGrain::InWal(log_position));
+            if let Some(uncheckpointed) = data.uncheckpointed_grains.get_mut(&grain) {
+                *uncheckpointed = UncheckpointedGrain::InWal(log_position);
+            }
         }
         Ok(())
     }

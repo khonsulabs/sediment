@@ -530,7 +530,7 @@ impl StratumHeader {
         let mut grains = [0; 16_372];
 
         let crc32 = u32::from_be_bytes(scratch[16_380..].try_into().expect("u32 is 4 bytes"));
-        let computed_crc = dbg!(crc32c(&scratch[..16_380]));
+        let computed_crc = crc32c(&scratch[..16_380]);
         if crc32 != computed_crc {
             if scratch.iter().all(|b| b == &0) {
                 return Ok(Self {
@@ -564,7 +564,7 @@ impl Duplicable for StratumHeader {
         let mut writer = ChecksumWriter::new(BufWriter::new(writer));
         writer.write_all(&self.transaction_id.0 .0.to_be_bytes())?;
         writer.write_all(&self.grains)?;
-        self.crc32 = dbg!(writer.crc32());
+        self.crc32 = writer.crc32();
         writer.write_all(&self.crc32.to_be_bytes())?;
 
         writer.flush()?;

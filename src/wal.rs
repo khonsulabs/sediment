@@ -9,7 +9,7 @@ use crate::{
     format::{ByteUtil, GrainAllocationInfo, GrainId, TransactionId},
     store::BasinState,
     util::{u32_to_usize, usize_to_u32},
-    Data as DatabaseData, Result,
+    Data as DatabaseData, Error, Result,
 };
 
 #[derive(Debug)]
@@ -101,7 +101,10 @@ impl LogManager for Manager {
                 } {
                     self.scratch.clear();
                     chunk.read_to_end(&mut self.scratch)?;
-                    assert!(chunk.check_crc().expect("crc not validated")); // TODO make this an error
+                    if !chunk.check_crc()? {
+                        return Err(Error::ChecksumFailed.into());
+                    }
+
                     match WalChunk::read(&self.scratch)? {
                         WalChunk::NewGrainInWal { id, data } => {
                             let basin = store.basins.get_or_insert_with(id.basin_id(), || {
@@ -116,7 +119,8 @@ impl LogManager for Manager {
                             );
 
                             // Write the grain data to disk.
-                            file.seek(SeekFrom::Start(id.file_position()))?;
+                            let file_position = id.file_position();
+                            file.seek(SeekFrom::Start(file_position))?;
                             file.write_all(&checkpointed_tx.to_be_bytes())?;
                             file.write_all(&usize_to_u32(data.len())?.to_be_bytes())?;
                             file.write_all(data)?;
@@ -146,7 +150,8 @@ impl LogManager for Manager {
 
             all_new_grains.sort_unstable();
 
-            while let Some(first_id) = all_new_grains.first().cloned() {
+            let mut index = 0;
+            while let Some(first_id) = all_new_grains.get(index).cloned() {
                 let basin = store.basins.get_or_insert_with(first_id.basin_id(), || {
                     BasinState::default_for(first_id.basin_id())
                 });
@@ -158,12 +163,11 @@ impl LogManager for Manager {
                     // This is a messy match statement, but the goal is to only
                     // re-lookup basin and stratum when we jump to a new
                     // stratum.
-                    match all_new_grains.first().copied() {
+                    match all_new_grains.get(index).copied() {
                         Some(id)
                             if id.basin_id() == first_id.basin_id()
                                 && id.stratum_id() == first_id.stratum_id() =>
                         {
-                            all_new_grains.pop();
                             for index in 0..id.grain_count() {
                                 stratum.header.active.grains[usize::from(
                                     id.local_grain_index().as_u16(),
@@ -173,6 +177,7 @@ impl LogManager for Manager {
                         }
                         _ => break,
                     }
+                    index += 1;
                 }
                 stratum.write_header(latest_tx_id, &fsyncs)?;
             }
@@ -211,6 +216,7 @@ pub enum WalChunk<'a> {
 }
 
 impl<'a> WalChunk<'a> {
+    pub const TRANSACTION_TAIL_BYTES: u32 = 17;
     pub fn read(buffer: &'a [u8]) -> Result<Self> {
         if buffer.len() < 9 {
             todo!("error: buffer too short")
@@ -225,10 +231,10 @@ impl<'a> WalChunk<'a> {
             1 => todo!("archive grain"),
             2 => todo!("free grain"),
             3 => {
-                if buffer.len() == 25 {
+                if buffer.len() == u32_to_usize(Self::TRANSACTION_TAIL_BYTES)? {
                     // TODO real error
-                    let commit_log_entry = GrainId::from_bytes(&buffer[9..17]).unwrap();
-                    let embedded_header = GrainId::from_bytes(&buffer[17..]);
+                    let commit_log_entry = GrainId::from_bytes(&buffer[1..9]).unwrap();
+                    let embedded_header = GrainId::from_bytes(&buffer[9..]);
                     Ok(Self::FinishTransaction {
                         commit_log_entry,
                         embedded_header,

@@ -172,3 +172,50 @@ fn checkpoint() {
 
     std::fs::remove_dir_all(path).unwrap();
 }
+
+#[test]
+fn checkpoint_loop() {
+    use std::io::Read;
+    let path = Path::new(".test-checkpoint-loop");
+    if path.exists() {
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    // Configure the WAL to checkpoint after 10 bytes -- "hello, world" is 12.
+    let mut grains_written = Vec::new();
+    for i in 0_usize..10 {
+        let db = Config::for_directory(path)
+            .configure_wal(|wal| wal.checkpoint_after_bytes(10))
+            .recover()
+            .unwrap();
+        let mut tx = db.begin_transaction().unwrap();
+        let grain = tx.write(&i.to_be_bytes()).unwrap();
+        assert!(db.read(grain).unwrap().is_none());
+        grains_written.push(grain);
+        tx.commit().unwrap();
+
+        for (index, grain) in grains_written.iter().enumerate() {
+            let mut reader = db.read(*grain).unwrap().expect("grain not found");
+            let mut contents = Vec::new();
+            reader.read_to_end(&mut contents).unwrap();
+            assert_eq!(contents, &index.to_be_bytes());
+        }
+
+        db.shutdown().unwrap();
+    }
+
+    let db = Config::for_directory(path)
+        .configure_wal(|wal| wal.checkpoint_after_bytes(10))
+        .recover()
+        .unwrap();
+    for (index, grain) in grains_written.iter().enumerate() {
+        let mut reader = db.read(*grain).unwrap().expect("grain not found");
+        let mut contents = Vec::new();
+        reader.read_to_end(&mut contents).unwrap();
+        assert_eq!(contents, &index.to_be_bytes());
+    }
+
+    db.shutdown().unwrap();
+
+    std::fs::remove_dir_all(path).unwrap();
+}

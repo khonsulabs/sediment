@@ -17,7 +17,6 @@ pub struct Transaction<'db> {
     written_grains: Vec<(GrainId, LogPosition)>,
     embedded_header_data: Option<GrainId>,
     log_entry: CommitLogEntry,
-    scratch: Vec<u8>,
 }
 
 impl<'db> Transaction<'db> {
@@ -29,7 +28,6 @@ impl<'db> Transaction<'db> {
             embedded_header_data: index.embedded_header_data,
             log_entry: CommitLogEntry::new(TransactionId::from(entry.id()), index.commit_log_head),
             entry: Some(entry),
-            scratch: Vec::new(),
         })
     }
 
@@ -56,15 +54,16 @@ impl<'db> Transaction<'db> {
         self.log_entry.serialize_to(&mut log_entry_bytes)?;
         let new_commit_log_head = self.write(&log_entry_bytes)?;
 
-        let entry = self.entry.take().expect("entry missing");
+        let mut entry = self.entry.take().expect("entry missing");
 
         // Write the transaction tail
-        self.scratch.clear();
+        let mut chunk = entry.begin_chunk(WalChunk::TRANSACTION_TAIL_BYTES)?;
         WalChunk::write_transaction_tail(
             new_commit_log_head,
             self.embedded_header_data,
-            &mut self.scratch,
+            &mut chunk,
         )?;
+        chunk.finish()?;
 
         let transaction_id = TransactionId::from(entry.commit()?);
 
