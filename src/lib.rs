@@ -6,6 +6,7 @@ use std::{
 };
 
 use okaywal::WriteAheadLog;
+pub use transaction::Transaction;
 
 use crate::{
     atlas::{Atlas, GrainReader},
@@ -13,8 +14,6 @@ use crate::{
     format::GrainId,
     store::Store,
 };
-
-pub use transaction::Transaction;
 
 mod allocations;
 mod atlas;

@@ -1,12 +1,12 @@
-use flume::{Receiver, Sender};
-
-use crate::{Error, Result};
-
 use std::{
     fs::File,
     sync::{Arc, Condvar, Mutex},
     thread::{self, available_parallelism, JoinHandle},
 };
+
+use flume::{Receiver, Sender};
+
+use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct FSyncManager {

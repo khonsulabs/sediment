@@ -1,11 +1,12 @@
-use crc32c::crc32c;
-use okaywal::EntryId;
 use std::{
     fmt::{Display, Write as _},
     io::{BufWriter, Read, Write},
     ops::AddAssign,
     str::FromStr,
 };
+
+use crc32c::crc32c;
+use okaywal::EntryId;
 
 use crate::{store::Duplicable, Error, Result};
 
