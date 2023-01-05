@@ -21,3 +21,6 @@ watchable = "1.1.0"
 [patch.crates-io]
 okaywal = { path = "../okaywal2" }
 # watchable = { path = "../watchable" }
+
+[workspace]
+members = ["xtask", "benchmarks"]
