@@ -467,7 +467,7 @@ impl IndexHeader {
         let crc32 = u32::from_be_bytes(scratch[40..].try_into().expect("u32 is 4 bytes"));
         let computed_crc = crc32c(&scratch[..40]);
         if crc32 != computed_crc {
-            todo!("crc error")
+            return Err(Error::ChecksumFailed);
         }
 
         let transaction_id = TransactionId(u64::from_be_bytes(

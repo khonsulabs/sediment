@@ -106,7 +106,7 @@ impl LogManager for Manager {
             // We allocate the transaction grains vec once and reuse the vec to
             // avoid reallocating.
             let mut transaction_grains = Vec::new();
-            while let Some(mut entry) = checkpointed_entries.read_entry()? {
+            'entry_loop: while let Some(mut entry) = checkpointed_entries.read_entry()? {
                 let checkpointed_tx = TransactionId::from(entry.id());
                 // Because an entry could be aborted, we need to make sure we don't
                 // modify our DiskState until after we've read every chunk. We will
@@ -116,7 +116,7 @@ impl LogManager for Manager {
                 while let Some(mut chunk) = match entry.read_chunk()? {
                     ReadChunkResult::Chunk(chunk) => Some(chunk),
                     ReadChunkResult::EndOfEntry => None,
-                    ReadChunkResult::AbortedEntry => todo!(),
+                    ReadChunkResult::AbortedEntry => continue 'entry_loop,
                 } {
                     self.scratch.clear();
                     chunk.read_to_end(&mut self.scratch)?;
