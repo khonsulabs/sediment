@@ -3,13 +3,13 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use okaywal::{LogManager, ReadChunkResult};
+use okaywal::{EntryId, LogManager, ReadChunkResult, WriteAheadLog};
 
 use crate::{
-    format::{ByteUtil, GrainAllocationInfo, GrainId, TransactionId},
+    format::{ByteUtil, GrainAllocationInfo, GrainAllocationStatus, GrainId, TransactionId},
     store::BasinState,
     util::{u32_to_usize, usize_to_u32},
-    Data as DatabaseData, Error, Result,
+    Data as DatabaseData, Database, Error, Result,
 };
 
 #[derive(Debug)]
@@ -31,6 +31,7 @@ impl LogManager for Manager {
     fn recover(&mut self, entry: &mut okaywal::Entry<'_>) -> io::Result<()> {
         if let Some(database) = self.db.upgrade() {
             let mut written_grains = Vec::new();
+            let mut freed_grains = Vec::new();
             let mut index_metadata = database.atlas.current_index_metadata()?;
             loop {
                 match entry.read_chunk()? {
@@ -45,17 +46,23 @@ impl LogManager for Manager {
                             WalChunk::NewGrainInWal { id, .. } => {
                                 written_grains.push((id, position))
                             }
-                            WalChunk::ArchiveGrain(_) => {
-                                todo!("process grain archivals in the wal")
-                            }
-                            WalChunk::FreeGrain(_) => todo!("process grain freeing in the wal"),
-                            WalChunk::FinishTransaction {
-                                commit_log_entry,
-                                embedded_header,
-                            } => {
+                            WalChunk::FinishTransaction { commit_log_entry } => {
                                 index_metadata.commit_log_head = Some(commit_log_entry);
-                                index_metadata.embedded_header_data = embedded_header;
                             }
+                            WalChunk::UpdatedEmbeddedHeader(header) => {
+                                index_metadata.embedded_header_data = header;
+                            }
+                            WalChunk::CheckpointTo(tx_id) => {
+                                index_metadata.checkpoint_target = tx_id;
+                            }
+                            WalChunk::CheckpointedTo(tx_id) => {
+                                index_metadata.checkpointed_to = tx_id;
+                            }
+                            WalChunk::FreeGrain(id) => {
+                                freed_grains.push(id);
+                            }
+                            // Archiving a grain doesn't have any effect on the in-memory state
+                            WalChunk::ArchiveGrain(_) => {}
                         }
                     }
                     ReadChunkResult::EndOfEntry => break,
@@ -63,9 +70,14 @@ impl LogManager for Manager {
                 }
             }
 
-            database
-                .atlas
-                .note_grains_written(index_metadata, written_grains)?;
+            freed_grains.sort_unstable();
+
+            database.atlas.note_transaction_committed(
+                index_metadata,
+                written_grains,
+                &freed_grains,
+                true,
+            )?;
         }
 
         Ok(())
@@ -75,15 +87,22 @@ impl LogManager for Manager {
         &mut self,
         last_checkpointed_id: okaywal::EntryId,
         checkpointed_entries: &mut okaywal::SegmentReader,
+        wal: &WriteAheadLog,
     ) -> std::io::Result<()> {
         if let Some(database) = self.db.upgrade() {
-            let fsyncs = database.store.syncer.new_batch()?;
+            let database = Database {
+                data: database,
+                wal: wal.clone(),
+            };
+            let fsyncs = database.data.store.syncer.new_batch()?;
             let latest_tx_id = TransactionId::from(last_checkpointed_id);
-            let mut store = database.store.lock()?;
+            let mut store = database.data.store.lock()?;
             let mut needs_directory_sync = store.needs_directory_sync;
-            let mut all_new_grains = Vec::new();
+            let mut all_changed_grains = Vec::new();
             let mut latest_commit_log_entry = store.index.active.commit_log_head;
             let mut latest_embedded_header_data = store.index.active.embedded_header_data;
+            let mut latest_checkpoint_target = store.index.active.checkpoint_target;
+            let mut latest_checkpointed_to = store.index.active.checkpointed_to;
             // We allocate the transaction grains vec once and reuse the vec to
             // avoid reallocating.
             let mut transaction_grains = Vec::new();
@@ -112,7 +131,7 @@ impl LogManager for Manager {
                             });
                             let stratum = basin.get_or_allocate_stratum(
                                 id.stratum_id(),
-                                &database.store.directory,
+                                &database.data.store.directory,
                             );
                             let mut file = BufWriter::new(
                                 stratum.get_or_open_file(&mut needs_directory_sync)?,
@@ -128,51 +147,68 @@ impl LogManager for Manager {
                             file.write_all(&crc32.to_be_bytes())?;
                             file.flush()?;
 
-                            transaction_grains.push(id);
+                            transaction_grains.push((id, GrainAllocationStatus::Allocated));
                         }
-                        WalChunk::ArchiveGrain(_) => todo!(),
-                        WalChunk::FreeGrain(_) => todo!(),
-                        WalChunk::FinishTransaction {
-                            commit_log_entry,
-                            embedded_header,
-                        } => {
+                        WalChunk::ArchiveGrain(id) => {
+                            transaction_grains.push((id, GrainAllocationStatus::Archived));
+                        }
+                        WalChunk::FreeGrain(id) => {
+                            transaction_grains.push((id, GrainAllocationStatus::Free));
+                        }
+                        WalChunk::FinishTransaction { commit_log_entry } => {
                             latest_commit_log_entry = Some(commit_log_entry);
-                            latest_embedded_header_data = embedded_header;
+                        }
+                        WalChunk::UpdatedEmbeddedHeader(header) => {
+                            latest_embedded_header_data = header;
+                        }
+                        WalChunk::CheckpointTo(tx_id) => {
+                            latest_checkpoint_target = tx_id;
+                        }
+                        WalChunk::CheckpointedTo(tx_id) => {
+                            latest_checkpointed_to = tx_id;
                         }
                     }
                 }
 
-                all_new_grains.append(&mut transaction_grains);
+                all_changed_grains.append(&mut transaction_grains);
             }
 
-            // TODO allocate a grain for the new commit log entry and write the
-            // commit log entry.
-
-            all_new_grains.sort_unstable();
+            all_changed_grains.sort_unstable();
 
             let mut index = 0;
-            while let Some(first_id) = all_new_grains.get(index).cloned() {
+            while let Some((first_id, _)) = all_changed_grains.get(index).cloned() {
                 let basin = store.basins.get_or_insert_with(first_id.basin_id(), || {
                     BasinState::default_for(first_id.basin_id())
                 });
-                let stratum =
-                    basin.get_or_allocate_stratum(first_id.stratum_id(), &database.store.directory);
+                let stratum = basin
+                    .get_or_allocate_stratum(first_id.stratum_id(), &database.data.store.directory);
 
                 // Update the stratum header for the disk state.
                 loop {
                     // This is a messy match statement, but the goal is to only
                     // re-lookup basin and stratum when we jump to a new
                     // stratum.
-                    match all_new_grains.get(index).copied() {
-                        Some(id)
+                    match all_changed_grains.get(index).copied() {
+                        Some((id, status))
                             if id.basin_id() == first_id.basin_id()
                                 && id.stratum_id() == first_id.stratum_id() =>
                         {
-                            for index in 0..id.grain_count() {
-                                stratum.header.active.grains[usize::from(
-                                    id.local_grain_index().as_u16(),
-                                ) + usize::from(index)] =
-                                    GrainAllocationInfo::allocated(id.grain_count() - index).0;
+                            let local_index = usize::from(id.local_grain_index().as_u16());
+                            if status == GrainAllocationStatus::Free {
+                                // Free grains are just 0s.
+                                stratum.header.active.grains
+                                    [local_index..local_index + usize::from(id.grain_count())]
+                                    .fill(0);
+                            } else {
+                                for index in 0..id.grain_count() {
+                                    let status = if status == GrainAllocationStatus::Allocated {
+                                        GrainAllocationInfo::allocated(id.grain_count() - index)
+                                    } else {
+                                        GrainAllocationInfo::archived(id.grain_count() - index)
+                                    };
+                                    stratum.header.active.grains
+                                        [local_index + usize::from(index)] = status.0;
+                                }
                             }
                         }
                         _ => break,
@@ -184,6 +220,9 @@ impl LogManager for Manager {
 
             store.index.active.commit_log_head = latest_commit_log_entry;
             store.index.active.embedded_header_data = latest_embedded_header_data;
+            store.index.active.checkpoint_target = latest_checkpoint_target;
+            store.index.active.checkpointed_to = latest_checkpointed_to;
+
             store.write_header(latest_tx_id, &fsyncs)?;
 
             if needs_directory_sync {
@@ -193,7 +232,15 @@ impl LogManager for Manager {
 
             fsyncs.wait_all()?;
 
-            database.atlas.note_grains_checkpointed(&all_new_grains)?;
+            database
+                .data
+                .atlas
+                .note_grains_checkpointed(&all_changed_grains)?;
+
+            database
+                .data
+                .checkpointer
+                .checkpoint_to(latest_checkpoint_target);
 
             Ok(())
         } else {
@@ -203,45 +250,45 @@ impl LogManager for Manager {
 }
 
 pub enum WalChunk<'a> {
-    NewGrainInWal {
-        id: GrainId,
-        data: &'a [u8],
-    },
+    NewGrainInWal { id: GrainId, data: &'a [u8] },
     ArchiveGrain(GrainId),
     FreeGrain(GrainId),
-    FinishTransaction {
-        commit_log_entry: GrainId,
-        embedded_header: Option<GrainId>,
-    },
+    UpdatedEmbeddedHeader(Option<GrainId>),
+    CheckpointTo(TransactionId),
+    CheckpointedTo(TransactionId),
+    FinishTransaction { commit_log_entry: GrainId },
 }
 
 impl<'a> WalChunk<'a> {
-    pub const TRANSACTION_TAIL_BYTES: u32 = 17;
+    pub const COMMAND_LENGTH: u32 = 9;
+    pub const COMMAND_LENGTH_USIZE: usize = Self::COMMAND_LENGTH as usize;
     pub fn read(buffer: &'a [u8]) -> Result<Self> {
-        if buffer.len() < 9 {
+        if buffer.len() < Self::COMMAND_LENGTH_USIZE {
             todo!("error: buffer too short")
         }
         let kind = buffer[0];
-        let id = GrainId::from_bytes(&buffer[1..9]).unwrap(); // TODO real error
         match kind {
             0 => Ok(Self::NewGrainInWal {
-                id,
+                id: GrainId::from_bytes(&buffer[1..9]).unwrap(), // TODO real error,
                 data: &buffer[9..],
             }),
-            1 => todo!("archive grain"),
-            2 => todo!("free grain"),
-            3 => {
-                if buffer.len() == u32_to_usize(Self::TRANSACTION_TAIL_BYTES)? {
-                    // TODO real error
-                    let commit_log_entry = GrainId::from_bytes(&buffer[1..9]).unwrap();
-                    let embedded_header = GrainId::from_bytes(&buffer[9..]);
-                    Ok(Self::FinishTransaction {
-                        commit_log_entry,
-                        embedded_header,
-                    })
-                } else {
-                    todo!("error: buffer incorrect length")
-                }
+            1 => Ok(Self::ArchiveGrain(
+                GrainId::from_bytes(&buffer[1..9]).unwrap(),
+            )),
+            2 => Ok(Self::FreeGrain(GrainId::from_bytes(&buffer[1..9]).unwrap())),
+            3 => Ok(Self::UpdatedEmbeddedHeader(GrainId::from_bytes(
+                &buffer[1..9],
+            ))),
+            4 => Ok(Self::CheckpointTo(TransactionId::from(EntryId(
+                u64::from_be_bytes(buffer[1..9].try_into().expect("u64 is 8 bytes")),
+            )))),
+            5 => Ok(Self::CheckpointedTo(TransactionId::from(EntryId(
+                u64::from_be_bytes(buffer[1..9].try_into().expect("u64 is 8 bytes")),
+            )))),
+            255 => {
+                Ok(Self::FinishTransaction {
+                    commit_log_entry: GrainId::from_bytes(&buffer[1..9]).unwrap(), // TODO real error,
+                })
             }
             _ => todo!("invalid chunk"),
         }
@@ -254,18 +301,55 @@ impl<'a> WalChunk<'a> {
         Ok(())
     }
 
+    pub fn write_archive_grain<W: Write>(grain_id: GrainId, writer: &mut W) -> Result<()> {
+        writer.write_all(&[1])?;
+        writer.write_all(&grain_id.to_be_bytes())?;
+        Ok(())
+    }
+
+    pub fn write_free_grain<W: Write>(grain_id: GrainId, writer: &mut W) -> Result<()> {
+        writer.write_all(&[2])?;
+        writer.write_all(&grain_id.to_be_bytes())?;
+        Ok(())
+    }
+
+    pub fn write_embedded_header_update<W: Write>(
+        new_embedded_header: Option<GrainId>,
+        writer: &mut W,
+    ) -> Result<()> {
+        writer.write_all(&[3])?;
+        writer.write_all(&new_embedded_header.unwrap_or(GrainId::NONE).to_be_bytes())?;
+        Ok(())
+    }
+
+    pub fn write_checkpoint_to<W: Write>(
+        checkpoint_to: TransactionId,
+        writer: &mut W,
+    ) -> Result<()> {
+        writer.write_all(&[4])?;
+        writer.write_all(&checkpoint_to.to_be_bytes())?;
+        Ok(())
+    }
+
+    pub fn write_checkpointed_to<W: Write>(
+        checkpointed_to: TransactionId,
+        writer: &mut W,
+    ) -> Result<()> {
+        writer.write_all(&[5])?;
+        writer.write_all(&checkpointed_to.to_be_bytes())?;
+        Ok(())
+    }
+
     pub const fn new_grain_length(data_length: u32) -> u32 {
         data_length + 9
     }
 
     pub fn write_transaction_tail<W: Write>(
         commit_log_entry_id: GrainId,
-        embedded_header: Option<GrainId>,
         writer: &mut W,
     ) -> Result<()> {
-        writer.write_all(&[3])?;
+        writer.write_all(&[255])?;
         writer.write_all(&commit_log_entry_id.to_be_bytes())?;
-        writer.write_all(&embedded_header.to_be_bytes())?;
         Ok(())
     }
 }

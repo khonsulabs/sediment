@@ -10,15 +10,18 @@ pub use transaction::Transaction;
 
 use crate::{
     atlas::{Atlas, GrainReader},
+    checkpointer::Checkpointer,
     commit_log::CommitLogEntry,
     config::Config,
-    format::GrainId,
+    format::{GrainId, Stored, TransactionId},
     store::Store,
+    transaction::TransactionLock,
 };
 
 mod allocations;
 mod atlas;
 mod basinmap;
+mod checkpointer;
 mod commit_log;
 pub mod config;
 pub mod format;
@@ -44,18 +47,36 @@ impl Database {
         // state. Each commit happens when the write ahead log is checkpointed.
         let store = Store::recover(config.wal.directory.as_ref())?;
         let atlas = Atlas::new(&store);
-        let data = Arc::new(Data { store, atlas });
+        let current_metadata = atlas.current_index_metadata()?;
+        let (checkpointer, cp_spawner) = Checkpointer::new(current_metadata.checkpointed_to);
+        let data = Arc::new(Data {
+            store,
+            atlas,
+            tx_lock: TransactionLock::default(),
+            checkpointer,
+        });
+
         // Recover any transactions from the write ahead log that haven't been
         // checkpointed to the store already.
         let wal = config.wal.open(wal::Manager::new(&data))?;
+
+        // The wal recovery process may have recovered sediment checkpoints that
+        // are in the WAL but not yet in permanent storage. Refresh the metadata.
+        let current_metadata = data.atlas.current_index_metadata()?;
+        cp_spawner.spawn(current_metadata.checkpointed_to, &data, &wal)?;
+        if current_metadata.checkpoint_target > current_metadata.checkpointed_to {
+            data.checkpointer
+                .checkpoint_to(current_metadata.checkpoint_target);
+        }
 
         Ok(Self { data, wal })
     }
 
     pub fn begin_transaction(&self) -> Result<Transaction<'_>> {
+        let tx_guard = self.data.tx_lock.lock();
         let wal_entry = self.wal.begin_entry()?;
 
-        Transaction::new(self, wal_entry)
+        Transaction::new(self, wal_entry, tx_guard)
     }
 
     pub fn read(&self, grain: GrainId) -> Result<Option<GrainReader>> {
@@ -63,10 +84,25 @@ impl Database {
     }
 
     pub fn shutdown(self) -> Result<()> {
+        // Shut the checkpointer down first, since it may try to access the
+        // write-ahead log.
+        self.data.checkpointer.shutdown()?;
+        // Shut down the write-ahead log, which may still end up having its own
+        // checkpointing process finishing up. This may require the file syncer.
         self.wal.shutdown()?;
+        // With everything else shut down, we can now shut down the file
+        // synchronization threadpool.
         self.data.store.syncer.shutdown()?;
 
         Ok(())
+    }
+
+    pub fn checkpoint_target(&self) -> Result<TransactionId> {
+        Ok(self.data.atlas.current_index_metadata()?.checkpoint_target)
+    }
+
+    pub fn checkpointed_to(&self) -> Result<TransactionId> {
+        Ok(self.data.atlas.current_index_metadata()?.checkpointed_to)
     }
 
     pub fn embedded_header(&self) -> Result<Option<GrainId>> {
@@ -77,10 +113,13 @@ impl Database {
             .embedded_header_data)
     }
 
-    pub fn commit_log_head(&self) -> Result<Option<CommitLogEntry>> {
+    pub fn commit_log_head(&self) -> Result<Option<Stored<CommitLogEntry>>> {
         if let Some(entry_id) = self.data.atlas.current_index_metadata()?.commit_log_head {
             if let Some(mut reader) = self.read(entry_id)? {
-                return CommitLogEntry::read_from(&mut reader).map(Some);
+                return Ok(Some(Stored {
+                    grain_id: entry_id,
+                    stored: CommitLogEntry::read_from(&mut reader)?,
+                }));
             }
         }
 
@@ -99,11 +138,15 @@ impl PartialEq for Database {
 #[derive(Debug)]
 struct Data {
     store: Store,
+    checkpointer: Checkpointer,
     atlas: Atlas,
+    tx_lock: TransactionLock,
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("a GrainId was used that was not allocated")]
+    GrainNotAllocated,
     #[error("a poisoned lock was encountered, the database must be closed and reopened")]
     LockPoisoned,
     #[error("a thread was not able to be joined")]
@@ -169,7 +212,7 @@ fn basic() {
 }
 
 #[test]
-fn checkpoint() {
+fn wal_checkpoint() {
     let path = Path::new(".test-checkpoint");
     if path.exists() {
         std::fs::remove_dir_all(path).unwrap();
@@ -204,7 +247,7 @@ fn checkpoint() {
 }
 
 #[test]
-fn checkpoint_loop() {
+fn wal_checkpoint_loop() {
     let path = Path::new(".test-checkpoint-loop");
     if path.exists() {
         std::fs::remove_dir_all(path).unwrap();
@@ -259,6 +302,68 @@ fn checkpoint_loop() {
         let expected_grain = grains_to_read.next().expect("too many commit log entries");
         assert_eq!(&commit_log_entry.new_grains[0].id, expected_grain);
         current_commit_log_entry = commit_log_entry.next_entry(&db).unwrap();
+    }
+
+    db.shutdown().unwrap();
+
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn sediment_checkpoint_loop() {
+    let path = Path::new(".test-sediment-checkpoint-loop");
+    if path.exists() {
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    // Configure the WAL to checkpoint after 10 bytes -- "hello, world" is 12.
+    let mut grains_written = Vec::new();
+    let mut tx_id = TransactionId::default();
+    for i in 0_usize..10 {
+        let db = Config::for_directory(path)
+            .configure_wal(|wal| wal.checkpoint_after_bytes(10))
+            .recover()
+            .unwrap();
+        let mut tx = db.begin_transaction().unwrap();
+        let new_grain = tx.write(&i.to_be_bytes()).unwrap();
+        if let Some(last_grain) = grains_written.last() {
+            tx.archive(*last_grain).unwrap();
+        }
+        grains_written.push(new_grain);
+        tx.checkpoint_to(tx_id).unwrap();
+        tx_id = tx.commit().unwrap();
+
+        db.shutdown().unwrap();
+    }
+
+    let db = Config::for_directory(path)
+        .configure_wal(|wal| wal.checkpoint_after_bytes(10))
+        .recover()
+        .unwrap();
+
+    // Because we close and reopen the database so often, we may not actually
+    // have finished the sediment checkpoint yet. This thread sleep gives it
+    // time to complete if it was run upon recovery.
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Because we archived all grains except the last one, we should only be able to read the last grain
+
+    for (index, grain) in grains_written.iter().enumerate() {
+        let result = db.read(*grain).unwrap();
+        if index >= grains_written.len() - 2 {
+            let contents = result.expect("grain not found").read_all_data().unwrap();
+            assert_eq!(contents, &index.to_be_bytes());
+        } else if let Some(grain) = result {
+            // Because grain IDs can be reused, we may have "lucked" out and
+            // stumbled upon another written grain. If we get an error reading
+            // the data or the contents aren't what we expect, this is a passed
+            // check.
+            if let Ok(contents) = grain.read_all_data() {
+                assert_ne!(contents, &index.to_be_bytes());
+            }
+        } else {
+            // None means the grain couldn't be read.
+        }
     }
 
     db.shutdown().unwrap();

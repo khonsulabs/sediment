@@ -1,7 +1,7 @@
 use std::{
     fmt::{Display, Write as _},
     io::{BufWriter, Read, Write},
-    ops::AddAssign,
+    ops::{AddAssign, Deref, DerefMut},
     str::FromStr,
 };
 
@@ -10,7 +10,7 @@ use okaywal::EntryId;
 
 use crate::{store::Duplicable, Error, Result};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct GrainId(u64);
 
 impl GrainId {
@@ -95,6 +95,21 @@ impl FromStr for GrainId {
             basin_and_stratum.stratum(),
             id,
         ))
+    }
+}
+
+impl std::fmt::Debug for GrainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let basin_id = self.basin_id();
+        let stratum_id = self.stratum_id();
+        let local_index = self.local_grain_index();
+        let count = self.grain_count();
+        f.debug_struct("GrainId")
+            .field("basin", &basin_id.0)
+            .field("stratum", &stratum_id.0)
+            .field("index", &local_index.0)
+            .field("count", &count)
+            .finish()
     }
 }
 
@@ -253,7 +268,7 @@ fn basin_id_encoding() {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct GrainIndex(u16);
 
 impl GrainIndex {
@@ -329,21 +344,39 @@ fn grain_id_strings() {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Default)]
-pub struct TransactionId(EntryId);
+pub struct TransactionId(u64);
 
 impl TransactionId {
     pub fn to_be_bytes(self) -> [u8; 8] {
-        self.0 .0.to_be_bytes()
+        self.0.to_be_bytes()
     }
 
     pub const fn from_be_bytes(bytes: [u8; 8]) -> Self {
-        Self(EntryId(u64::from_be_bytes(bytes)))
+        Self(u64::from_be_bytes(bytes))
     }
 }
 
 impl From<EntryId> for TransactionId {
     fn from(id: EntryId) -> Self {
-        Self(id)
+        Self(id.0)
+    }
+}
+
+impl From<TransactionId> for EntryId {
+    fn from(tx_id: TransactionId) -> Self {
+        EntryId(tx_id.0)
+    }
+}
+
+impl PartialEq<EntryId> for TransactionId {
+    fn eq(&self, other: &EntryId) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialOrd<EntryId> for TransactionId {
+    fn partial_cmp(&self, other: &EntryId) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
     }
 }
 
@@ -393,15 +426,17 @@ pub struct IndexHeader {
     pub transaction_id: TransactionId,
     pub embedded_header_data: Option<GrainId>,
     pub commit_log_head: Option<GrainId>,
+    pub checkpoint_target: TransactionId,
+    pub checkpointed_to: TransactionId,
     pub crc32: u32,
 }
 
 impl Duplicable for IndexHeader {
-    const BYTES: u64 = 28;
+    const BYTES: u64 = 44;
 
     fn write_to<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         let mut writer = ChecksumWriter::new(writer);
-        writer.write_all(&self.transaction_id.0 .0.to_be_bytes())?;
+        writer.write_all(&self.transaction_id.to_be_bytes())?;
         writer.write_all(
             &self
                 .embedded_header_data
@@ -416,6 +451,8 @@ impl Duplicable for IndexHeader {
                 .0
                 .to_be_bytes(),
         )?;
+        writer.write_all(&self.checkpoint_target.to_be_bytes())?;
+        writer.write_all(&self.checkpointed_to.to_be_bytes())?;
         let (_, crc32) = writer.write_crc32_and_finish()?;
         self.crc32 = crc32;
 
@@ -425,23 +462,32 @@ impl Duplicable for IndexHeader {
 
 impl IndexHeader {
     pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
-        scratch.resize(28, 0);
+        scratch.resize(44, 0);
         file.read_exact(scratch)?;
-        let crc32 = u32::from_be_bytes(scratch[24..].try_into().expect("u32 is 4 bytes"));
-        let computed_crc = crc32c(&scratch[..24]);
+        let crc32 = u32::from_be_bytes(scratch[40..].try_into().expect("u32 is 4 bytes"));
+        let computed_crc = crc32c(&scratch[..40]);
         if crc32 != computed_crc {
             todo!("crc error")
         }
 
-        let transaction_id = TransactionId(EntryId(u64::from_be_bytes(
+        let transaction_id = TransactionId(u64::from_be_bytes(
             scratch[..8].try_into().expect("u64 is 8 bytes"),
-        )));
+        ));
         let embedded_header_data = GrainId::from_bytes(&scratch[8..16]);
         let commit_log_head = GrainId::from_bytes(&scratch[16..24]);
+        let checkpoint_target = TransactionId(u64::from_be_bytes(
+            scratch[24..32].try_into().expect("u64 is 8 bytes"),
+        ));
+        let checkpointed_to = TransactionId(u64::from_be_bytes(
+            scratch[32..40].try_into().expect("u64 is 8 bytes"),
+        ));
+
         Ok(Self {
             transaction_id,
             embedded_header_data,
             commit_log_head,
+            checkpoint_target,
+            checkpointed_to,
             crc32,
         })
     }
@@ -544,9 +590,9 @@ impl StratumHeader {
             return Err(Error::ChecksumFailed);
         }
 
-        let transaction_id = TransactionId(EntryId(u64::from_be_bytes(
+        let transaction_id = TransactionId(u64::from_be_bytes(
             scratch[..8].try_into().expect("u64 is 8 bytes"),
-        )));
+        ));
 
         grains.copy_from_slice(&scratch[8..16_372 + 8]);
 
@@ -563,7 +609,7 @@ impl Duplicable for StratumHeader {
 
     fn write_to<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
         let mut writer = ChecksumWriter::new(BufWriter::new(writer));
-        writer.write_all(&self.transaction_id.0 .0.to_be_bytes())?;
+        writer.write_all(&self.transaction_id.to_be_bytes())?;
         writer.write_all(&self.grains)?;
         self.crc32 = writer.crc32();
         writer.write_all(&self.crc32.to_be_bytes())?;
@@ -598,6 +644,11 @@ impl GrainAllocationInfo {
         Self((1 << 6) | count)
     }
 
+    pub const fn archived(count: u8) -> Self {
+        assert!(count < 64);
+        Self((2 << 6) | count)
+    }
+
     pub fn status(self) -> Option<GrainAllocationStatus> {
         match self.0 >> 6 {
             0 => Some(GrainAllocationStatus::Free),
@@ -612,6 +663,7 @@ impl GrainAllocationInfo {
     }
 }
 
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
 pub enum GrainAllocationStatus {
     Allocated,
     Archived,
@@ -690,5 +742,25 @@ where
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.writer.flush()
+    }
+}
+
+#[derive(Debug)]
+pub struct Stored<T> {
+    pub grain_id: GrainId,
+    pub stored: T,
+}
+
+impl<T> Deref for Stored<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.stored
+    }
+}
+
+impl<T> DerefMut for Stored<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.stored
     }
 }

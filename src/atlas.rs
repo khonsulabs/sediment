@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs::{File, OpenOptions},
     io::{BufReader, Read, Seek},
     path::PathBuf,
@@ -12,10 +12,13 @@ use tinyvec::ArrayVec;
 use crate::{
     allocations::FreeLocations,
     basinmap::BasinMap,
-    format::{BasinAndStratum, BasinId, GrainId, StratumHeader, StratumId},
+    format::{
+        BasinAndStratum, BasinId, GrainAllocationStatus, GrainId, GrainIndex, StratumHeader,
+        StratumId, TransactionId,
+    },
     store::{BasinState, Store},
     util::{u32_to_usize, usize_to_u32},
-    Result,
+    Error, Result,
 };
 
 #[derive(Debug)]
@@ -39,6 +42,8 @@ impl Atlas {
                 index: IndexMetadata {
                     commit_log_head: disk_state.index.active.commit_log_head,
                     embedded_header_data: disk_state.index.active.embedded_header_data,
+                    checkpoint_target: disk_state.index.active.checkpoint_target,
+                    checkpointed_to: disk_state.index.active.checkpointed_to,
                 },
                 basins,
                 uncheckpointed_grains: HashMap::new(),
@@ -61,7 +66,7 @@ impl Atlas {
             Some(UncheckpointedGrain::PendingCommit) => Ok(None),
             Some(UncheckpointedGrain::InWal(location)) => {
                 let location = *location;
-                let mut chunk_reader = wal.read_at(location)?;
+                let mut chunk_reader = wal.read_at(location).unwrap();
                 // We hold onto the data lock until after we read from the wal
                 // to ensure a checkpoint doesn't happen before we start the
                 // read operation.
@@ -73,7 +78,10 @@ impl Atlas {
                 Ok(Some(GrainReader::InWal(chunk_reader)))
             }
             None => {
-                // TODO we should verify this grain id is actually valid, without blocking for the disk state.
+                if data.check_grain_validity(grain).is_err() {
+                    return Ok(None);
+                }
+
                 let file_path = data.basins[grain.basin_id()].as_ref().and_then(|basin| {
                     basin
                         .strata
@@ -100,7 +108,8 @@ impl Atlas {
                     if length
                         > grain.basin_id().grain_stripe_bytes() * u32::from(grain.grain_count())
                     {
-                        todo!("invalid grain id")
+                        // This was not a valid grain offset.
+                        return Ok(None);
                     }
 
                     return Ok(Some(GrainReader::InStratum(StratumGrainReader {
@@ -207,28 +216,84 @@ impl Atlas {
         .expect("empty stratum should have room"))
     }
 
-    pub fn note_grains_written(
+    pub fn note_transaction_committed(
         &self,
         new_metadata: IndexMetadata,
         written_grains: impl IntoIterator<Item = (GrainId, LogPosition)>,
+        mut freed_grains: &[GrainId],
+        is_from_wal: bool,
     ) -> Result<()> {
         let mut data = self.data.lock()?;
         data.index = new_metadata;
-        for (grain, log_position) in written_grains {
-            if let Some(uncheckpointed) = data.uncheckpointed_grains.get_mut(&grain) {
-                *uncheckpointed = UncheckpointedGrain::InWal(log_position);
+        if is_from_wal {
+            for (grain, log_position) in written_grains {
+                data.uncheckpointed_grains
+                    .insert(grain, UncheckpointedGrain::InWal(log_position));
+                let basin = data.basins.get_or_default(grain.basin_id());
+                let stratum = &mut basin.strata[grain.stratum_id().as_usize()];
+                assert!(stratum.allocations.allocate_grain(grain.local_grain_id()));
+                stratum.known_grains.insert(grain.local_grain_index());
+            }
+        } else {
+            for (grain, log_position) in written_grains {
+                if let Some(uncheckpointed) = data.uncheckpointed_grains.get_mut(&grain) {
+                    *uncheckpointed = UncheckpointedGrain::InWal(log_position);
+                }
             }
         }
+
+        // We assume that freed_grains is sorted. To avoid continuing to re-look
+        // up the basin and stratum for grains that are from the same stratum,
+        // we use two loops -- one to get the stratum and one to do the actual
+        // free operations. Only the inner loop advances the iterator.
+        while let Some(next_grain) = freed_grains.first().copied() {
+            let basin = data.basins.get_or_default(next_grain.basin_id());
+            let stratum = &mut basin.strata[next_grain.stratum_id().as_usize()];
+
+            while let Some(grain) = freed_grains
+                .first()
+                .filter(|g| g.basin_and_stratum() == next_grain.basin_and_stratum())
+                .copied()
+            {
+                freed_grains = &freed_grains[1..];
+
+                stratum.allocations.free_grain(grain.local_grain_id());
+                stratum.known_grains.remove(&grain.local_grain_index());
+            }
+        }
+
         Ok(())
     }
 
     pub fn note_grains_checkpointed<'a>(
         &self,
-        checkpointed_grains: impl IntoIterator<Item = &'a GrainId>,
+        checkpointed_grains: impl IntoIterator<Item = &'a (GrainId, GrainAllocationStatus)>,
     ) -> Result<()> {
         let mut data = self.data.lock()?;
-        for grain in checkpointed_grains {
-            data.uncheckpointed_grains.remove(grain);
+        for (grain, status) in checkpointed_grains {
+            match status {
+                GrainAllocationStatus::Allocated => {
+                    // The grain can now be found in the Stratum, so we can stop
+                    // returning readers to the WAL.
+                    data.uncheckpointed_grains.remove(grain);
+                }
+                GrainAllocationStatus::Archived => {
+                    // Archiving has no effect to the Atlas.
+                }
+                GrainAllocationStatus::Free => {
+                    // The grains area already removed during the WAL phase.
+                    // let basin = data.basins[grain.basin_id()]
+                    //     .as_mut()
+                    //     .expect("basin missing");
+                    // let stratum = basin
+                    //     .strata
+                    //     .get_mut(grain.stratum_id().as_usize())
+                    //     .expect("stratum missing");
+
+                    // stratum.allocations.free_grain(grain.local_grain_id());
+                    // stratum.known_grains.remove(&grain.local_grain_index());
+                }
+            }
         }
         Ok(())
     }
@@ -246,8 +311,14 @@ impl Atlas {
                 .expect("stratum missing");
 
             stratum.allocations.free_grain(grain.local_grain_id());
+            stratum.known_grains.remove(&grain.local_grain_index());
         }
         Ok(())
+    }
+
+    pub fn check_grain_validity(&self, grain: GrainId) -> Result<()> {
+        let data = self.data.lock()?;
+        data.check_grain_validity(grain)
     }
 }
 
@@ -257,6 +328,23 @@ struct Data {
     index: IndexMetadata,
     basins: BasinMap<Basin>,
     uncheckpointed_grains: HashMap<GrainId, UncheckpointedGrain>,
+}
+
+impl Data {
+    pub fn check_grain_validity(&self, grain: GrainId) -> Result<()> {
+        let basin = self.basins[grain.basin_id()]
+            .as_ref()
+            .expect("basin missing");
+        let stratum = basin
+            .strata
+            .get(grain.stratum_id().as_usize())
+            .expect("stratum missing");
+        if stratum.known_grains.contains(&grain.local_grain_index()) {
+            Ok(())
+        } else {
+            Err(Error::GrainNotAllocated)
+        }
+    }
 }
 
 fn allocate_grain_within_stratum(
@@ -270,6 +358,7 @@ fn allocate_grain_within_stratum(
     if let Some(index) = stratum.allocations.allocate(number_of_grains_needed) {
         let id = GrainId::new(basin_id, stratum_id, index);
         uncheckpointed_grains.insert(id, UncheckpointedGrain::PendingCommit);
+        stratum.known_grains.insert(id.local_grain_index());
         Ok(id)
     } else {
         Err(())
@@ -307,19 +396,46 @@ impl<'a> From<&'a BasinState> for Basin {
 struct Stratum {
     path: Arc<PathBuf>,
     allocations: FreeLocations,
+    known_grains: HashSet<GrainIndex>,
 }
 
 impl Stratum {
-    fn from_stratum(path: Arc<PathBuf>, state: &StratumHeader) -> Self {
-        let allocations = FreeLocations::from_stratum(state);
+    fn from_stratum(path: Arc<PathBuf>, stratum: &StratumHeader) -> Self {
+        let allocations = FreeLocations::from_stratum(stratum);
 
-        Self { path, allocations }
+        let mut known_grains = HashSet::new();
+        let mut index = 0;
+        while index < 16_372 {
+            let index_status = stratum.grain_info(index);
+            let count = index_status.count();
+            let allocated = !matches!(
+                index_status.status().expect("invalid header"),
+                GrainAllocationStatus::Free
+            );
+
+            if allocated {
+                known_grains.insert(
+                    GrainIndex::new(index.try_into().expect("only valid indexes are used"))
+                        .expect("only valid grains are used"),
+                );
+                index += usize::from(count);
+            } else {
+                index += 1;
+            }
+        }
+
+        Self {
+            path,
+            allocations,
+            known_grains,
+        }
     }
 
     fn default_for(path: PathBuf) -> Self {
         Self {
             path: Arc::new(path),
             allocations: FreeLocations::default(),
+            known_grains: HashSet::default(),
         }
     }
 }
@@ -439,4 +555,6 @@ impl<'a> StratumIdIter<'a> {
 pub struct IndexMetadata {
     pub embedded_header_data: Option<GrainId>,
     pub commit_log_head: Option<GrainId>,
+    pub checkpoint_target: TransactionId,
+    pub checkpointed_to: TransactionId,
 }

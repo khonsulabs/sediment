@@ -45,7 +45,7 @@ impl FreeLocations {
                         )
                         .then_some(index)
                     }) {
-                    next_allocated_index
+                    next_allocated_index + index + 1
                 } else {
                     16_372
                 };
@@ -133,8 +133,7 @@ impl FreeLocations {
     }
 
     #[must_use]
-    #[cfg(test)] // This was originally written for more than testing. We should probably just rewrite the tests and delete this.
-    fn allocate_grain(&mut self, grain_id: LocalGrainId) -> bool {
+    pub fn allocate_grain(&mut self, grain_id: LocalGrainId) -> bool {
         let start = grain_id.grain_index();
         let count = u16::from(grain_id.grain_count());
         let end = start.as_u16() + count;
