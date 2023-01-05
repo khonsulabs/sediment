@@ -138,7 +138,7 @@ impl Atlas {
         // the Data pointer first, allowing the borrow checker to see that the
         // mutable accesses are unique.
         let data = &mut *data;
-        let mut eligible_basins = ArrayVec::<[(BasinId, u32, bool, bool, u32); 8]>::new();
+        let mut eligible_basins = ArrayVec::<[(BasinId, u32, bool, u32); 8]>::new();
         for basin in 0..=7 {
             let basin_id = BasinId::new(basin).expect("valid basin id");
             let grain_size = basin_id.grain_stripe_bytes();
@@ -150,21 +150,22 @@ impl Atlas {
                 };
             let extra_bytes = number_of_grains_needed * grain_size - length;
 
-            eligible_basins.push((
-                basin_id,
-                number_of_grains_needed,
-                number_of_grains_needed <= 63,
-                data.basins[basin_id].is_some(),
-                extra_bytes,
-            ));
+            if number_of_grains_needed <= 63 {
+                eligible_basins.push((
+                    basin_id,
+                    number_of_grains_needed,
+                    data.basins[basin_id].is_some(),
+                    extra_bytes,
+                ));
+            }
         }
 
-        eligible_basins.sort_by(|a, b| a.4.cmp(&b.4));
+        eligible_basins.sort_by(|a, b| a.3.cmp(&b.3));
 
         // Now we have a list of basins to consider.
-        for (basin_id, number_of_grains_needed, _, _, _) in eligible_basins
+        for (basin_id, number_of_grains_needed, _, _) in eligible_basins
             .iter()
-            .filter(|(_, _, can_fit, is_allocated, _)| *can_fit && *is_allocated)
+            .filter(|(_, _, is_allocated, _)| *is_allocated)
         {
             let basin = data.basins[*basin_id]
                 .as_mut()
@@ -192,7 +193,7 @@ impl Atlas {
 
         // We couldn't find an existing stratum that was able to fit the
         // allocation. Create a new one.
-        let (basin_id, number_of_grains_needed, _, is_allocated, _) = eligible_basins
+        let (basin_id, number_of_grains_needed, is_allocated, _) = eligible_basins
             .first()
             .expect("at least one basin should fit");
         if !*is_allocated {
