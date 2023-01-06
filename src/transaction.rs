@@ -1,4 +1,7 @@
-use std::sync::{Arc, Condvar, Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Condvar, Mutex},
+};
 
 use crc32c::crc32c;
 use okaywal::{EntryWriter, LogPosition};
@@ -16,9 +19,8 @@ use crate::{
 pub struct Transaction<'db> {
     database: &'db Database,
     entry: Option<EntryWriter<'db>>,
-    written_grains: Vec<(GrainId, LogPosition)>,
-    log_entry: CommitLogEntry,
-    _guard: TransactionGuard,
+    guard: Option<TransactionGuard>,
+    state: Option<CommittingTransaction>,
 }
 
 impl<'db> Transaction<'db> {
@@ -27,19 +29,23 @@ impl<'db> Transaction<'db> {
         entry: EntryWriter<'db>,
         guard: TransactionGuard,
     ) -> Result<Self> {
-        let index_metadata = database.data.atlas.current_index_metadata()?;
+        let metadata = guard.current_index_metadata();
         Ok(Self {
             database,
-            written_grains: Vec::new(),
-            log_entry: CommitLogEntry::new(
-                TransactionId::from(entry.id()),
-                index_metadata.commit_log_head,
-                index_metadata.embedded_header_data,
-                index_metadata.checkpoint_target,
-                index_metadata.checkpointed_to,
-            ),
+            state: Some(CommittingTransaction {
+                metadata,
+                written_grains: Vec::new(),
+                log_entry: CommitLogEntry::new(
+                    TransactionId::from(entry.id()),
+                    metadata.commit_log_head,
+                    metadata.embedded_header_data,
+                    metadata.checkpoint_target,
+                    metadata.checkpointed_to,
+                ),
+            }),
+
             entry: Some(entry),
-            _guard: guard,
+            guard: Some(guard),
         })
     }
 
@@ -52,8 +58,9 @@ impl<'db> Transaction<'db> {
         WalChunk::write_new_grain(grain_id, data, &mut chunk)?;
         let record = chunk.finish()?;
 
-        self.written_grains.push((grain_id, record.position));
-        self.log_entry.new_grains.push(NewGrain {
+        let state = self.state.as_mut().expect("state missing");
+        state.written_grains.push((grain_id, record.position));
+        state.log_entry.new_grains.push(NewGrain {
             id: grain_id,
             crc32: crc32c(data),
         });
@@ -68,7 +75,8 @@ impl<'db> Transaction<'db> {
         WalChunk::write_archive_grain(grain, &mut chunk)?;
         chunk.finish()?;
 
-        self.log_entry.archived_grains.push(grain);
+        let state = self.state.as_mut().expect("state missing");
+        state.log_entry.archived_grains.push(grain);
 
         Ok(())
     }
@@ -81,29 +89,35 @@ impl<'db> Transaction<'db> {
             chunk.finish()?;
         }
 
-        self.log_entry.freed_grains.extend(grains.iter().copied());
+        let state = self.state.as_mut().expect("state missing");
+        state.log_entry.freed_grains.extend(grains.iter().copied());
 
         Ok(())
     }
 
+    #[allow(clippy::drop_ref)]
     pub fn set_embedded_header(&mut self, new_header: Option<GrainId>) -> Result<()> {
         let entry = self.entry.as_mut().expect("entry missing");
         let mut chunk = entry.begin_chunk(WalChunk::COMMAND_LENGTH)?;
         WalChunk::write_embedded_header_update(new_header, &mut chunk)?;
         chunk.finish()?;
 
-        if let Some(old_header) = self.log_entry.embedded_header_data {
+        let mut state = self.state.as_mut().expect("state missing");
+        if let Some(old_header) = state.log_entry.embedded_header_data {
+            drop(state);
             self.archive(old_header)?;
+            state = self.state.as_mut().expect("state missing");
         }
 
-        self.log_entry.embedded_header_data = new_header;
+        state.log_entry.embedded_header_data = new_header;
 
         Ok(())
     }
 
     pub fn checkpoint_to(&mut self, tx_id: TransactionId) -> Result<()> {
         let entry = self.entry.as_mut().expect("entry missing");
-        if tx_id <= self.log_entry.checkpoint_target {
+        let mut state = self.state.as_mut().expect("state missing");
+        if tx_id <= state.log_entry.checkpoint_target {
             // already the checkpoint target
             return Ok(());
         } else if tx_id >= entry.id() {
@@ -114,14 +128,15 @@ impl<'db> Transaction<'db> {
         WalChunk::write_checkpoint_to(tx_id, &mut chunk)?;
         chunk.finish()?;
 
-        self.log_entry.checkpoint_target = tx_id;
+        state.log_entry.checkpoint_target = tx_id;
 
         Ok(())
     }
 
     pub(crate) fn checkpointed_to(&mut self, tx_id: TransactionId) -> Result<()> {
         let entry = self.entry.as_mut().expect("entry missing");
-        if tx_id <= self.log_entry.checkpointed_to {
+        let mut state = self.state.as_mut().expect("state missing");
+        if tx_id <= state.log_entry.checkpointed_to {
             // already the checkpoint target
             return Ok(());
         } else if tx_id >= entry.id() {
@@ -132,24 +147,23 @@ impl<'db> Transaction<'db> {
         WalChunk::write_checkpointed_to(tx_id, &mut chunk)?;
         chunk.finish()?;
 
-        self.log_entry.checkpointed_to = tx_id;
+        state.log_entry.checkpointed_to = tx_id;
 
         Ok(())
     }
 
+    #[allow(clippy::drop_ref)]
     pub fn commit(mut self) -> Result<TransactionId> {
+        let state = self.state.as_mut().expect("state missing");
         // Write the commit log entry
-        self.log_entry.freed_grains.sort_unstable();
+        state.log_entry.freed_grains.sort_unstable();
         let mut log_entry_bytes = Vec::new();
-        self.log_entry.serialize_to(&mut log_entry_bytes)?;
+        state.log_entry.serialize_to(&mut log_entry_bytes)?;
+        drop(state);
         let new_commit_log_head = self.write(&log_entry_bytes)?;
 
-        let new_metadata = IndexMetadata {
-            embedded_header_data: self.log_entry.embedded_header_data,
-            commit_log_head: Some(new_commit_log_head),
-            checkpoint_target: self.log_entry.checkpoint_target,
-            checkpointed_to: self.log_entry.checkpointed_to,
-        };
+        let mut state = self.state.take().expect("state missing");
+        state.metadata.commit_log_head = Some(new_commit_log_head);
 
         // Write the transaction tail
         let mut entry = self.entry.take().expect("entry missing");
@@ -157,14 +171,14 @@ impl<'db> Transaction<'db> {
         WalChunk::write_transaction_tail(new_commit_log_head, &mut chunk)?;
         chunk.finish()?;
 
-        let transaction_id = TransactionId::from(entry.commit()?);
+        let guard = self.guard.take().expect("tx guard missing");
 
-        self.database.data.atlas.note_transaction_committed(
-            new_metadata,
-            self.written_grains.drain(..),
-            &self.log_entry.freed_grains,
-            false,
-        )?;
+        let transaction_id = state.log_entry.transaction_id;
+        let finalizer = guard.stage(state, self.database);
+
+        entry.commit()?;
+
+        finalizer.finalize()?;
 
         Ok(transaction_id)
     }
@@ -174,6 +188,7 @@ impl<'db> Transaction<'db> {
     }
 
     fn rollback_transaction(&mut self) -> Result<()> {
+        let mut state = self.state.take().expect("state missing");
         let entry = self.entry.take().expect("entry missing");
 
         let result = entry.rollback();
@@ -181,7 +196,7 @@ impl<'db> Transaction<'db> {
         self.database
             .data
             .atlas
-            .rollback_grains(self.written_grains.drain(..).map(|(g, _)| g))?;
+            .rollback_grains(state.written_grains.drain(..).map(|(g, _)| g))?;
 
         result?;
 
@@ -198,31 +213,40 @@ impl<'db> Drop for Transaction<'db> {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct TransactionLock {
     data: Arc<TransactionLockData>,
 }
 
 impl TransactionLock {
-    pub fn lock(&self) -> TransactionGuard {
-        let mut locked = self.data.tx_lock.lock().expect("can't panick");
+    pub fn new(initial_metadata: IndexMetadata) -> Self {
+        Self {
+            data: Arc::new(TransactionLockData {
+                tx_lock: Mutex::new(TransactionState::new(initial_metadata)),
+                tx_sync: Condvar::new(),
+            }),
+        }
+    }
+
+    pub(super) fn lock(&self) -> TransactionGuard {
+        let mut state = self.data.tx_lock.lock().expect("can't panick");
 
         // Wait for the locked status to be relinquished
-        while *locked {
-            locked = self.data.tx_sync.wait(locked).expect("can't panick");
+        while state.in_transaction {
+            state = self.data.tx_sync.wait(state).expect("can't panick");
         }
 
         // Acquire the locked status
-        *locked = true;
+        state.in_transaction = true;
 
         // Return the guard
-        TransactionGuard(self.clone())
+        TransactionGuard { lock: self.clone() }
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct TransactionLockData {
-    tx_lock: Arc<Mutex<bool>>,
+    tx_lock: Mutex<TransactionState>,
     tx_sync: Condvar,
 }
 
@@ -233,16 +257,98 @@ struct TransactionLockData {
 /// can write to it already, but we need extra guarantees because we don't want
 /// to publish some state until after the WAL has confirmed its commit.
 #[derive(Debug)]
-pub struct TransactionGuard(TransactionLock);
+pub(super) struct TransactionGuard {
+    lock: TransactionLock,
+}
+
+impl TransactionGuard {
+    pub fn current_index_metadata(&self) -> IndexMetadata {
+        let state = self.lock.data.tx_lock.lock().expect("cannot panic");
+        state.metadata
+    }
+
+    pub(super) fn stage(
+        self,
+        tx: CommittingTransaction,
+        db: &'_ Database,
+    ) -> TransactionFinalizer<'_> {
+        let id = tx.log_entry.transaction_id;
+        let mut state = self.lock.data.tx_lock.lock().expect("cannot panic");
+        state.metadata = tx.metadata;
+        state.committing_transactions.push_back(tx);
+
+        TransactionFinalizer {
+            db,
+            lock: self.lock.clone(),
+            id,
+        }
+    }
+}
 
 impl Drop for TransactionGuard {
     fn drop(&mut self) {
         // Reset the locked status
-        let mut locked = self.0.data.tx_lock.lock().expect("can't panick");
-        *locked = false;
-        drop(locked);
+        let mut state = self.lock.data.tx_lock.lock().expect("can't panick");
+        state.in_transaction = false;
+        drop(state);
 
         // Notify the next waiter.
-        self.0.data.tx_sync.notify_one();
+        self.lock.data.tx_sync.notify_one();
+    }
+}
+
+#[derive(Debug)]
+struct TransactionState {
+    in_transaction: bool,
+    metadata: IndexMetadata,
+    committing_transactions: VecDeque<CommittingTransaction>,
+}
+
+impl TransactionState {
+    pub fn new(initial_metadata: IndexMetadata) -> Self {
+        Self {
+            in_transaction: false,
+            metadata: initial_metadata,
+            committing_transactions: VecDeque::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct CommittingTransaction {
+    metadata: IndexMetadata,
+    written_grains: Vec<(GrainId, LogPosition)>,
+    log_entry: CommitLogEntry,
+}
+
+#[derive(Debug)]
+pub(super) struct TransactionFinalizer<'a> {
+    db: &'a Database,
+    lock: TransactionLock,
+    id: TransactionId,
+}
+
+impl<'a> TransactionFinalizer<'a> {
+    pub fn finalize(self) -> Result<()> {
+        let mut state = self.lock.data.tx_lock.lock().expect("can't panic");
+
+        while state
+            .committing_transactions
+            .front()
+            .map_or(false, |tx| tx.log_entry.transaction_id <= self.id)
+        {
+            let mut tx_to_commit = state
+                .committing_transactions
+                .pop_front()
+                .expect("just checked");
+            self.db.data.atlas.note_transaction_committed(
+                tx_to_commit.metadata,
+                tx_to_commit.written_grains.drain(..),
+                &tx_to_commit.log_entry.freed_grains,
+                false,
+            )?;
+        }
+
+        Ok(())
     }
 }

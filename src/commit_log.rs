@@ -78,7 +78,7 @@ impl CommitLogEntry {
         Ok(())
     }
 
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
+    pub fn read_from<R: Read>(mut reader: R) -> Result<Self> {
         let mut eight_bytes = [0; 8];
         reader.read_exact(&mut eight_bytes)?;
         let transaction_id = TransactionId::from_be_bytes(eight_bytes);
@@ -137,10 +137,11 @@ impl CommitLogEntry {
     pub fn next_entry(&self, database: &Database) -> Result<Option<Stored<Self>>> {
         if self.transaction_id > database.checkpointed_to()? {
             if let Some(entry_id) = self.next_entry {
-                if let Some(mut reader) = database.read(entry_id)? {
+                if let Some(reader) = database.read(entry_id)? {
+                    let data = reader.read_all_data()?;
                     return Ok(Some(Stored {
                         grain_id: entry_id,
-                        stored: Self::read_from(&mut reader)?,
+                        stored: Self::read_from(&data[..])?,
                     }));
                 }
             }

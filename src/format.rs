@@ -238,8 +238,8 @@ impl BasinAndStratum {
 
 impl Display for BasinAndStratum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let basin = BasinId((self.0 >> 41) as u8);
-        let stratum = StratumId(self.0 & 0x1fff_ffff_ffff);
+        let basin = self.basin();
+        let stratum = self.stratum();
         write!(f, "{basin}{stratum}")
     }
 }
@@ -401,9 +401,9 @@ pub struct IndexFile {
 }
 
 impl IndexFile {
-    pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
-        let first_header = IndexHeader::read_from(file, scratch)?;
-        let second_header = IndexHeader::read_from(file, scratch)?;
+    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
+        let first_header = IndexHeader::read_from(&mut file, scratch)?;
+        let second_header = IndexHeader::read_from(&mut file, scratch)?;
         Ok(Self {
             first_header,
             second_header,
@@ -434,7 +434,7 @@ pub struct IndexHeader {
 impl Duplicable for IndexHeader {
     const BYTES: u64 = 44;
 
-    fn write_to<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+    fn write_to<W: std::io::Write>(&mut self, writer: W) -> Result<()> {
         let mut writer = ChecksumWriter::new(writer);
         writer.write_all(&self.transaction_id.to_be_bytes())?;
         writer.write_all(
@@ -461,7 +461,7 @@ impl Duplicable for IndexHeader {
 }
 
 impl IndexHeader {
-    pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
+    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
         scratch.resize(44, 0);
         file.read_exact(scratch)?;
         let crc32 = u32::from_be_bytes(scratch[40..].try_into().expect("u32 is 4 bytes"));
@@ -537,9 +537,9 @@ pub struct StratumFileHeader {
 
 impl StratumFileHeader {
     const BYTES: u64 = StratumHeader::BYTES * 2;
-    pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
-        let first_header = StratumHeader::read_from(file, scratch)?;
-        let second_header = StratumHeader::read_from(file, scratch)?;
+    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
+        let first_header = StratumHeader::read_from(&mut file, scratch)?;
+        let second_header = StratumHeader::read_from(&mut file, scratch)?;
         Ok(Self {
             first_header,
             second_header,
@@ -570,7 +570,7 @@ impl StratumHeader {
         GrainAllocationInfo(self.grains[index])
     }
 
-    pub fn read_from<R: Read>(file: &mut R, scratch: &mut Vec<u8>) -> Result<Self> {
+    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
         scratch.resize(16_384, 0);
         file.read_exact(scratch)?;
 
@@ -607,7 +607,7 @@ impl StratumHeader {
 impl Duplicable for StratumHeader {
     const BYTES: u64 = 16_384;
 
-    fn write_to<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+    fn write_to<W: std::io::Write>(&mut self, writer: W) -> Result<()> {
         let mut writer = ChecksumWriter::new(BufWriter::new(writer));
         writer.write_all(&self.transaction_id.to_be_bytes())?;
         writer.write_all(&self.grains)?;

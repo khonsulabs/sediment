@@ -52,7 +52,7 @@ impl Database {
         let data = Arc::new(Data {
             store,
             atlas,
-            tx_lock: TransactionLock::default(),
+            tx_lock: TransactionLock::new(current_metadata),
             checkpointer,
         });
 

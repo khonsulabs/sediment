@@ -190,7 +190,7 @@ where
 pub trait Duplicable: Sized {
     const BYTES: u64;
 
-    fn write_to<W: io::Write>(&mut self, writer: &mut W) -> Result<()>;
+    fn write_to<W: io::Write>(&mut self, writer: W) -> Result<()>;
 }
 
 #[derive(Debug)]

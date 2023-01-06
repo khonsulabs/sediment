@@ -202,13 +202,11 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SedimentT
         })
     }
 
-    fn reset(shutting_down: bool) -> Result<(), ()> {
-        if shutting_down {
-            let path = Path::new(".threaded-inserts.sediment");
-            if path.exists() {
-                println!("Cleaning up.");
-                std::fs::remove_dir_all(path).unwrap();
-            }
+    fn reset(_shutting_down: bool) -> Result<(), ()> {
+        let path = Path::new(".threaded-inserts.sediment");
+        if path.exists() {
+            println!("Cleaning up.");
+            std::fs::remove_dir_all(path).unwrap();
         }
         Ok(())
     }
@@ -239,12 +237,6 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SedimentT
 
     fn label(_number_of_threads: usize, _config: &Arc<ThreadedInsertsData>) -> Label {
         Label::from("sediment")
-    }
-}
-
-impl Drop for SedimentThreadedInserts {
-    fn drop(&mut self) {
-        // self.db.clone().shutdown().unwrap();
     }
 }
 
