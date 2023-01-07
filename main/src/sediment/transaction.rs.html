@@ -352,6 +352,13 @@
 <span id="352">352</span>
 <span id="353">353</span>
 <span id="354">354</span>
+<span id="355">355</span>
+<span id="356">356</span>
+<span id="357">357</span>
+<span id="358">358</span>
+<span id="359">359</span>
+<span id="360">360</span>
+<span id="361">361</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     collections::VecDeque,
     sync::{Arc, Condvar, Mutex},
@@ -700,6 +707,13 @@
                 tx_to_commit.written_grains.drain(..),
                 <span class="kw-2">&amp;</span>tx_to_commit.log_entry.freed_grains,
                 <span class="bool-val">false</span>,
+            )<span class="question-mark">?</span>;
+            <span class="self">self</span>.db.data.commit_logs.cache(
+                tx_to_commit
+                    .metadata
+                    .commit_log_head
+                    .expect(<span class="string">&quot;commit log must be present&quot;</span>),
+                Arc::new(tx_to_commit.log_entry),
             )<span class="question-mark">?</span>;
         }
 

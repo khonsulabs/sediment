@@ -627,7 +627,7 @@
             <span class="prelude-val">Some</span>(UncheckpointedGrain::PendingCommit) =&gt; <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>),
             <span class="prelude-val">Some</span>(UncheckpointedGrain::InWal(location)) =&gt; {
                 <span class="kw">let </span>location = <span class="kw-2">*</span>location;
-                <span class="kw">let </span><span class="kw-2">mut </span>chunk_reader = wal.read_at(location).unwrap();
+                <span class="kw">let </span><span class="kw-2">mut </span>chunk_reader = wal.read_at(location)<span class="question-mark">?</span>;
                 <span class="comment">// We hold onto the data lock until after we read from the wal
                 // to ensure a checkpoint doesn&#39;t happen before we start the
                 // read operation.

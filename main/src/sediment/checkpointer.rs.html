@@ -217,7 +217,7 @@
 
             <span class="comment">// Find all commit log entries that are &lt;=
             // transaction_to_checkpoint.
-            </span><span class="kw">let </span><span class="kw-2">mut </span>current_commit_log = db.commit_log_head().unwrap();
+            </span><span class="kw">let </span><span class="kw-2">mut </span>current_commit_log = db.commit_log_head()<span class="question-mark">?</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>archived_grains = Vec::new();
             <span class="kw">let </span><span class="kw-2">mut </span>commit_logs_to_archive = Vec::new();
             <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>entry) = current_commit_log {
@@ -227,16 +227,16 @@
                     archived_grains.append(<span class="kw-2">&amp;mut </span>entry.archived_grains);
                     commit_logs_to_archive.push(entry.grain_id);
                 }
-                current_commit_log = entry.next_entry(<span class="kw-2">&amp;</span>db).unwrap();
+                current_commit_log = entry.next_entry(<span class="kw-2">&amp;</span>db)<span class="question-mark">?</span>;
             }
 
-            <span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction().unwrap();
+            <span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction()<span class="question-mark">?</span>;
             <span class="kw">for </span>commit_log_id <span class="kw">in </span>commit_logs_to_archive {
                 tx.archive(commit_log_id)<span class="question-mark">?</span>;
             }
-            tx.free_grains(<span class="kw-2">&amp;</span>archived_grains).unwrap();
-            tx.checkpointed_to(transaction_to_checkpoint).unwrap();
-            tx.commit().unwrap();
+            tx.free_grains(<span class="kw-2">&amp;</span>archived_grains)<span class="question-mark">?</span>;
+            tx.checkpointed_to(transaction_to_checkpoint)<span class="question-mark">?</span>;
+            tx.commit()<span class="question-mark">?</span>;
 
             current_tx_id = transaction_to_checkpoint;
         }
