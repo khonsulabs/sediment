@@ -187,6 +187,8 @@
 <span id="187">187</span>
 <span id="188">188</span>
 <span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     fs::File,
     sync::{Arc, Condvar, Mutex},
@@ -331,6 +333,10 @@
 
 <span class="kw">impl </span>FSyncBatch {
     <span class="kw">pub fn </span>queue_fsync_all(<span class="kw-2">&amp;</span><span class="self">self</span>, file: File) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>remaining_syncs = <span class="self">self</span>.notify.remaining.lock()<span class="question-mark">?</span>;
+        <span class="kw-2">*</span>remaining_syncs += <span class="number">1</span>;
+        drop(remaining_syncs);
+
         <span class="self">self</span>.command_sender
             .send(FSync {
                 all: <span class="bool-val">true</span>,
@@ -339,13 +345,14 @@
             })
             .map_err(|<span class="kw">_</span>| Error::Shutdown)<span class="question-mark">?</span>;
 
-        <span class="kw">let </span><span class="kw-2">mut </span>remaining_syncs = <span class="self">self</span>.notify.remaining.lock()<span class="question-mark">?</span>;
-        <span class="kw-2">*</span>remaining_syncs += <span class="number">1</span>;
-
         <span class="prelude-val">Ok</span>(())
     }
 
     <span class="kw">pub fn </span>queue_fsync_data(<span class="kw-2">&amp;</span><span class="self">self</span>, file: File) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>remaining_syncs = <span class="self">self</span>.notify.remaining.lock()<span class="question-mark">?</span>;
+        <span class="kw-2">*</span>remaining_syncs += <span class="number">1</span>;
+        drop(remaining_syncs);
+
         <span class="self">self</span>.command_sender
             .send(FSync {
                 all: <span class="bool-val">false</span>,
@@ -353,9 +360,6 @@
                 notify: <span class="self">self</span>.notify.clone(),
             })
             .map_err(|<span class="kw">_</span>| Error::Shutdown)<span class="question-mark">?</span>;
-
-        <span class="kw">let </span><span class="kw-2">mut </span>remaining_syncs = <span class="self">self</span>.notify.remaining.lock()<span class="question-mark">?</span>;
-        <span class="kw-2">*</span>remaining_syncs += <span class="number">1</span>;
 
         <span class="prelude-val">Ok</span>(())
     }
