@@ -56,7 +56,7 @@ Sediment's internal implementation is separated into several main types:
   and removing old commit log entries. Without the Checkpointer, Sediment would
   be an append-only database that data could never be removed from.
 
-## Disk Format
+### Disk Format
 
 On-disk, Sediment uses an `index` file and a collection of "Strata" -- sticking
 with the geology theme. Each Stratum is organized by its Basin, which determines

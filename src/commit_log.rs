@@ -1,4 +1,8 @@
-use std::io::{Read, Write};
+use std::{
+    collections::{hash_map, HashMap},
+    io::{Read, Write},
+    sync::{Arc, Condvar, Mutex},
+};
 
 use crate::{
     format::{ByteUtil, GrainId, Stored, TransactionId},
@@ -159,4 +163,84 @@ pub struct NewGrain {
 
 impl NewGrain {
     const BYTES: usize = 12;
+}
+
+#[derive(Debug, Default)]
+pub struct CommitLogs {
+    // TODO this should be an LRU
+    cached: Mutex<HashMap<GrainId, CommitLogCacheEntry>>,
+    sync: Condvar,
+}
+
+impl CommitLogs {
+    pub fn cache(&self, grain_id: GrainId, entry: Arc<CommitLogEntry>) -> Result<()> {
+        let mut data = self.cached.lock()?;
+        data.insert(grain_id, CommitLogCacheEntry::Cached(Some(entry)));
+        Ok(())
+    }
+
+    pub fn get_or_lookup(
+        &self,
+        grain_id: GrainId,
+        db: &Database,
+    ) -> Result<Option<Arc<CommitLogEntry>>> {
+        let mut data = self.cached.lock()?;
+        loop {
+            match data.entry(grain_id) {
+                hash_map::Entry::Occupied(entry) => match entry.get() {
+                    CommitLogCacheEntry::Cached(cached) => return Ok(cached.clone()),
+                    CommitLogCacheEntry::Caching => {
+                        // Another thread is trying to cache this entry already.
+                        data = self.sync.wait(data)?;
+                    }
+                },
+                hash_map::Entry::Vacant(miss) => {
+                    miss.insert(CommitLogCacheEntry::Caching);
+                    drop(data);
+
+                    // We want to be careful to not cause another thread to
+                    // block indefinitely if we receive an error.
+                    let result = match Self::read_entry(grain_id, db) {
+                        Ok(entry) => {
+                            let entry = entry.map(Arc::new);
+                            data = self.cached.lock()?;
+                            data.insert(grain_id, CommitLogCacheEntry::Cached(entry.clone()));
+                            Ok(entry)
+                        }
+                        Err(err) => {
+                            // We had an error reading, clear our entry in the
+                            // cache before returning it.
+                            data = self.cached.lock()?;
+                            data.remove(&grain_id);
+                            Err(err)
+                        }
+                    };
+
+                    drop(data);
+
+                    // This is wasteful to wake up all waiting threads, but we
+                    // don't have a good way to notify just a single one.
+                    self.sync.notify_all();
+
+                    return result;
+                }
+            }
+        }
+    }
+
+    fn read_entry(grain_id: GrainId, db: &Database) -> Result<Option<CommitLogEntry>> {
+        if let Some(reader) = db.read(grain_id)? {
+            let data = reader.read_all_data()?;
+            let entry = CommitLogEntry::read_from(&data[..])?;
+            Ok(Some(entry))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[derive(Debug)]
+enum CommitLogCacheEntry {
+    Cached(Option<Arc<CommitLogEntry>>),
+    Caching,
 }

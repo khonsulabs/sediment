@@ -210,11 +210,13 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SedimentT
         })
     }
 
-    fn reset(_shutting_down: bool) -> Result<(), ()> {
-        let path = Path::new(".threaded-inserts.sediment");
-        if path.exists() {
-            println!("Cleaning up.");
-            std::fs::remove_dir_all(path).unwrap();
+    fn reset(shutting_down: bool) -> Result<(), ()> {
+        if shutting_down {
+            let path = Path::new(".threaded-inserts.sediment");
+            if path.exists() {
+                println!("Cleaning up.");
+                std::fs::remove_dir_all(path).unwrap();
+            }
         }
         Ok(())
     }

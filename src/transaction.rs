@@ -347,6 +347,13 @@ impl<'a> TransactionFinalizer<'a> {
                 &tx_to_commit.log_entry.freed_grains,
                 false,
             )?;
+            self.db.data.commit_logs.cache(
+                tx_to_commit
+                    .metadata
+                    .commit_log_head
+                    .expect("commit log must be present"),
+                Arc::new(tx_to_commit.log_entry),
+            )?;
         }
 
         Ok(())

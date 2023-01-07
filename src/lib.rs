@@ -13,7 +13,7 @@ pub use transaction::Transaction;
 use crate::{
     atlas::{Atlas, GrainReader},
     checkpointer::Checkpointer,
-    commit_log::CommitLogEntry,
+    commit_log::{CommitLogEntry, CommitLogs},
     config::Config,
     format::{GrainId, Stored, TransactionId},
     store::Store,
@@ -56,6 +56,7 @@ impl Database {
             atlas,
             tx_lock: TransactionLock::new(current_metadata),
             checkpointer,
+            commit_logs: CommitLogs::default(),
         });
 
         // Recover any transactions from the write ahead log that haven't been
@@ -83,6 +84,10 @@ impl Database {
 
     pub fn read(&self, grain: GrainId) -> Result<Option<GrainReader>> {
         self.data.atlas.find(grain, &self.wal)
+    }
+
+    pub fn read_commit_log_entry(&self, grain: GrainId) -> Result<Option<Arc<CommitLogEntry>>> {
+        self.data.commit_logs.get_or_lookup(grain, self)
     }
 
     pub fn shutdown(self) -> Result<()> {
@@ -142,6 +147,7 @@ struct Data {
     store: Store,
     checkpointer: Checkpointer,
     atlas: Atlas,
+    commit_logs: CommitLogs,
     tx_lock: TransactionLock,
 }
 

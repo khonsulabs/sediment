@@ -94,7 +94,7 @@ fn sediment_checkpoint_thread(
 
             // Find all commit log entries that are <=
             // transaction_to_checkpoint.
-            let mut current_commit_log = db.commit_log_head().unwrap();
+            let mut current_commit_log = db.commit_log_head()?;
             let mut archived_grains = Vec::new();
             let mut commit_logs_to_archive = Vec::new();
             while let Some(mut entry) = current_commit_log {
@@ -104,16 +104,16 @@ fn sediment_checkpoint_thread(
                     archived_grains.append(&mut entry.archived_grains);
                     commit_logs_to_archive.push(entry.grain_id);
                 }
-                current_commit_log = entry.next_entry(&db).unwrap();
+                current_commit_log = entry.next_entry(&db)?;
             }
 
-            let mut tx = db.begin_transaction().unwrap();
+            let mut tx = db.begin_transaction()?;
             for commit_log_id in commit_logs_to_archive {
                 tx.archive(commit_log_id)?;
             }
-            tx.free_grains(&archived_grains).unwrap();
-            tx.checkpointed_to(transaction_to_checkpoint).unwrap();
-            tx.commit().unwrap();
+            tx.free_grains(&archived_grains)?;
+            tx.checkpointed_to(transaction_to_checkpoint)?;
+            tx.commit()?;
 
             current_tx_id = transaction_to_checkpoint;
         }

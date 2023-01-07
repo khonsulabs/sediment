@@ -66,7 +66,7 @@ impl Atlas {
             Some(UncheckpointedGrain::PendingCommit) => Ok(None),
             Some(UncheckpointedGrain::InWal(location)) => {
                 let location = *location;
-                let mut chunk_reader = wal.read_at(location).unwrap();
+                let mut chunk_reader = wal.read_at(location)?;
                 // We hold onto the data lock until after we read from the wal
                 // to ensure a checkpoint doesn't happen before we start the
                 // read operation.
