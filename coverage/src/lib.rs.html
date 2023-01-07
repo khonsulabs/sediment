@@ -14,8 +14,8 @@
         <div class="level-item has-text-centered">
         <div>
             <p class="heading">Lines</p>
-            <p class="title has-text-success">
-                <abbr title="206 / 228">90.35 %</abbr></p>
+            <p class="title has-text-warning">
+                <abbr title="199 / 228">87.28 %</abbr></p>
         </div>
     </div>
 
@@ -23,7 +23,7 @@
         <div>
             <p class="heading">Functions</p>
             <p class="title has-text-danger">
-                <abbr title="36 / 64">56.25 %</abbr></p>
+                <abbr title="33 / 64">51.56 %</abbr></p>
         </div>
     </div>
 
@@ -1032,7 +1032,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2955
+                3043
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn begin_transaction(&amp;self) -&gt; Result&lt;Transaction&lt;&#x27;_&gt;&gt; {</pre>
@@ -1045,7 +1045,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2955
+                3043
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let tx_guard = self.data.tx_lock.lock();</pre>
@@ -1058,7 +1058,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2955
+                3043
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let wal_entry = self.wal.begin_entry()?;</pre>
@@ -1084,7 +1084,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2955
+                3043
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Transaction::new(self, wal_entry, tx_guard)</pre>
@@ -1097,7 +1097,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2955
+                3043
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1123,7 +1123,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6252
+                8797
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn read(&amp;self, grain: GrainId) -&gt; Result&lt;Option&lt;GrainReader&gt;&gt; {</pre>
@@ -1136,7 +1136,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6252
+                8797
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        self.data.atlas.find(grain, &amp;self.wal)</pre>
@@ -1149,7 +1149,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6252
+                8797
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1409,7 +1409,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6151
+                8701
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn checkpointed_to(&amp;self) -&gt; Result&lt;TransactionId&gt; {</pre>
@@ -1422,7 +1422,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6151
+                8701
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Ok(self.data.atlas.current_index_metadata()?.checkpointed_to)</pre>
@@ -1435,7 +1435,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6151
+                8701
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1565,7 +1565,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                31
+                27
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn commit_log_head(&amp;self) -&gt; Result&lt;Option&lt;Stored&lt;CommitLogEntry&gt;&gt;&gt; {</pre>
@@ -1578,7 +1578,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                31
+                27
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        if let Some(entry_id) = self.data.atlas.current_index_metadata()?.commit_log_head {</pre>
@@ -1591,7 +1591,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                31
+                27
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            if let Some(mut reader) = self.read(entry_id)? {</pre>
@@ -1617,7 +1617,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                31
+                27
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                    grain_id: entry_id,</pre>
@@ -1630,7 +1630,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                31
+                27
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                    stored: CommitLogEntry::read_from(&amp;mut reader)?,</pre>
@@ -1708,7 +1708,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                31
+                27
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1955,7 +1955,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6
+                2
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">#[derive(thiserror::Error, Debug)]</pre>
@@ -2227,11 +2227,11 @@
                 <a href="#169">169</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    fn from(err: Error) -&gt; Self {</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    fn from(err: Error) -&gt; Self {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2240,11 +2240,11 @@
                 <a href="#170">170</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        match err {</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        match err {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2266,11 +2266,11 @@
                 <a href="#172">172</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            other =&gt; io::Error::new(io::ErrorKind::Other, other),</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">            other =&gt; io::Error::new(io::ErrorKind::Other, other),</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2292,11 +2292,11 @@
                 <a href="#174">174</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    }</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2344,11 +2344,11 @@
                 <a href="#178">178</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    fn from(_: PoisonError&lt;T&gt;) -&gt; Self {</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    fn from(_: PoisonError&lt;T&gt;) -&gt; Self {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2357,11 +2357,11 @@
                 <a href="#179">179</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        Self::LockPoisoned</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        Self::LockPoisoned</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2370,11 +2370,11 @@
                 <a href="#180">180</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    }</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4901,7 +4901,7 @@
         </div></div>
         <footer class="footer">
             <div class="content has-text-centered">
-                <p class="heading">Date: 2023-01-07 00:42</p>
+                <p class="heading">Date: 2023-01-07 05:04</p>
             </div>
         </footer>
     </body>
