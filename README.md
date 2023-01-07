@@ -1,5 +1,14 @@
 # Sediment
 
+**This crate is not anywhere near being ready to be used in production projects.
+Constructive feedback is welcome!**
+
+![sediment forbids unsafe code](https://img.shields.io/badge/unsafe-forbid-success)
+[![crate version](https://img.shields.io/crates/v/sediment.svg)](https://crates.io/crates/sediment)
+[![Live Build Status](https://img.shields.io/github/actions/workflow/status/khonsulabs/sediment/rust.yml?branch=main)](https://github.com/khonsulabs/sediment/actions?query=workflow:Tests)
+[![HTML Coverage Report for `main` branch](https://khonsulabs.github.io/sediment/coverage/badge.svg)](https://khonsulabs.github.io/sediment/coverage/)
+[![Documentation](https://img.shields.io/badge/docs-main-informational)](https://khonsulabs.github.io/sediment/main/sediment)
+
 This storage format is meant to provide a foundation for building ACID-compliant
 databases.
 
