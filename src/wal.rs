@@ -13,12 +13,12 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct Manager {
+pub struct WalManager {
     db: Weak<DatabaseData>,
     scratch: Vec<u8>,
 }
 
-impl Manager {
+impl WalManager {
     pub(super) fn new(database: &Arc<DatabaseData>) -> Self {
         Self {
             db: Arc::downgrade(database),
@@ -27,7 +27,7 @@ impl Manager {
     }
 }
 
-impl LogManager for Manager {
+impl LogManager for WalManager {
     fn recover(&mut self, entry: &mut okaywal::Entry<'_>) -> io::Result<()> {
         if let Some(database) = self.db.upgrade() {
             let mut written_grains = Vec::new();

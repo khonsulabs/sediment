@@ -60,7 +60,7 @@ impl Database {
 
         // Recover any transactions from the write ahead log that haven't been
         // checkpointed to the store already.
-        let wal = config.wal.open(wal::Manager::new(&data))?;
+        let wal = config.wal.open(wal::WalManager::new(&data))?;
 
         // The wal recovery process may have recovered sediment checkpoints that
         // are in the WAL but not yet in permanent storage. Refresh the metadata.
