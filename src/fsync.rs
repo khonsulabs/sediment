@@ -142,6 +142,10 @@ pub struct FSyncBatch {
 
 impl FSyncBatch {
     pub fn queue_fsync_all(&self, file: File) -> Result<()> {
+        let mut remaining_syncs = self.notify.remaining.lock()?;
+        *remaining_syncs += 1;
+        drop(remaining_syncs);
+
         self.command_sender
             .send(FSync {
                 all: true,
@@ -150,13 +154,14 @@ impl FSyncBatch {
             })
             .map_err(|_| Error::Shutdown)?;
 
-        let mut remaining_syncs = self.notify.remaining.lock()?;
-        *remaining_syncs += 1;
-
         Ok(())
     }
 
     pub fn queue_fsync_data(&self, file: File) -> Result<()> {
+        let mut remaining_syncs = self.notify.remaining.lock()?;
+        *remaining_syncs += 1;
+        drop(remaining_syncs);
+
         self.command_sender
             .send(FSync {
                 all: false,
@@ -164,9 +169,6 @@ impl FSyncBatch {
                 notify: self.notify.clone(),
             })
             .map_err(|_| Error::Shutdown)?;
-
-        let mut remaining_syncs = self.notify.remaining.lock()?;
-        *remaining_syncs += 1;
 
         Ok(())
     }
