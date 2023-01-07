@@ -500,12 +500,12 @@
             </span>.embedded_header_data)
     }
 
-    <span class="kw">pub fn </span>commit_log_head(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Stored&lt;CommitLogEntry&gt;&gt;&gt; {
+    <span class="kw">pub fn </span>commit_log_head(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;Stored&lt;Arc&lt;CommitLogEntry&gt;&gt;&gt;&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(entry_id) = <span class="self">self</span>.data.atlas.current_index_metadata()<span class="question-mark">?</span>.commit_log_head {
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>reader) = <span class="self">self</span>.read(entry_id)<span class="question-mark">? </span>{
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(entry) = <span class="self">self</span>.read_commit_log_entry(entry_id)<span class="question-mark">? </span>{
                 <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(Stored {
                     grain_id: entry_id,
-                    stored: CommitLogEntry::read_from(<span class="kw-2">&amp;mut </span>reader)<span class="question-mark">?</span>,
+                    stored: entry,
                 }));
             }
         }

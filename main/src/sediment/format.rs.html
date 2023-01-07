@@ -764,6 +764,18 @@
 <span id="764">764</span>
 <span id="765">765</span>
 <span id="766">766</span>
+<span id="767">767</span>
+<span id="768">768</span>
+<span id="769">769</span>
+<span id="770">770</span>
+<span id="771">771</span>
+<span id="772">772</span>
+<span id="773">773</span>
+<span id="774">774</span>
+<span id="775">775</span>
+<span id="776">776</span>
+<span id="777">777</span>
+<span id="778">778</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     fmt::{Display, Write <span class="kw">as _</span>},
     io::{BufWriter, Read, Write},
@@ -1120,6 +1132,18 @@
     <span class="kw">pub const fn </span>from_be_bytes(bytes: [u8; <span class="number">8</span>]) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>(u64::from_be_bytes(bytes))
     }
+}
+
+<span class="kw">impl </span>From&lt;u64&gt; <span class="kw">for </span>TransactionId {
+    <span class="kw">fn </span>from(id: u64) -&gt; <span class="self">Self </span>{
+        TransactionId(id)
+    }
+}
+
+<span class="kw">impl </span>From&lt;TransactionId&gt; <span class="kw">for </span>u64 {
+    <span class="kw">fn </span>from(id: TransactionId) -&gt; <span class="self">Self </span>{
+        id.<span class="number">0
+    </span>}
 }
 
 <span class="kw">impl </span>From&lt;EntryId&gt; <span class="kw">for </span>TransactionId {

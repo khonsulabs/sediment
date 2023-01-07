@@ -559,6 +559,9 @@
 <span id="559">559</span>
 <span id="560">560</span>
 <span id="561">561</span>
+<span id="562">562</span>
+<span id="563">563</span>
+<span id="564">564</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     collections::{HashMap, HashSet, VecDeque},
     fs::{File, OpenOptions},
@@ -786,12 +789,25 @@
         is_from_wal: bool,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>data = <span class="self">self</span>.data.lock()<span class="question-mark">?</span>;
-        data.index = new_metadata;
+        <span class="kw">let </span>data = <span class="kw-2">&amp;mut *</span>data; <span class="comment">// This local deref helps avoid lifetime issues with borrows
+        </span>data.index = new_metadata;
         <span class="kw">if </span>is_from_wal {
             <span class="kw">for </span>(grain, log_position) <span class="kw">in </span>written_grains {
                 data.uncheckpointed_grains
                     .insert(grain, UncheckpointedGrain::InWal(log_position));
                 <span class="kw">let </span>basin = data.basins.get_or_default(grain.basin_id());
+
+                <span class="comment">// We may be committing a grain to a new stratum.
+                </span><span class="kw">while </span>grain.stratum_id().as_usize() &gt;= basin.strata.len() {
+                    <span class="kw">let </span>new_id =
+                        StratumId::new(basin.strata.len().try_into()<span class="question-mark">?</span>).expect(<span class="string">&quot;invalid statum id&quot;</span>);
+                    basin.strata.push(Stratum::default_for(
+                        data.directory.join(
+                            BasinAndStratum::from_parts(grain.basin_id(), new_id).to_string(),
+                        ),
+                    ));
+                }
+
                 <span class="kw">let </span>stratum = <span class="kw-2">&amp;mut </span>basin.strata[grain.stratum_id().as_usize()];
                 <span class="macro">assert!</span>(stratum.allocations.allocate_grain(grain.local_grain_id()));
                 stratum.known_grains.insert(grain.local_grain_index());
@@ -844,16 +860,6 @@
                 </span>}
                 GrainAllocationStatus::Free =&gt; {
                     <span class="comment">// The grains area already removed during the WAL phase.
-                    // let basin = data.basins[grain.basin_id()]
-                    //     .as_mut()
-                    //     .expect(&quot;basin missing&quot;);
-                    // let stratum = basin
-                    //     .strata
-                    //     .get_mut(grain.stratum_id().as_usize())
-                    //     .expect(&quot;stratum missing&quot;);
-
-                    // stratum.allocations.free_grain(grain.local_grain_id());
-                    // stratum.known_grains.remove(&amp;grain.local_grain_index());
                 </span>}
             }
         }

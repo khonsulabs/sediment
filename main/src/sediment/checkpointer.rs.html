@@ -121,6 +121,10 @@
 <span id="121">121</span>
 <span id="122">122</span>
 <span id="123">123</span>
+<span id="124">124</span>
+<span id="125">125</span>
+<span id="126">126</span>
+<span id="127">127</span>
 </pre><pre class="rust"><code><span class="kw">use </span>std::{
     sync::{Arc, Weak},
     thread::JoinHandle,
@@ -220,13 +224,17 @@
             </span><span class="kw">let </span><span class="kw-2">mut </span>current_commit_log = db.commit_log_head()<span class="question-mark">?</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>archived_grains = Vec::new();
             <span class="kw">let </span><span class="kw-2">mut </span>commit_logs_to_archive = Vec::new();
-            <span class="kw">while let </span><span class="prelude-val">Some</span>(<span class="kw-2">mut </span>entry) = current_commit_log {
+            <span class="kw">while let </span><span class="prelude-val">Some</span>(entry) = current_commit_log {
                 <span class="kw">if </span>entry.transaction_id &gt; current_tx_id
                     &amp;&amp; entry.transaction_id &lt;= transaction_to_checkpoint
                 {
-                    archived_grains.append(<span class="kw-2">&amp;mut </span>entry.archived_grains);
+                    archived_grains.extend(entry.archived_grains.iter().copied());
                     commit_logs_to_archive.push(entry.grain_id);
+                } <span class="kw">else if </span>entry.transaction_id &lt;= current_tx_id {
+                    <span class="comment">// We can&#39;t go any further back.
+                    </span><span class="kw">break</span>;
                 }
+
                 current_commit_log = entry.next_entry(<span class="kw-2">&amp;</span>db)<span class="question-mark">?</span>;
             }
 
