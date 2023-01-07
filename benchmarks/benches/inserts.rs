@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, ops::Range, path::Path, sync::Arc};
+use std::{fmt::Debug, num::NonZeroUsize, ops::Range, path::Path, sync::Arc};
 
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use sediment::{format::TransactionId, Database};
@@ -173,15 +173,25 @@ mod marble {
     }
 }
 
-#[derive(Debug)]
 pub struct ThreadedInsertsData {
     source: Vec<u8>,
     ranges: Vec<Vec<Range<usize>>>,
 }
 
+impl Debug for ThreadedInsertsData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let batches = self.ranges.len();
+        let total_inserts = self.ranges.iter().map(|batch| batch.len()).sum::<usize>();
+        f.debug_struct("ThreadedInsertsData")
+            .field("batches", &batches)
+            .field("total_inserts", &total_inserts)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SedimentThreadedInserts {
-    db: Database,
+    db: Arc<Database>,
     number_of_threads: usize,
     data: Arc<ThreadedInsertsData>,
 }
@@ -194,7 +204,7 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SedimentT
         config: &Arc<ThreadedInsertsData>,
     ) -> Result<Self::SharedConfig, ()> {
         Ok(Self {
-            db: Database::recover(".threaded-inserts.sediment").unwrap(),
+            db: Arc::new(Database::recover(".threaded-inserts.sediment").unwrap()),
             number_of_threads,
             data: config.clone(),
         })
@@ -235,6 +245,18 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SedimentT
 
     fn label(_number_of_threads: usize, _config: &Arc<ThreadedInsertsData>) -> Label {
         Label::from("sediment")
+    }
+}
+
+impl Drop for SedimentThreadedInserts {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.db) == 1 {
+            // This is the last instance of this database, shut it down before
+            // the benchmark invokes reset. Otherwise, the checkpointer or the
+            // wal could encounter an error after the files are deleted out from
+            // underneath it.
+            self.db.as_ref().clone().shutdown().unwrap();
+        }
     }
 }
 
