@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+# default = ["marble", "rocksdb", "sqlite"]
 # default = ["fbarrier-fsync"]
 # iouring = ["sediment/iouring"]
 # fbarrier-fsync = ["sediment/fbarrier-fsync"]
@@ -15,9 +16,9 @@ sqlite = ["rusqlite"]
 timings = { git = "https://github.com/khonsulabs/timings", branch = "main" }
 # timings = { path = "../../timings" }
 sediment = { path = "../" }
-marble = { version = "11.7.11", optional = true }
-rusqlite = { version = "0.27.0", optional = true }
-rocksdb = { version = "0.18.0", optional = true }
+marble = { version = "15.0.2", optional = true }
+rusqlite = { version = "0.28.0", optional = true }
+rocksdb = { version = "0.19.0", optional = true }
 rand = "0.8"
 
 [[bench]]

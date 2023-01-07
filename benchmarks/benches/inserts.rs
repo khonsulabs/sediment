@@ -150,8 +150,6 @@ fn initialize_sqlite(path: &Path) -> rusqlite::Connection {
 
 #[cfg(feature = "marble")]
 mod marble {
-    use ::marble::{Marble, ObjectId};
-
     use super::*;
 
     pub fn measure(measurements: &Timings<String>) {
@@ -159,12 +157,12 @@ mod marble {
         if path.exists() {
             std::fs::remove_dir_all(path).unwrap();
         }
-        let marble = Marble::open(path).unwrap();
+        let marble = ::marble::open(path).unwrap();
 
         for i in 0_u128..ITERS {
             let measurement = measurements.begin("marble", String::from("insert 16b"));
             marble
-                .write_batch([(ObjectId::new(i as u64 + 1).unwrap(), Some(i.to_le_bytes()))])
+                .write_batch([(i as u64 + 1, Some(i.to_le_bytes()))])
                 .unwrap();
             marble.maintenance().unwrap();
             measurement.finish();
@@ -265,15 +263,13 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SqliteThr
         })
     }
 
-    fn measure(&mut self, measurements: &Timings<String>) -> Result<(), ()> {
+    fn measure(&mut self, measurements: &LabeledTimings<String>) -> Result<(), ()> {
         let path = Path::new(".threaded-inserts.sqlite3");
         let mut db = initialize_sqlite(path);
 
         for batch in &self.data.ranges {
-            let measurement = measurements.begin(
-                "sqlite",
-                format!("{}-threads-inserts", self.number_of_threads),
-            );
+            let measurement =
+                measurements.begin(format!("{}-threads-inserts", self.number_of_threads));
             let tx = db.transaction().unwrap();
             for range in batch {
                 tx.execute(
@@ -296,6 +292,10 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SqliteThr
         }
         Ok(())
     }
+
+    fn label(_number_of_threads: usize, _config: &Arc<ThreadedInsertsData>) -> Label {
+        Label::from("sqlite")
+    }
 }
 
 #[cfg(feature = "rocksdb")]
@@ -309,7 +309,7 @@ mod rocksdb {
     };
 
     use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch, WriteOptions, DB};
-    use timings::{BenchmarkImplementation, Timings};
+    use timings::{BenchmarkImplementation, LabeledTimings, Timings};
 
     use super::ITERS;
     use crate::ThreadedInsertsData;
@@ -371,14 +371,12 @@ mod rocksdb {
         }
 
         #[allow(clippy::unnecessary_to_owned)] // TODO submit PR against rocksdb to allow ?Sized
-        fn measure(&mut self, measurements: &Timings<String>) -> Result<(), ()> {
+        fn measure(&mut self, measurements: &LabeledTimings<String>) -> Result<(), ()> {
             let mut write_opts = WriteOptions::new();
             write_opts.set_sync(true);
             for batch in &self.config.data.ranges {
-                let measurement = measurements.begin(
-                    "rocksdb",
-                    format!("{}-threads-inserts", self.number_of_threads),
-                );
+                let measurement =
+                    measurements.begin(format!("{}-threads-inserts", self.number_of_threads));
                 let mut write_batch = WriteBatch::default();
 
                 for range in batch {
@@ -404,6 +402,10 @@ mod rocksdb {
                 std::fs::create_dir(path).unwrap();
             }
             Ok(())
+        }
+
+        fn label(_number_of_threads: usize, _config: &Arc<ThreadedInsertsData>) -> timings::Label {
+            "rocksdb".into()
         }
     }
 }

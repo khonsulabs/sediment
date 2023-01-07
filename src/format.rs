@@ -333,9 +333,9 @@ fn grain_id_strings() {
     let zero = GrainId(0);
     assert_eq!(zero.to_string(), "00-0");
     let none = GrainId::NONE;
-    assert_eq!(none.to_string(), "7fffffffffff-fffff");
+    assert_eq!(none.to_string(), "71ffffffffff-fffff");
     assert_eq!(
-        GrainId::from_str("7fffffffffff-fffff").unwrap(),
+        GrainId::from_str("71ffffffffff-fffff").unwrap(),
         GrainId::NONE
     );
     assert!(GrainId::from_str("72fffffffffff-fffff").is_err());

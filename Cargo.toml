@@ -10,7 +10,7 @@ categories = ["database"]
 readme = "./README.md"
 
 [dependencies]
-okaywal = "0.1.0"
+okaywal = "0.2.0"
 crc32c = "0.6.3"
 tinyvec = "1.6.0"
 thiserror = "1.0.38"
@@ -19,7 +19,7 @@ watchable = "1.1.0"
 
 # Comment out before checking into CI.
 [patch.crates-io]
-okaywal = { path = "../okaywal2" }
+# okaywal = { path = "../okaywal2" }
 # watchable = { path = "../watchable" }
 
 [workspace]
