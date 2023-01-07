@@ -370,7 +370,11 @@
 <span id="370">370</span>
 <span id="371">371</span>
 <span id="372">372</span>
-</pre><pre class="rust"><code><span class="kw">use </span>std::{
+<span id="373">373</span>
+<span id="374">374</span>
+</pre><pre class="rust"><code><span class="attribute">#![forbid(unsafe_code)]
+
+</span><span class="kw">use </span>std::{
     io::{<span class="self">self</span>},
     num::TryFromIntError,
     path::Path,
