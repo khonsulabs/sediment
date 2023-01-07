@@ -368,12 +368,12 @@
 };
 
 <span class="attribute">#[derive(Debug)]
-</span><span class="kw">pub struct </span>Manager {
+</span><span class="kw">pub struct </span>WalManager {
     db: Weak&lt;DatabaseData&gt;,
     scratch: Vec&lt;u8&gt;,
 }
 
-<span class="kw">impl </span>Manager {
+<span class="kw">impl </span>WalManager {
     <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>new(database: <span class="kw-2">&amp;</span>Arc&lt;DatabaseData&gt;) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             db: Arc::downgrade(database),
@@ -382,7 +382,7 @@
     }
 }
 
-<span class="kw">impl </span>LogManager <span class="kw">for </span>Manager {
+<span class="kw">impl </span>LogManager <span class="kw">for </span>WalManager {
     <span class="kw">fn </span>recover(<span class="kw-2">&amp;mut </span><span class="self">self</span>, entry: <span class="kw-2">&amp;mut </span>okaywal::Entry&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; io::Result&lt;()&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(database) = <span class="self">self</span>.db.upgrade() {
             <span class="kw">let </span><span class="kw-2">mut </span>written_grains = Vec::new();

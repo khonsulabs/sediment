@@ -434,7 +434,7 @@
 
         <span class="comment">// Recover any transactions from the write ahead log that haven&#39;t been
         // checkpointed to the store already.
-        </span><span class="kw">let </span>wal = config.wal.open(wal::Manager::new(<span class="kw-2">&amp;</span>data))<span class="question-mark">?</span>;
+        </span><span class="kw">let </span>wal = config.wal.open(wal::WalManager::new(<span class="kw-2">&amp;</span>data))<span class="question-mark">?</span>;
 
         <span class="comment">// The wal recovery process may have recovered sediment checkpoints that
         // are in the WAL but not yet in permanent storage. Refresh the metadata.
