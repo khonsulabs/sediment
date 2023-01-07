@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"sediment":[["impl&lt;W&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.66.0/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a> for <a class=\"struct\" href=\"sediment/format/struct.ChecksumWriter.html\" title=\"struct sediment::format::ChecksumWriter\">ChecksumWriter</a>&lt;W&gt;<span class=\"where fmt-newline\">where<br>&nbsp;&nbsp;&nbsp;&nbsp;W: <a class=\"trait\" href=\"https://doc.rust-lang.org/1.66.0/std/io/trait.Write.html\" title=\"trait std::io::Write\">Write</a>,</span>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

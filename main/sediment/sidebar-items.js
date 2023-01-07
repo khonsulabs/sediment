@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Error",""]],"mod":[["config",""],["format",""]],"struct":[["Database",""],["Transaction",""]],"type":[["Result",""]]};

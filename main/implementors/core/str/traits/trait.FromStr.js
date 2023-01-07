@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"sediment":[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.66.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"struct\" href=\"sediment/format/struct.GrainId.html\" title=\"struct sediment::format::GrainId\">GrainId</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.66.0/core/str/traits/trait.FromStr.html\" title=\"trait core::str::traits::FromStr\">FromStr</a> for <a class=\"struct\" href=\"sediment/format/struct.BasinAndStratum.html\" title=\"struct sediment::format::BasinAndStratum\">BasinAndStratum</a>"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
