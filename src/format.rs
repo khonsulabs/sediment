@@ -356,6 +356,18 @@ impl TransactionId {
     }
 }
 
+impl From<u64> for TransactionId {
+    fn from(id: u64) -> Self {
+        TransactionId(id)
+    }
+}
+
+impl From<TransactionId> for u64 {
+    fn from(id: TransactionId) -> Self {
+        id.0
+    }
+}
+
 impl From<EntryId> for TransactionId {
     fn from(id: EntryId) -> Self {
         Self(id.0)

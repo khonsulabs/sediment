@@ -97,13 +97,17 @@ fn sediment_checkpoint_thread(
             let mut current_commit_log = db.commit_log_head()?;
             let mut archived_grains = Vec::new();
             let mut commit_logs_to_archive = Vec::new();
-            while let Some(mut entry) = current_commit_log {
+            while let Some(entry) = current_commit_log {
                 if entry.transaction_id > current_tx_id
                     && entry.transaction_id <= transaction_to_checkpoint
                 {
-                    archived_grains.append(&mut entry.archived_grains);
+                    archived_grains.extend(entry.archived_grains.iter().copied());
                     commit_logs_to_archive.push(entry.grain_id);
+                } else if entry.transaction_id <= current_tx_id {
+                    // We can't go any further back.
+                    break;
                 }
+
                 current_commit_log = entry.next_entry(&db)?;
             }
 

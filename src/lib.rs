@@ -120,12 +120,12 @@ impl Database {
             .embedded_header_data)
     }
 
-    pub fn commit_log_head(&self) -> Result<Option<Stored<CommitLogEntry>>> {
+    pub fn commit_log_head(&self) -> Result<Option<Stored<Arc<CommitLogEntry>>>> {
         if let Some(entry_id) = self.data.atlas.current_index_metadata()?.commit_log_head {
-            if let Some(mut reader) = self.read(entry_id)? {
+            if let Some(entry) = self.read_commit_log_entry(entry_id)? {
                 return Ok(Some(Stored {
                     grain_id: entry_id,
-                    stored: CommitLogEntry::read_from(&mut reader)?,
+                    stored: entry,
                 }));
             }
         }

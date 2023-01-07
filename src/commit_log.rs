@@ -138,14 +138,13 @@ impl CommitLogEntry {
         })
     }
 
-    pub fn next_entry(&self, database: &Database) -> Result<Option<Stored<Self>>> {
+    pub fn next_entry(&self, database: &Database) -> Result<Option<Stored<Arc<Self>>>> {
         if self.transaction_id > database.checkpointed_to()? {
             if let Some(entry_id) = self.next_entry {
-                if let Some(reader) = database.read(entry_id)? {
-                    let data = reader.read_all_data()?;
+                if let Some(entry) = database.read_commit_log_entry(entry_id)? {
                     return Ok(Some(Stored {
                         grain_id: entry_id,
-                        stored: Self::read_from(&data[..])?,
+                        stored: entry,
                     }));
                 }
             }

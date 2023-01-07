@@ -225,12 +225,25 @@ impl Atlas {
         is_from_wal: bool,
     ) -> Result<()> {
         let mut data = self.data.lock()?;
+        let data = &mut *data; // This local deref helps avoid lifetime issues with borrows
         data.index = new_metadata;
         if is_from_wal {
             for (grain, log_position) in written_grains {
                 data.uncheckpointed_grains
                     .insert(grain, UncheckpointedGrain::InWal(log_position));
                 let basin = data.basins.get_or_default(grain.basin_id());
+
+                // We may be committing a grain to a new stratum.
+                while grain.stratum_id().as_usize() >= basin.strata.len() {
+                    let new_id =
+                        StratumId::new(basin.strata.len().try_into()?).expect("invalid statum id");
+                    basin.strata.push(Stratum::default_for(
+                        data.directory.join(
+                            BasinAndStratum::from_parts(grain.basin_id(), new_id).to_string(),
+                        ),
+                    ));
+                }
+
                 let stratum = &mut basin.strata[grain.stratum_id().as_usize()];
                 assert!(stratum.allocations.allocate_grain(grain.local_grain_id()));
                 stratum.known_grains.insert(grain.local_grain_index());
@@ -283,16 +296,6 @@ impl Atlas {
                 }
                 GrainAllocationStatus::Free => {
                     // The grains area already removed during the WAL phase.
-                    // let basin = data.basins[grain.basin_id()]
-                    //     .as_mut()
-                    //     .expect("basin missing");
-                    // let stratum = basin
-                    //     .strata
-                    //     .get_mut(grain.stratum_id().as_usize())
-                    //     .expect("stratum missing");
-
-                    // stratum.allocations.free_grain(grain.local_grain_id());
-                    // stratum.known_grains.remove(&grain.local_grain_index());
                 }
             }
         }
