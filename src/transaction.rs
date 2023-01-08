@@ -164,6 +164,10 @@ impl<'db> Transaction<'db> {
 
         let mut state = self.state.take().expect("state missing");
         state.metadata.commit_log_head = Some(new_commit_log_head);
+        // Because we end up caching the log_entry, we need it to match what's
+        // on disk. What we just stored did not contain the newly written commit
+        // log head grain. We need to remove it from the entry.
+        state.log_entry.new_grains.pop();
 
         // Write the transaction tail
         let mut entry = self.entry.take().expect("entry missing");
