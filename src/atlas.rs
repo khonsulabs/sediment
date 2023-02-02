@@ -126,7 +126,7 @@ impl Atlas {
         // example, storing a 80 byte value as 2 64 byte grains vs 3 32 byte
         // grains would waste 48 bytes in one case and waste 0 bytes in the
         // other.
-        let length_with_grain_info = length.checked_add(16).expect("grain too large"); // TODO error
+        let length_with_grain_info = length.checked_add(16).ok_or(Error::GrainTooLarge)?;
         let mut data = self.data.lock()?;
         // Accessing fields through MutexGuard's DerefMut causes issues with the
         // borrow checker extending the lifetime of the borrow across both

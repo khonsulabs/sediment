@@ -141,7 +141,6 @@ impl FreeLocations {
         for (index, info) in self.free_locations.iter_mut().enumerate() {
             let location_end = info.offset.as_u16() + info.length;
             if location_end >= start.as_u16() && info.offset.as_u16() <= end {
-                // TODO allocate from this chunk
                 if info.offset == start {
                     // Allocate from the start
                     info.offset = GrainIndex::new(end).expect("valid index");

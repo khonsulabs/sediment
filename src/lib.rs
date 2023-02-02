@@ -157,6 +157,10 @@ pub enum Error {
     ThreadJoin,
     #[error("crc32 checksum mismatch")]
     ChecksumFailed,
+    #[error("the value is too large to be stored in Sediment")]
+    GrainTooLarge,
+    #[error("an invalid grain id was encountered")]
+    InvalidGrainId,
     #[error("value too large for target: {0}")]
     ValueOutOfBounds(#[from] TryFromIntError),
     #[error("io error: {0}")]
@@ -190,28 +194,44 @@ fn basic() {
     }
 
     let db = Database::recover(path).unwrap();
+    assert!(db.embedded_header().unwrap().is_none());
     let mut tx = db.begin_transaction().unwrap();
     let grain = tx.write(b"hello, world").unwrap();
+    tx.set_embedded_header(Some(grain)).unwrap();
     assert!(db.read(grain).unwrap().is_none());
     let tx_id = tx.commit().unwrap();
+    assert_eq!(db.embedded_header().unwrap(), Some(grain));
 
-    let read_contents = db
-        .read(grain)
-        .unwrap()
-        .expect("grain not found")
-        .read_all_data()
-        .unwrap();
-    assert_eq!(read_contents, b"hello, world");
+    let verify = |db: &Database| {
+        let read_contents = db
+            .read(grain)
+            .unwrap()
+            .expect("grain not found")
+            .read_all_data()
+            .unwrap();
+        assert_eq!(read_contents, b"hello, world");
 
-    let commit = db.commit_log_head().unwrap().expect("commit log missing");
-    assert_eq!(commit.transaction_id, tx_id);
-    assert_eq!(commit.new_grains.len(), 1);
-    assert_eq!(commit.new_grains[0].id, grain);
-    assert!(commit.freed_grains.is_empty());
-    assert!(commit.archived_grains.is_empty());
-    assert!(commit.next_entry(&db).unwrap().is_none());
+        let commit = db.commit_log_head().unwrap().expect("commit log missing");
+        assert_eq!(commit.transaction_id, tx_id);
+        assert_eq!(commit.new_grains.len(), 1);
+        assert_eq!(commit.new_grains[0].id, grain);
+        assert_eq!(commit.embedded_header_data, Some(grain));
+        assert!(commit.freed_grains.is_empty());
+        assert!(commit.archived_grains.is_empty());
+        assert!(commit.next_entry(db).unwrap().is_none());
+    };
 
+    verify(&db);
+
+    // Close the database and reopen it. Since this has a default WAL
+    // configuration, this transaction will be recovered from the WAL, unlike a
+    // lot of the other unit tests.
     db.shutdown().unwrap();
+    let db = Database::recover(path).unwrap();
+
+    verify(&db);
+    db.shutdown().unwrap();
+
     std::fs::remove_dir_all(path).unwrap();
 }
 

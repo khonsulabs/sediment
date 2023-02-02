@@ -4,7 +4,7 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use crate::format::{ByteUtil, GrainId, Stored, TransactionId};
 use crate::util::{u32_to_usize, usize_to_u32};
-use crate::{Database, Result};
+use crate::{Database, Error, Result};
 
 #[derive(Debug)]
 pub struct CommitLogEntry {
@@ -102,7 +102,7 @@ impl CommitLogEntry {
         let mut new_grains = Vec::with_capacity(u32_to_usize(new_grain_count)?);
         for _ in 0..new_grain_count {
             reader.read_exact(&mut eight_bytes)?;
-            let id = GrainId::from_bytes(&eight_bytes).unwrap(); // TODO error
+            let id = GrainId::from_bytes(&eight_bytes).ok_or(Error::InvalidGrainId)?;
             reader.read_exact(&mut four_bytes)?;
             let crc32 = u32::from_be_bytes(four_bytes);
             new_grains.push(NewGrain { id, crc32 });
@@ -111,14 +111,14 @@ impl CommitLogEntry {
         let mut archived_grains = Vec::with_capacity(u32_to_usize(archived_grain_count)?);
         for _ in 0..archived_grain_count {
             reader.read_exact(&mut eight_bytes)?;
-            let id = GrainId::from_bytes(&eight_bytes).unwrap(); // TODO error
+            let id = GrainId::from_bytes(&eight_bytes).ok_or(Error::InvalidGrainId)?;
             archived_grains.push(id);
         }
 
         let mut freed_grains = Vec::with_capacity(u32_to_usize(freed_grain_count)?);
         for _ in 0..freed_grain_count {
             reader.read_exact(&mut eight_bytes)?;
-            let id = GrainId::from_bytes(&eight_bytes).unwrap(); // TODO error
+            let id = GrainId::from_bytes(&eight_bytes).ok_or(Error::InvalidGrainId)?;
             freed_grains.push(id);
         }
 

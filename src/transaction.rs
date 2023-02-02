@@ -105,6 +105,7 @@ impl<'db> Transaction<'db> {
             state = self.state.as_mut().expect("state missing");
         }
 
+        state.metadata.embedded_header_data = new_header;
         state.log_entry.embedded_header_data = new_header;
 
         Ok(())
