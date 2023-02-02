@@ -214,14 +214,6 @@ impl BasinId {
 pub struct BasinAndStratum(u64);
 
 impl BasinAndStratum {
-    pub const fn new(id: u64) -> Option<Self> {
-        if id < 2_u64.pow(45) {
-            Some(Self(id))
-        } else {
-            None
-        }
-    }
-
     pub const fn from_parts(basin: BasinId, stratum: StratumId) -> Self {
         Self((basin.0 as u64) << 41 | stratum.0)
     }
@@ -300,10 +292,6 @@ impl Display for GrainIndex {
 pub struct LocalGrainId(u64);
 
 impl LocalGrainId {
-    pub const fn new(id: u64) -> Self {
-        Self(id)
-    }
-
     pub const fn from_parts(index: GrainIndex, grain_count: u8) -> Option<Self> {
         if grain_count < 64 {
             Some(Self((index.0 as u64) << 6 | grain_count as u64))
@@ -647,10 +635,6 @@ impl Default for StratumHeader {
 pub struct GrainAllocationInfo(pub u8);
 
 impl GrainAllocationInfo {
-    pub const fn free() -> Self {
-        Self(0)
-    }
-
     pub const fn allocated(count: u8) -> Self {
         assert!(count < 64);
         Self((1 << 6) | count)

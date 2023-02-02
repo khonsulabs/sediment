@@ -78,44 +78,32 @@ impl Atlas {
                     return Ok(None);
                 }
 
-                let file_path = data.basins[grain.basin_id()].as_ref().and_then(|basin| {
-                    basin
-                        .strata
-                        .get(grain.stratum_id().as_usize())
-                        .map(|stratum| stratum.path.clone())
-                });
+                let file_path = data.basins[grain.basin_id()]
+                    .as_ref()
+                    .expect("grain validated")
+                    .strata
+                    .get(grain.stratum_id().as_usize())
+                    .expect("grain validated")
+                    .path
+                    .clone();
 
                 // Remove the lock before we do any file operations.
                 drop(data);
 
-                if let Some(file_path) = file_path {
-                    let mut file = OpenOptions::new().read(true).open(file_path.as_ref())?;
-                    // The grain data starts with the transaction id, followed
-                    // by the byte length.
-                    file.seek(std::io::SeekFrom::Start(grain.file_position() + 8))?;
-                    let mut file = BufReader::new(file);
-                    let mut length = [0; 4];
-                    file.read_exact(&mut length)?;
-                    let length = u32::from_be_bytes(length);
+                let mut file = OpenOptions::new().read(true).open(file_path.as_ref())?;
+                // The grain data starts with the transaction id, followed
+                // by the byte length.
+                file.seek(std::io::SeekFrom::Start(grain.file_position() + 8))?;
+                let mut file = BufReader::new(file);
+                let mut length = [0; 4];
+                file.read_exact(&mut length)?;
+                let length = u32::from_be_bytes(length);
 
-                    // We can perform a sanity check here to make sure this
-                    // *looks* like valid grain data: is the length smaller than
-                    // the total grain allocation?
-                    if length
-                        > grain.basin_id().grain_stripe_bytes() * u32::from(grain.grain_count())
-                    {
-                        // This was not a valid grain offset.
-                        return Ok(None);
-                    }
-
-                    return Ok(Some(GrainReader::InStratum(StratumGrainReader {
-                        file,
-                        length,
-                        bytes_remaining: length,
-                    })));
-                }
-
-                Ok(None)
+                return Ok(Some(GrainReader::InStratum(StratumGrainReader {
+                    file,
+                    length,
+                    bytes_remaining: length,
+                })));
             }
         }
     }

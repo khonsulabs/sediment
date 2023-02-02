@@ -30,12 +30,6 @@ impl<T> BasinMap<T> {
     }
 }
 
-impl<T> Default for BasinMap<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<T> Index<BasinId> for BasinMap<T> {
     type Output = Option<T>;
 

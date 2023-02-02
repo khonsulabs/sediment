@@ -197,6 +197,7 @@ fn basic() {
     assert!(db.embedded_header().unwrap().is_none());
     let mut tx = db.begin_transaction().unwrap();
     let grain = tx.write(b"hello, world").unwrap();
+    println!("Wrote {grain:?}");
     tx.set_embedded_header(Some(grain)).unwrap();
     assert!(db.read(grain).unwrap().is_none());
     let tx_id = tx.commit().unwrap();
