@@ -359,6 +359,7 @@
 <a href="#359" id="359">359</a>
 <a href="#360" id="360">360</a>
 <a href="#361" id="361">361</a>
+<a href="#362" id="362">362</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::VecDeque;
 <span class="kw">use </span>std::sync::{Arc, Condvar, Mutex};
 
@@ -466,6 +467,7 @@
             state = <span class="self">self</span>.state.as_mut().expect(<span class="string">&quot;state missing&quot;</span>);
         }
 
+        state.metadata.embedded_header_data = new_header;
         state.log_entry.embedded_header_data = new_header;
 
         <span class="prelude-val">Ok</span>(())

@@ -374,6 +374,26 @@
 <a href="#374" id="374">374</a>
 <a href="#375" id="375">375</a>
 <a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a>
+<a href="#396" id="396">396</a>
 </pre><pre class="rust"><code><span class="attr">#![forbid(unsafe_code)]
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>};
@@ -533,6 +553,10 @@
     </span>ThreadJoin,
     <span class="attr">#[error(<span class="string">&quot;crc32 checksum mismatch&quot;</span>)]
     </span>ChecksumFailed,
+    <span class="attr">#[error(<span class="string">&quot;the value is too large to be stored in Sediment&quot;</span>)]
+    </span>GrainTooLarge,
+    <span class="attr">#[error(<span class="string">&quot;an invalid grain id was encountered&quot;</span>)]
+    </span>InvalidGrainId,
     <span class="attr">#[error(<span class="string">&quot;value too large for target: {0}&quot;</span>)]
     </span>ValueOutOfBounds(<span class="attr">#[from] </span>TryFromIntError),
     <span class="attr">#[error(<span class="string">&quot;io error: {0}&quot;</span>)]
@@ -566,28 +590,44 @@
     }
 
     <span class="kw">let </span>db = Database::recover(path).unwrap();
+    <span class="macro">assert!</span>(db.embedded_header().unwrap().is_none());
     <span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction().unwrap();
     <span class="kw">let </span>grain = tx.write(<span class="string">b&quot;hello, world&quot;</span>).unwrap();
+    tx.set_embedded_header(<span class="prelude-val">Some</span>(grain)).unwrap();
     <span class="macro">assert!</span>(db.read(grain).unwrap().is_none());
     <span class="kw">let </span>tx_id = tx.commit().unwrap();
+    <span class="macro">assert_eq!</span>(db.embedded_header().unwrap(), <span class="prelude-val">Some</span>(grain));
 
-    <span class="kw">let </span>read_contents = db
-        .read(grain)
-        .unwrap()
-        .expect(<span class="string">&quot;grain not found&quot;</span>)
-        .read_all_data()
-        .unwrap();
-    <span class="macro">assert_eq!</span>(read_contents, <span class="string">b&quot;hello, world&quot;</span>);
+    <span class="kw">let </span>verify = |db: <span class="kw-2">&amp;</span>Database| {
+        <span class="kw">let </span>read_contents = db
+            .read(grain)
+            .unwrap()
+            .expect(<span class="string">&quot;grain not found&quot;</span>)
+            .read_all_data()
+            .unwrap();
+        <span class="macro">assert_eq!</span>(read_contents, <span class="string">b&quot;hello, world&quot;</span>);
 
-    <span class="kw">let </span>commit = db.commit_log_head().unwrap().expect(<span class="string">&quot;commit log missing&quot;</span>);
-    <span class="macro">assert_eq!</span>(commit.transaction_id, tx_id);
-    <span class="macro">assert_eq!</span>(commit.new_grains.len(), <span class="number">1</span>);
-    <span class="macro">assert_eq!</span>(commit.new_grains[<span class="number">0</span>].id, grain);
-    <span class="macro">assert!</span>(commit.freed_grains.is_empty());
-    <span class="macro">assert!</span>(commit.archived_grains.is_empty());
-    <span class="macro">assert!</span>(commit.next_entry(<span class="kw-2">&amp;</span>db).unwrap().is_none());
+        <span class="kw">let </span>commit = db.commit_log_head().unwrap().expect(<span class="string">&quot;commit log missing&quot;</span>);
+        <span class="macro">assert_eq!</span>(commit.transaction_id, tx_id);
+        <span class="macro">assert_eq!</span>(commit.new_grains.len(), <span class="number">1</span>);
+        <span class="macro">assert_eq!</span>(commit.new_grains[<span class="number">0</span>].id, grain);
+        <span class="macro">assert_eq!</span>(commit.embedded_header_data, <span class="prelude-val">Some</span>(grain));
+        <span class="macro">assert!</span>(commit.freed_grains.is_empty());
+        <span class="macro">assert!</span>(commit.archived_grains.is_empty());
+        <span class="macro">assert!</span>(commit.next_entry(db).unwrap().is_none());
+    };
 
+    verify(<span class="kw-2">&amp;</span>db);
+
+    <span class="comment">// Close the database and reopen it. Since this has a default WAL
+    // configuration, this transaction will be recovered from the WAL, unlike a
+    // lot of the other unit tests.
+    </span>db.shutdown().unwrap();
+    <span class="kw">let </span>db = Database::recover(path).unwrap();
+
+    verify(<span class="kw-2">&amp;</span>db);
     db.shutdown().unwrap();
+
     std::fs::remove_dir_all(path).unwrap();
 }
 

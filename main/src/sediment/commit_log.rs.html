@@ -245,7 +245,7 @@
 
 <span class="kw">use </span><span class="kw">crate</span>::format::{ByteUtil, GrainId, Stored, TransactionId};
 <span class="kw">use </span><span class="kw">crate</span>::util::{u32_to_usize, usize_to_u32};
-<span class="kw">use crate</span>::{Database, <span class="prelude-ty">Result</span>};
+<span class="kw">use crate</span>::{Database, Error, <span class="prelude-ty">Result</span>};
 
 <span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>CommitLogEntry {
@@ -343,8 +343,8 @@
         <span class="kw">let </span><span class="kw-2">mut </span>new_grains = Vec::with_capacity(u32_to_usize(new_grain_count)<span class="question-mark">?</span>);
         <span class="kw">for _ in </span><span class="number">0</span>..new_grain_count {
             reader.read_exact(<span class="kw-2">&amp;mut </span>eight_bytes)<span class="question-mark">?</span>;
-            <span class="kw">let </span>id = GrainId::from_bytes(<span class="kw-2">&amp;</span>eight_bytes).unwrap(); <span class="comment">// TODO error
-            </span>reader.read_exact(<span class="kw-2">&amp;mut </span>four_bytes)<span class="question-mark">?</span>;
+            <span class="kw">let </span>id = GrainId::from_bytes(<span class="kw-2">&amp;</span>eight_bytes).ok_or(Error::InvalidGrainId)<span class="question-mark">?</span>;
+            reader.read_exact(<span class="kw-2">&amp;mut </span>four_bytes)<span class="question-mark">?</span>;
             <span class="kw">let </span>crc32 = u32::from_be_bytes(four_bytes);
             new_grains.push(NewGrain { id, crc32 });
         }
@@ -352,15 +352,15 @@
         <span class="kw">let </span><span class="kw-2">mut </span>archived_grains = Vec::with_capacity(u32_to_usize(archived_grain_count)<span class="question-mark">?</span>);
         <span class="kw">for _ in </span><span class="number">0</span>..archived_grain_count {
             reader.read_exact(<span class="kw-2">&amp;mut </span>eight_bytes)<span class="question-mark">?</span>;
-            <span class="kw">let </span>id = GrainId::from_bytes(<span class="kw-2">&amp;</span>eight_bytes).unwrap(); <span class="comment">// TODO error
-            </span>archived_grains.push(id);
+            <span class="kw">let </span>id = GrainId::from_bytes(<span class="kw-2">&amp;</span>eight_bytes).ok_or(Error::InvalidGrainId)<span class="question-mark">?</span>;
+            archived_grains.push(id);
         }
 
         <span class="kw">let </span><span class="kw-2">mut </span>freed_grains = Vec::with_capacity(u32_to_usize(freed_grain_count)<span class="question-mark">?</span>);
         <span class="kw">for _ in </span><span class="number">0</span>..freed_grain_count {
             reader.read_exact(<span class="kw-2">&amp;mut </span>eight_bytes)<span class="question-mark">?</span>;
-            <span class="kw">let </span>id = GrainId::from_bytes(<span class="kw-2">&amp;</span>eight_bytes).unwrap(); <span class="comment">// TODO error
-            </span>freed_grains.push(id);
+            <span class="kw">let </span>id = GrainId::from_bytes(<span class="kw-2">&amp;</span>eight_bytes).ok_or(Error::InvalidGrainId)<span class="question-mark">?</span>;
+            freed_grains.push(id);
         }
 
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{

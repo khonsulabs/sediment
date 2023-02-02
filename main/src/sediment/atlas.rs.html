@@ -686,8 +686,8 @@
         // example, storing a 80 byte value as 2 64 byte grains vs 3 32 byte
         // grains would waste 48 bytes in one case and waste 0 bytes in the
         // other.
-        </span><span class="kw">let </span>length_with_grain_info = length.checked_add(<span class="number">16</span>).expect(<span class="string">&quot;grain too large&quot;</span>); <span class="comment">// TODO error
-        </span><span class="kw">let </span><span class="kw-2">mut </span>data = <span class="self">self</span>.data.lock()<span class="question-mark">?</span>;
+        </span><span class="kw">let </span>length_with_grain_info = length.checked_add(<span class="number">16</span>).ok_or(Error::GrainTooLarge)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>data = <span class="self">self</span>.data.lock()<span class="question-mark">?</span>;
         <span class="comment">// Accessing fields through MutexGuard&#39;s DerefMut causes issues with the
         // borrow checker extending the lifetime of the borrow across both
         // basins and uncheckpointed_grains. So, we perform the DerefMut to get

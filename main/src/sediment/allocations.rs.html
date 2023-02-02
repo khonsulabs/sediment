@@ -328,7 +328,6 @@
 <a href="#328" id="328">328</a>
 <a href="#329" id="329">329</a>
 <a href="#330" id="330">330</a>
-<a href="#331" id="331">331</a>
 </pre><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::format::{
     GrainAllocationInfo, GrainAllocationStatus, GrainIndex, LocalGrainId, StratumHeader,
 };
@@ -472,8 +471,7 @@
         <span class="kw">for </span>(index, info) <span class="kw">in </span><span class="self">self</span>.free_locations.iter_mut().enumerate() {
             <span class="kw">let </span>location_end = info.offset.as_u16() + info.length;
             <span class="kw">if </span>location_end &gt;= start.as_u16() &amp;&amp; info.offset.as_u16() &lt;= end {
-                <span class="comment">// TODO allocate from this chunk
-                </span><span class="kw">if </span>info.offset == start {
+                <span class="kw">if </span>info.offset == start {
                     <span class="comment">// Allocate from the start
                     </span>info.offset = GrainIndex::new(end).expect(<span class="string">&quot;valid index&quot;</span>);
                     info.length -= count;
