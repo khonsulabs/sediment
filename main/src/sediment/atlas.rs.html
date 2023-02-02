@@ -546,18 +546,6 @@
 <a href="#546" id="546">546</a>
 <a href="#547" id="547">547</a>
 <a href="#548" id="548">548</a>
-<a href="#549" id="549">549</a>
-<a href="#550" id="550">550</a>
-<a href="#551" id="551">551</a>
-<a href="#552" id="552">552</a>
-<a href="#553" id="553">553</a>
-<a href="#554" id="554">554</a>
-<a href="#555" id="555">555</a>
-<a href="#556" id="556">556</a>
-<a href="#557" id="557">557</a>
-<a href="#558" id="558">558</a>
-<a href="#559" id="559">559</a>
-<a href="#560" id="560">560</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::{HashMap, HashSet, VecDeque};
 <span class="kw">use </span>std::fs::{File, OpenOptions};
 <span class="kw">use </span>std::io::{BufReader, Read, Seek};
@@ -638,44 +626,32 @@
                     <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
                 }
 
-                <span class="kw">let </span>file_path = data.basins[grain.basin_id()].as_ref().and_then(|basin| {
-                    basin
-                        .strata
-                        .get(grain.stratum_id().as_usize())
-                        .map(|stratum| stratum.path.clone())
-                });
+                <span class="kw">let </span>file_path = data.basins[grain.basin_id()]
+                    .as_ref()
+                    .expect(<span class="string">&quot;grain validated&quot;</span>)
+                    .strata
+                    .get(grain.stratum_id().as_usize())
+                    .expect(<span class="string">&quot;grain validated&quot;</span>)
+                    .path
+                    .clone();
 
                 <span class="comment">// Remove the lock before we do any file operations.
                 </span>drop(data);
 
-                <span class="kw">if let </span><span class="prelude-val">Some</span>(file_path) = file_path {
-                    <span class="kw">let </span><span class="kw-2">mut </span>file = OpenOptions::new().read(<span class="bool-val">true</span>).open(file_path.as_ref())<span class="question-mark">?</span>;
-                    <span class="comment">// The grain data starts with the transaction id, followed
-                    // by the byte length.
-                    </span>file.seek(std::io::SeekFrom::Start(grain.file_position() + <span class="number">8</span>))<span class="question-mark">?</span>;
-                    <span class="kw">let </span><span class="kw-2">mut </span>file = BufReader::new(file);
-                    <span class="kw">let </span><span class="kw-2">mut </span>length = [<span class="number">0</span>; <span class="number">4</span>];
-                    file.read_exact(<span class="kw-2">&amp;mut </span>length)<span class="question-mark">?</span>;
-                    <span class="kw">let </span>length = u32::from_be_bytes(length);
+                <span class="kw">let </span><span class="kw-2">mut </span>file = OpenOptions::new().read(<span class="bool-val">true</span>).open(file_path.as_ref())<span class="question-mark">?</span>;
+                <span class="comment">// The grain data starts with the transaction id, followed
+                // by the byte length.
+                </span>file.seek(std::io::SeekFrom::Start(grain.file_position() + <span class="number">8</span>))<span class="question-mark">?</span>;
+                <span class="kw">let </span><span class="kw-2">mut </span>file = BufReader::new(file);
+                <span class="kw">let </span><span class="kw-2">mut </span>length = [<span class="number">0</span>; <span class="number">4</span>];
+                file.read_exact(<span class="kw-2">&amp;mut </span>length)<span class="question-mark">?</span>;
+                <span class="kw">let </span>length = u32::from_be_bytes(length);
 
-                    <span class="comment">// We can perform a sanity check here to make sure this
-                    // *looks* like valid grain data: is the length smaller than
-                    // the total grain allocation?
-                    </span><span class="kw">if </span>length
-                        &gt; grain.basin_id().grain_stripe_bytes() * u32::from(grain.grain_count())
-                    {
-                        <span class="comment">// This was not a valid grain offset.
-                        </span><span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>);
-                    }
-
-                    <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(GrainReader::InStratum(StratumGrainReader {
-                        file,
-                        length,
-                        bytes_remaining: length,
-                    })));
-                }
-
-                <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(GrainReader::InStratum(StratumGrainReader {
+                    file,
+                    length,
+                    bytes_remaining: length,
+                })));
             }
         }
     }

@@ -80,12 +80,6 @@
 <a href="#80" id="80">80</a>
 <a href="#81" id="81">81</a>
 <a href="#82" id="82">82</a>
-<a href="#83" id="83">83</a>
-<a href="#84" id="84">84</a>
-<a href="#85" id="85">85</a>
-<a href="#86" id="86">86</a>
-<a href="#87" id="87">87</a>
-<a href="#88" id="88">88</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::ops::{Index, IndexMut};
 
 <span class="kw">use </span><span class="kw">crate</span>::format::BasinId;
@@ -115,12 +109,6 @@
         </span>T: Default,
     {
         <span class="self">self</span>.get_or_insert_with(index, T::default)
-    }
-}
-
-<span class="kw">impl</span>&lt;T&gt; Default <span class="kw">for </span>BasinMap&lt;T&gt; {
-    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-        <span class="self">Self</span>::new()
     }
 }
 

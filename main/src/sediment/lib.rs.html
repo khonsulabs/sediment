@@ -394,6 +394,7 @@
 <a href="#394" id="394">394</a>
 <a href="#395" id="395">395</a>
 <a href="#396" id="396">396</a>
+<a href="#397" id="397">397</a>
 </pre><pre class="rust"><code><span class="attr">#![forbid(unsafe_code)]
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>};
@@ -593,6 +594,7 @@
     <span class="macro">assert!</span>(db.embedded_header().unwrap().is_none());
     <span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction().unwrap();
     <span class="kw">let </span>grain = tx.write(<span class="string">b&quot;hello, world&quot;</span>).unwrap();
+    <span class="macro">println!</span>(<span class="string">&quot;Wrote {grain:?}&quot;</span>);
     tx.set_embedded_header(<span class="prelude-val">Some</span>(grain)).unwrap();
     <span class="macro">assert!</span>(db.read(grain).unwrap().is_none());
     <span class="kw">let </span>tx_id = tx.commit().unwrap();
