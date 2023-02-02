@@ -14,8 +14,8 @@
         <div class="level-item has-text-centered">
         <div>
             <p class="heading">Lines</p>
-            <p class="title has-text-warning">
-                <abbr title="204 / 234">87.18 %</abbr></p>
+            <p class="title has-text-success">
+                <abbr title="225 / 249">90.36 %</abbr></p>
         </div>
     </div>
 
@@ -23,7 +23,7 @@
         <div>
             <p class="heading">Functions</p>
             <p class="title has-text-danger">
-                <abbr title="33 / 68">48.53 %</abbr></p>
+                <abbr title="35 / 69">50.72 %</abbr></p>
         </div>
     </div>
 
@@ -538,7 +538,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6
+                7
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn recover&lt;AsRefPath: AsRef&lt;Path&gt;&gt;(directory: AsRefPath) -&gt; Result&lt;Self&gt; {</pre>
@@ -551,7 +551,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6
+                7
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Config::for_directory(directory).recover()</pre>
@@ -564,7 +564,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6
+                7
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -590,7 +590,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    fn recover_config(config: Config) -&gt; Result&lt;Self&gt; {</pre>
@@ -629,7 +629,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let store = Store::recover(config.wal.directory.as_ref())?;</pre>
@@ -642,7 +642,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let atlas = Atlas::new(&amp;store);</pre>
@@ -655,7 +655,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let current_metadata = atlas.current_index_metadata()?;</pre>
@@ -668,7 +668,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let (checkpointer, cp_spawner) = Checkpointer::new(current_metadata.checkpointed_to);</pre>
@@ -681,7 +681,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let data = Arc::new(Data {</pre>
@@ -694,7 +694,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            store,</pre>
@@ -707,7 +707,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            atlas,</pre>
@@ -720,7 +720,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            tx_lock: TransactionLock::new(current_metadata),</pre>
@@ -733,7 +733,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            checkpointer,</pre>
@@ -746,7 +746,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            commit_logs: CommitLogs::default(),</pre>
@@ -759,7 +759,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        });</pre>
@@ -811,7 +811,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let wal = config.wal.open(wal::WalManager::new(&amp;data))?;</pre>
@@ -863,7 +863,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let current_metadata = data.atlas.current_index_metadata()?;</pre>
@@ -876,7 +876,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        cp_spawner.spawn(current_metadata.checkpointed_to, &amp;data, &amp;wal)?;</pre>
@@ -889,7 +889,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        if current_metadata.checkpoint_target &gt; current_metadata.checkpointed_to {</pre>
@@ -902,7 +902,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6
+                8
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            data.checkpointer</pre>
@@ -915,7 +915,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6
+                8
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                .checkpoint_to(current_metadata.checkpoint_target);</pre>
@@ -928,7 +928,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                24
+                23
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        }</pre>
@@ -954,7 +954,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Ok(Self { data, wal })</pre>
@@ -967,7 +967,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -993,7 +993,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3060
+                3062
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn begin_transaction(&amp;self) -&gt; Result&lt;Transaction&lt;&#x27;_&gt;&gt; {</pre>
@@ -1006,7 +1006,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3060
+                3062
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let tx_guard = self.data.tx_lock.lock();</pre>
@@ -1019,7 +1019,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3060
+                3062
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        let wal_entry = self.wal.begin_entry()?;</pre>
@@ -1045,7 +1045,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3060
+                3062
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Transaction::new(self, wal_entry, tx_guard)</pre>
@@ -1058,7 +1058,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3060
+                3062
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1084,7 +1084,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                134
+                143
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn read(&amp;self, grain: GrainId) -&gt; Result&lt;Option&lt;GrainReader&gt;&gt; {</pre>
@@ -1097,7 +1097,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                134
+                143
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        self.data.atlas.find(grain, &amp;self.wal)</pre>
@@ -1110,7 +1110,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                134
+                143
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1136,7 +1136,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6775
+                6621
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn read_commit_log_entry(&amp;self, grain: GrainId) -&gt; Result&lt;Option&lt;Arc&lt;CommitLogEntry&gt;&gt;&gt; {</pre>
@@ -1149,7 +1149,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6775
+                6621
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        self.data.commit_logs.get_or_lookup(grain, self)</pre>
@@ -1162,7 +1162,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6775
+                6621
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1227,7 +1227,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        self.data.checkpointer.shutdown()?;</pre>
@@ -1266,7 +1266,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        self.wal.shutdown()?;</pre>
@@ -1305,7 +1305,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        self.data.store.syncer.shutdown()?;</pre>
@@ -1331,7 +1331,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Ok(())</pre>
@@ -1344,7 +1344,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                30
+                31
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1422,7 +1422,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6741
+                6585
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn checkpointed_to(&amp;self) -&gt; Result&lt;TransactionId&gt; {</pre>
@@ -1435,7 +1435,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6741
+                6585
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        Ok(self.data.atlas.current_index_metadata()?.checkpointed_to)</pre>
@@ -1448,7 +1448,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                6741
+                6585
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -1473,11 +1473,11 @@
                 <a href="#111">111</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">    pub fn embedded_header(&amp;self) -&gt; Result&lt;Option&lt;GrainId&gt;&gt; {</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    pub fn embedded_header(&amp;self) -&gt; Result&lt;Option&lt;GrainId&gt;&gt; {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -1486,11 +1486,11 @@
                 <a href="#112">112</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        Ok(self</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        Ok(self</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -1499,11 +1499,11 @@
                 <a href="#113">113</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">            .data</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .data</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -1512,11 +1512,11 @@
                 <a href="#114">114</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">            .atlas</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .atlas</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -1525,11 +1525,11 @@
                 <a href="#115">115</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">            .current_index_metadata()?</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .current_index_metadata()?</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -1551,11 +1551,11 @@
                 <a href="#117">117</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">    }</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -1578,7 +1578,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    pub fn commit_log_head(&amp;self) -&gt; Result&lt;Option&lt;Stored&lt;Arc&lt;CommitLogEntry&gt;&gt;&gt;&gt; {</pre>
@@ -1591,7 +1591,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">        if let Some(entry_id) = self.data.atlas.current_index_metadata()?.commit_log_head {</pre>
@@ -1604,7 +1604,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">            if let Some(entry) = self.read_commit_log_entry(entry_id)? {</pre>
@@ -1617,7 +1617,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                return Ok(Some(Stored {</pre>
@@ -1630,7 +1630,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                    grain_id: entry_id,</pre>
@@ -1643,7 +1643,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                    stored: entry,</pre>
@@ -1656,7 +1656,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">                }));</pre>
@@ -1721,7 +1721,7 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                40
+                43
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">    }</pre>
@@ -2114,7 +2114,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    #[error(&quot;value too large for target: {0}&quot;)]</pre>
+                <pre class="has-background-white py-0 px-2">    #[error(&quot;the value is too large to be stored in Sediment&quot;)]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2127,7 +2127,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    ValueOutOfBounds(#[from] TryFromIntError),</pre>
+                <pre class="has-background-white py-0 px-2">    GrainTooLarge,</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2140,7 +2140,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    #[error(&quot;io error: {0}&quot;)]</pre>
+                <pre class="has-background-white py-0 px-2">    #[error(&quot;an invalid grain id was encountered&quot;)]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2153,7 +2153,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    Io(#[from] io::Error),</pre>
+                <pre class="has-background-white py-0 px-2">    InvalidGrainId,</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2166,7 +2166,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    #[error(&quot;the service has shut down&quot;)]</pre>
+                <pre class="has-background-white py-0 px-2">    #[error(&quot;value too large for target: {0}&quot;)]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2179,7 +2179,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    Shutdown,</pre>
+                <pre class="has-background-white py-0 px-2">    ValueOutOfBounds(#[from] TryFromIntError),</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2192,7 +2192,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">}</pre>
+                <pre class="has-background-white py-0 px-2">    #[error(&quot;io error: {0}&quot;)]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2205,7 +2205,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+                <pre class="has-background-white py-0 px-2">    Io(#[from] io::Error),</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2218,7 +2218,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">pub type Result&lt;T, E = Error&gt; = std::result::Result&lt;T, E&gt;;</pre>
+                <pre class="has-background-white py-0 px-2">    #[error(&quot;the service has shut down&quot;)]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2231,7 +2231,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+                <pre class="has-background-white py-0 px-2">    Shutdown,</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2244,7 +2244,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">impl From&lt;Error&gt; for io::Error {</pre>
+                <pre class="has-background-white py-0 px-2">}</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2253,11 +2253,11 @@
                 <a href="#171">171</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">    fn from(err: Error) -&gt; Self {</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2266,11 +2266,11 @@
                 <a href="#172">172</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        match err {</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">pub type Result&lt;T, E = Error&gt; = std::result::Result&lt;T, E&gt;;</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2279,11 +2279,11 @@
                 <a href="#173">173</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">            Error::Io(err) =&gt; err,</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2292,11 +2292,11 @@
                 <a href="#174">174</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">            other =&gt; io::Error::new(io::ErrorKind::Other, other),</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">impl From&lt;Error&gt; for io::Error {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2305,11 +2305,11 @@
                 <a href="#175">175</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
                 
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">        }</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    fn from(err: Error) -&gt; Self {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2322,7 +2322,7 @@
                 
             </div>
             <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">    }</pre>
+                <pre class="has-background-danger-light py-0 px-2">        match err {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2331,11 +2331,11 @@
                 <a href="#177">177</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
                 
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">}</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">            Error::Io(err) =&gt; err,</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2344,11 +2344,11 @@
                 <a href="#178">178</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
                 
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">            other =&gt; io::Error::new(io::ErrorKind::Other, other),</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2361,7 +2361,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">impl&lt;T&gt; From&lt;PoisonError&lt;T&gt;&gt; for Error {</pre>
+                <pre class="has-background-white py-0 px-2">        }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2374,7 +2374,7 @@
                 
             </div>
             <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">    fn from(_: PoisonError&lt;T&gt;) -&gt; Self {</pre>
+                <pre class="has-background-danger-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2383,11 +2383,11 @@
                 <a href="#181">181</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        Self::LockPoisoned</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">}</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2396,11 +2396,11 @@
                 <a href="#182">182</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">    }</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2413,13 +2413,65 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">}</pre>
+                <pre class="has-background-white py-0 px-2">impl&lt;T&gt; From&lt;PoisonError&lt;T&gt;&gt; for Error {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
                 id="184">
                 <a href="#184">184</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
+            </div>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    fn from(_: PoisonError&lt;T&gt;) -&gt; Self {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="185">
+                <a href="#185">185</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
+            </div>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        Self::LockPoisoned</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="186">
+                <a href="#186">186</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
+            </div>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">    }</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="187">
+                <a href="#187">187</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">}</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="188">
+                <a href="#188">188</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -2431,8 +2483,8 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
-                id="185">
-                <a href="#185">185</a>
+                id="189">
+                <a href="#189">189</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
@@ -2440,58 +2492,6 @@
             </div>
             <div class="column has-background-success-light p-0">
                 <pre class="has-background-success-light py-0 px-2">#[test]</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="186">
-                <a href="#186">186</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">fn basic() {</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="187">
-                <a href="#187">187</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;test&quot;);</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="188">
-                <a href="#188">188</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="189">
-                <a href="#189">189</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
-            </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2504,7 +2504,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    }</pre>
+                <pre class="has-background-success-light py-0 px-2">fn basic() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2513,11 +2513,11 @@
                 <a href="#191">191</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;test&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2530,7 +2530,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let db = Database::recover(path).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2539,11 +2539,11 @@
                 <a href="#193">193</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut tx = db.begin_transaction().unwrap();</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2556,7 +2556,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let grain = tx.write(b&quot;hello, world&quot;).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2565,11 +2565,11 @@
                 <a href="#195">195</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert!(db.read(grain).unwrap().is_none());</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2582,7 +2582,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let tx_id = tx.commit().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    let db = Database::recover(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2595,7 +2595,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2"></pre>
+                <pre class="has-background-success-light py-0 px-2">    assert!(db.embedded_header().unwrap().is_none());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2608,7 +2608,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let read_contents = db</pre>
+                <pre class="has-background-success-light py-0 px-2">    let mut tx = db.begin_transaction().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2621,7 +2621,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .read(grain)</pre>
+                <pre class="has-background-success-light py-0 px-2">    let grain = tx.write(b&quot;hello, world&quot;).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2634,7 +2634,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap()</pre>
+                <pre class="has-background-success-light py-0 px-2">    tx.set_embedded_header(Some(grain)).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2647,7 +2647,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .expect(&quot;grain not found&quot;)</pre>
+                <pre class="has-background-success-light py-0 px-2">    assert!(db.read(grain).unwrap().is_none());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2660,7 +2660,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .read_all_data()</pre>
+                <pre class="has-background-success-light py-0 px-2">    let tx_id = tx.commit().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2673,26 +2673,13 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    assert_eq!(db.embedded_header().unwrap(), Some(grain));</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
                 id="204">
                 <a href="#204">204</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert_eq!(read_contents, b&quot;hello, world&quot;);</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="205">
-                <a href="#205">205</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -2704,15 +2691,28 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
+                id="205">
+                <a href="#205">205</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let verify = |db: &amp;Database| {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
                 id="206">
                 <a href="#206">206</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let commit = db.commit_log_head().unwrap().expect(&quot;commit log missing&quot;);</pre>
+                <pre class="has-background-success-light py-0 px-2">        let read_contents = db</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2722,10 +2722,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert_eq!(commit.transaction_id, tx_id);</pre>
+                <pre class="has-background-success-light py-0 px-2">            .read(grain)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2735,10 +2735,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert_eq!(commit.new_grains.len(), 1);</pre>
+                <pre class="has-background-success-light py-0 px-2">            .unwrap()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2748,10 +2748,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert_eq!(commit.new_grains[0].id, grain);</pre>
+                <pre class="has-background-success-light py-0 px-2">            .expect(&quot;grain not found&quot;)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2761,10 +2761,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert!(commit.freed_grains.is_empty());</pre>
+                <pre class="has-background-success-light py-0 px-2">            .read_all_data()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2774,10 +2774,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert!(commit.archived_grains.is_empty());</pre>
+                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2787,10 +2787,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert!(commit.next_entry(&amp;db).unwrap().is_none());</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(read_contents, b&quot;hello, world&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2813,10 +2813,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        let commit = db.commit_log_head().unwrap().expect(&quot;commit log missing&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2826,10 +2826,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    std::fs::remove_dir_all(path).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(commit.transaction_id, tx_id);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2839,10 +2839,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">}</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(commit.new_grains.len(), 1);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2851,11 +2851,11 @@
                 <a href="#217">217</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(commit.new_grains[0].id, grain);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2865,10 +2865,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">#[test]</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(commit.embedded_header_data, Some(grain));</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2878,10 +2878,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">fn wal_checkpoint() {</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert!(commit.freed_grains.is_empty());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2891,10 +2891,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;.test-checkpoint&quot;);</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert!(commit.archived_grains.is_empty());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2904,10 +2904,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                2
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert!(commit.next_entry(db).unwrap().is_none());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2916,30 +2916,17 @@
                 <a href="#222">222</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    };</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
                 id="223">
                 <a href="#223">223</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    }</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="224">
-                <a href="#224">224</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -2951,15 +2938,28 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
+                id="224">
+                <a href="#224">224</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    verify(&amp;db);</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
                 id="225">
                 <a href="#225">225</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2972,7 +2972,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
+                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; Close the database and reopen it. Since this has a default WAL</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2985,7 +2985,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; configuration, this transaction will be recovered from the WAL, unlike a</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -2998,7 +2998,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
+                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; lot of the other unit tests.</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3011,7 +3011,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3024,7 +3024,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut tx = db.begin_transaction().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    let db = Database::recover(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3037,7 +3037,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let grain = tx.write(b&quot;hello, world&quot;).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3050,7 +3050,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert!(db.read(grain).unwrap().is_none());</pre>
+                <pre class="has-background-success-light py-0 px-2">    verify(&amp;db);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3063,7 +3063,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    tx.commit().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3076,7 +3076,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3089,7 +3089,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2"></pre>
+                <pre class="has-background-success-light py-0 px-2">    std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3102,7 +3102,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
+                <pre class="has-background-success-light py-0 px-2">}</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3111,11 +3111,11 @@
                 <a href="#237">237</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3128,7 +3128,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
+                <pre class="has-background-success-light py-0 px-2">#[test]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3141,7 +3141,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">fn wal_checkpoint() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3154,7 +3154,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let contents = db</pre>
+                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;.test-checkpoint&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3167,7 +3167,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .read(grain)</pre>
+                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3176,11 +3176,11 @@
                 <a href="#242">242</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap()</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3193,7 +3193,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .expect(&quot;grain not found&quot;)</pre>
+                <pre class="has-background-success-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3202,11 +3202,11 @@
                 <a href="#244">244</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .read_all_data()</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3215,11 +3215,11 @@
                 <a href="#245">245</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3232,7 +3232,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    assert_eq!(contents, b&quot;hello, world&quot;);</pre>
+                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3241,11 +3241,11 @@
                 <a href="#247">247</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3258,7 +3258,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3271,7 +3271,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2"></pre>
+                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3284,7 +3284,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    std::fs::remove_dir_all(path).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    let mut tx = db.begin_transaction().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3297,7 +3297,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">}</pre>
+                <pre class="has-background-success-light py-0 px-2">    let grain = tx.write(b&quot;hello, world&quot;).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3306,11 +3306,11 @@
                 <a href="#252">252</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    assert!(db.read(grain).unwrap().is_none());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3323,7 +3323,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">#[test]</pre>
+                <pre class="has-background-success-light py-0 px-2">    tx.commit().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3336,7 +3336,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">fn wal_checkpoint_loop() {</pre>
+                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3349,7 +3349,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;.test-checkpoint-loop&quot;);</pre>
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3362,7 +3362,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
+                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3371,11 +3371,11 @@
                 <a href="#257">257</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3388,7 +3388,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    }</pre>
+                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3397,11 +3397,11 @@
                 <a href="#259">259</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3410,11 +3410,11 @@
                 <a href="#260">260</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let contents = db</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3427,7 +3427,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut grains_written = Vec::new();</pre>
+                <pre class="has-background-success-light py-0 px-2">        .read(grain)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3437,10 +3437,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                11
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    for i in 0_usize..10 {</pre>
+                <pre class="has-background-success-light py-0 px-2">        .unwrap()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3450,10 +3450,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let db = Config::for_directory(path)</pre>
+                <pre class="has-background-success-light py-0 px-2">        .expect(&quot;grain not found&quot;)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3463,10 +3463,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+                <pre class="has-background-success-light py-0 px-2">        .read_all_data()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3476,10 +3476,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .recover()</pre>
+                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3489,10 +3489,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    assert_eq!(contents, b&quot;hello, world&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3501,11 +3501,11 @@
                 <a href="#267">267</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let mut tx = db.begin_transaction().unwrap();</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3515,10 +3515,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let grain = tx.write(&amp;i.to_be_bytes()).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3528,10 +3528,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        assert!(db.read(grain).unwrap().is_none());</pre>
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3541,10 +3541,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        grains_written.push(grain);</pre>
+                <pre class="has-background-success-light py-0 px-2">    std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3554,10 +3554,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        tx.commit().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">}</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3580,10 +3580,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        for (index, grain) in grains_written.iter().enumerate() {</pre>
+                <pre class="has-background-success-light py-0 px-2">#[test]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3593,10 +3593,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            let contents = db</pre>
+                <pre class="has-background-success-light py-0 px-2">fn wal_checkpoint_loop() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3606,10 +3606,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">                .read(*grain)</pre>
+                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;.test-checkpoint-loop&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3619,10 +3619,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">                .unwrap()</pre>
+                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3631,11 +3631,11 @@
                 <a href="#277">277</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">                .expect(&quot;grain not found&quot;)</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3645,10 +3645,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">                .read_all_data()</pre>
+                <pre class="has-background-success-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3657,11 +3657,11 @@
                 <a href="#279">279</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">                .unwrap();</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3670,11 +3670,11 @@
                 <a href="#280">280</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                55
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            assert_eq!(contents, &amp;index.to_be_bytes());</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3683,11 +3683,11 @@
                 <a href="#281">281</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">        }</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let mut grains_written = Vec::new();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3696,11 +3696,11 @@
                 <a href="#282">282</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                11
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    for i in 0_usize..10 {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3713,7 +3713,7 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        db.shutdown().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        let db = Config::for_directory(path)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3722,11 +3722,11 @@
                 <a href="#284">284</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    }</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3735,11 +3735,11 @@
                 <a href="#285">285</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .recover()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3749,10 +3749,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
+                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3762,10 +3762,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+                <pre class="has-background-success-light py-0 px-2">        let mut tx = db.begin_transaction().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3775,10 +3775,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
+                <pre class="has-background-success-light py-0 px-2">        let grain = tx.write(&amp;i.to_be_bytes()).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3788,10 +3788,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert!(db.read(grain).unwrap().is_none());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3804,7 +3804,7 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    for (index, grain) in grains_written.iter().enumerate() {</pre>
+                <pre class="has-background-success-light py-0 px-2">        grains_written.push(grain);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3817,104 +3817,13 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let contents = db</pre>
+                <pre class="has-background-success-light py-0 px-2">        tx.commit().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
                 id="292">
                 <a href="#292">292</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .read(*grain)</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="293">
-                <a href="#293">293</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .unwrap()</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="294">
-                <a href="#294">294</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .expect(&quot;grain not found&quot;)</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="295">
-                <a href="#295">295</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .read_all_data()</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="296">
-                <a href="#296">296</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="297">
-                <a href="#297">297</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        assert_eq!(contents, &amp;index.to_be_bytes());</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="298">
-                <a href="#298">298</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
-            </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    }</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="299">
-                <a href="#299">299</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -3926,15 +3835,106 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
+                id="293">
+                <a href="#293">293</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        for (index, grain) in grains_written.iter().enumerate() {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="294">
+                <a href="#294">294</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            let contents = db</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="295">
+                <a href="#295">295</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">                .read(*grain)</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="296">
+                <a href="#296">296</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">                .unwrap()</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="297">
+                <a href="#297">297</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">                .expect(&quot;grain not found&quot;)</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="298">
+                <a href="#298">298</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">                .read_all_data()</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="299">
+                <a href="#299">299</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">                .unwrap();</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
                 id="300">
                 <a href="#300">300</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                55
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Verify the commit log is correct. The commit log head will contain the</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            assert_eq!(contents, &amp;index.to_be_bytes());</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3947,7 +3947,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; addition of the most recent grain, and we should be able to iterate</pre>
+                <pre class="has-background-white py-0 px-2">        }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3960,7 +3960,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; backwards and find each grain in each entry.</pre>
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -3970,81 +3970,16 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut grains_to_read = grains_written.iter().rev();</pre>
+                <pre class="has-background-success-light py-0 px-2">        db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
                 id="304">
                 <a href="#304">304</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut current_commit_log_entry = db.commit_log_head().unwrap();</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="305">
-                <a href="#305">305</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                11
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    while let Some(commit_log_entry) = current_commit_log_entry {</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="306">
-                <a href="#306">306</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let expected_grain = grains_to_read.next().expect(&quot;too many commit log entries&quot;);</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="307">
-                <a href="#307">307</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        assert_eq!(&amp;commit_log_entry.new_grains[0].id, expected_grain);</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="308">
-                <a href="#308">308</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        current_commit_log_entry = commit_log_entry.next_entry(&amp;db).unwrap();</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="309">
-                <a href="#309">309</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -4056,8 +3991,8 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
-                id="310">
-                <a href="#310">310</a>
+                id="305">
+                <a href="#305">305</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -4065,6 +4000,71 @@
             </div>
             <div class="column has-background-white p-0">
                 <pre class="has-background-white py-0 px-2"></pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="306">
+                <a href="#306">306</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="307">
+                <a href="#307">307</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="308">
+                <a href="#308">308</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="309">
+                <a href="#309">309</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="310">
+                <a href="#310">310</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    for (index, grain) in grains_written.iter().enumerate() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4074,10 +4074,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        let contents = db</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4087,10 +4087,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2"></pre>
+                <pre class="has-background-success-light py-0 px-2">            .read(*grain)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4100,10 +4100,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    std::fs::remove_dir_all(path).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">            .unwrap()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4113,16 +4113,68 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">}</pre>
+                <pre class="has-background-success-light py-0 px-2">            .expect(&quot;grain not found&quot;)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
                 id="315">
                 <a href="#315">315</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .read_all_data()</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="316">
+                <a href="#316">316</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="317">
+                <a href="#317">317</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(contents, &amp;index.to_be_bytes());</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="318">
+                <a href="#318">318</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    }</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="319">
+                <a href="#319">319</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
@@ -4134,67 +4186,15 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
-                id="316">
-                <a href="#316">316</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">#[test]</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="317">
-                <a href="#317">317</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">fn sediment_checkpoint_loop() {</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="318">
-                <a href="#318">318</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;.test-sediment-checkpoint-loop&quot;);</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
-                id="319">
-                <a href="#319">319</a>
-            </div>
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
-            </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
-            </div>
-        </div><div class="columns p-0 m-0">
-            <div
-                class="column is-1 is-narrow p-0 has-text-centered"
                 id="320">
                 <a href="#320">320</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
                 
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Verify the commit log is correct. The commit log head will contain the</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4203,11 +4203,11 @@
                 <a href="#321">321</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    }</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; addition of the most recent grain, and we should be able to iterate</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4220,7 +4220,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; backwards and find each grain in each entry.</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4229,11 +4229,11 @@
                 <a href="#323">323</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let mut grains_to_read = grains_written.iter().rev();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4246,7 +4246,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut grains_written = Vec::new();</pre>
+                <pre class="has-background-success-light py-0 px-2">    let mut current_commit_log_entry = db.commit_log_head().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4256,10 +4256,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                11
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let mut tx_id = TransactionId::default();</pre>
+                <pre class="has-background-success-light py-0 px-2">    while let Some(commit_log_entry) = current_commit_log_entry {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4269,10 +4269,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                11
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    for i in 0_usize..10 {</pre>
+                <pre class="has-background-success-light py-0 px-2">        let expected_grain = grains_to_read.next().expect(&quot;too many commit log entries&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4285,7 +4285,7 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let db = Config::for_directory(path)</pre>
+                <pre class="has-background-success-light py-0 px-2">        assert_eq!(&amp;commit_log_entry.new_grains[0].id, expected_grain);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4298,7 +4298,7 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+                <pre class="has-background-success-light py-0 px-2">        current_commit_log_entry = commit_log_entry.next_entry(&amp;db).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4307,11 +4307,11 @@
                 <a href="#329">329</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .recover()</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4320,11 +4320,11 @@
                 <a href="#330">330</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4334,10 +4334,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let mut tx = db.begin_transaction().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4347,10 +4347,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let new_grain = tx.write(&amp;i.to_be_bytes()).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4360,10 +4360,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        if let Some(last_grain) = grains_written.last() {</pre>
+                <pre class="has-background-success-light py-0 px-2">    std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4373,10 +4373,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                9
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            tx.archive(*last_grain).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">}</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4385,11 +4385,11 @@
                 <a href="#335">335</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                9
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        }</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4399,10 +4399,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        grains_written.push(new_grain);</pre>
+                <pre class="has-background-success-light py-0 px-2">#[test]</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4412,10 +4412,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        tx.checkpoint_to(tx_id).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">fn sediment_checkpoint_loop() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4425,10 +4425,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        tx_id = tx.commit().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    let path = Path::new(&quot;.test-sediment-checkpoint-loop&quot;);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4438,10 +4438,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2"></pre>
+                <pre class="has-background-success-light py-0 px-2">    if path.exists() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4450,11 +4450,11 @@
                 <a href="#340">340</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        db.shutdown().unwrap();</pre>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">        std::fs::remove_dir_all(path).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4463,11 +4463,11 @@
                 <a href="#341">341</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    }</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4489,11 +4489,11 @@
                 <a href="#343">343</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
             </div>
-            <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4506,7 +4506,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
+                <pre class="has-background-success-light py-0 px-2">    let mut grains_written = Vec::new();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4519,7 +4519,7 @@
                 1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
+                <pre class="has-background-success-light py-0 px-2">    let mut tx_id = TransactionId::default();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4529,10 +4529,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                11
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">    for i in 0_usize..10 {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4542,10 +4542,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2"></pre>
+                <pre class="has-background-success-light py-0 px-2">        let db = Config::for_directory(path)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4555,10 +4555,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; Because we close and reopen the database so often, we may not actually</pre>
+                <pre class="has-background-success-light py-0 px-2">            .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4568,10 +4568,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; have finished the sediment checkpoint yet. This thread sleep gives it</pre>
+                <pre class="has-background-success-light py-0 px-2">            .recover()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4581,10 +4581,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; time to complete if it was run upon recovery.</pre>
+                <pre class="has-background-success-light py-0 px-2">            .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4594,10 +4594,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                1
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    std::thread::sleep(std::time::Duration::from_millis(100));</pre>
+                <pre class="has-background-success-light py-0 px-2">        let mut tx = db.begin_transaction().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4606,11 +4606,11 @@
                 <a href="#352">352</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        let new_grain = tx.write(&amp;i.to_be_bytes()).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4619,11 +4619,11 @@
                 <a href="#353">353</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Because we archived all grains except the last one, we should only be able to read the last grain</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        if let Some(last_grain) = grains_written.last() {</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4632,11 +4632,11 @@
                 <a href="#354">354</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                9
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2"></pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            tx.archive(*last_grain).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4646,10 +4646,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                10
+                9
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">    for (index, grain) in grains_written.iter().enumerate() {</pre>
+                <pre class="has-background-success-light py-0 px-2">        }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4662,7 +4662,7 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        let result = db.read(*grain).unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        grains_written.push(new_grain);</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4675,7 +4675,7 @@
                 10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        if index &gt;= grains_written.len() - 2 {</pre>
+                <pre class="has-background-success-light py-0 px-2">        tx.checkpoint_to(tx_id).unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4685,10 +4685,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            let contents = result.expect(&quot;grain not found&quot;).read_all_data().unwrap();</pre>
+                <pre class="has-background-success-light py-0 px-2">        tx_id = tx.commit().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4698,10 +4698,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                2
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            assert_eq!(contents, &amp;index.to_be_bytes());</pre>
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4711,10 +4711,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                8
+                10
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        } else if let Some(grain) = result {</pre>
+                <pre class="has-background-success-light py-0 px-2">        db.shutdown().unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4727,7 +4727,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; Because grain IDs can be reused, we may have &quot;lucked&quot; out and</pre>
+                <pre class="has-background-white py-0 px-2">    }</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4740,7 +4740,7 @@
                 
             </div>
             <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; stumbled upon another written grain. If we get an error reading</pre>
+                <pre class="has-background-white py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4749,11 +4749,11 @@
                 <a href="#363">363</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; the data or the contents aren&#x27;t what we expect, this is a passed</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    let db = Config::for_directory(path)</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4762,11 +4762,11 @@
                 <a href="#364">364</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; check.</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        .configure_wal(|wal| wal.checkpoint_after_bytes(10))</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4776,10 +4776,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            if let Ok(contents) = grain.read_all_data() {</pre>
+                <pre class="has-background-success-light py-0 px-2">        .recover()</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4789,10 +4789,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                3
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">                assert_ne!(contents, &amp;index.to_be_bytes());</pre>
+                <pre class="has-background-success-light py-0 px-2">        .unwrap();</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4801,11 +4801,11 @@
                 <a href="#367">367</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-danger-light p-0">
-                <pre class="has-background-danger-light py-0 px-2">            }</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2"></pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4815,10 +4815,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                5
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        } else {</pre>
+                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; Because we close and reopen the database so often, we may not actually</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4828,10 +4828,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                5
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">            &#x2F;&#x2F; None means the grain couldn&#x27;t be read.</pre>
+                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; have finished the sediment checkpoint yet. This thread sleep gives it</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4841,10 +4841,10 @@
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
-                5
+                1
             </div>
             <div class="column has-background-success-light p-0">
-                <pre class="has-background-success-light py-0 px-2">        }</pre>
+                <pre class="has-background-success-light py-0 px-2">    &#x2F;&#x2F; time to complete if it was run upon recovery.</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4853,11 +4853,11 @@
                 <a href="#371">371</a>
             </div>
             <div
-                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
-                
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                1
             </div>
-            <div class="column has-background-white p-0">
-                <pre class="has-background-white py-0 px-2">    }</pre>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    std::thread::sleep(std::time::Duration::from_millis(100));</pre>
             </div>
         </div><div class="columns p-0 m-0">
             <div
@@ -4879,6 +4879,266 @@
                 <a href="#373">373</a>
             </div>
             <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    &#x2F;&#x2F; Because we archived all grains except the last one, we should only be able to read the last grain</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="374">
+                <a href="#374">374</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="375">
+                <a href="#375">375</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">    for (index, grain) in grains_written.iter().enumerate() {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="376">
+                <a href="#376">376</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        let result = db.read(*grain).unwrap();</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="377">
+                <a href="#377">377</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                10
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        if index &gt;= grains_written.len() - 2 {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="378">
+                <a href="#378">378</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            let contents = result.expect(&quot;grain not found&quot;).read_all_data().unwrap();</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="379">
+                <a href="#379">379</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                2
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            assert_eq!(contents, &amp;index.to_be_bytes());</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="380">
+                <a href="#380">380</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                8
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        } else if let Some(grain) = result {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="381">
+                <a href="#381">381</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; Because grain IDs can be reused, we may have &quot;lucked&quot; out and</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="382">
+                <a href="#382">382</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; stumbled upon another written grain. If we get an error reading</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="383">
+                <a href="#383">383</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; the data or the contents aren&#x27;t what we expect, this is a passed</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="384">
+                <a href="#384">384</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">            &#x2F;&#x2F; check.</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="385">
+                <a href="#385">385</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                4
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            if let Ok(contents) = grain.read_all_data() {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="386">
+                <a href="#386">386</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                4
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">                assert_ne!(contents, &amp;index.to_be_bytes());</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="387">
+                <a href="#387">387</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-danger-light has-background-danger">
+                
+            </div>
+            <div class="column has-background-danger-light p-0">
+                <pre class="has-background-danger-light py-0 px-2">            }</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="388">
+                <a href="#388">388</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                4
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        } else {</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="389">
+                <a href="#389">389</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                4
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">            &#x2F;&#x2F; None means the grain couldn&#x27;t be read.</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="390">
+                <a href="#390">390</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
+                4
+            </div>
+            <div class="column has-background-success-light p-0">
+                <pre class="has-background-success-light py-0 px-2">        }</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="391">
+                <a href="#391">391</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2">    }</pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="392">
+                <a href="#392">392</a>
+            </div>
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered has-text-white has-background-white">
+                
+            </div>
+            <div class="column has-background-white p-0">
+                <pre class="has-background-white py-0 px-2"></pre>
+            </div>
+        </div><div class="columns p-0 m-0">
+            <div
+                class="column is-1 is-narrow p-0 has-text-centered"
+                id="393">
+                <a href="#393">393</a>
+            </div>
+            <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
                 1
             </div>
@@ -4888,8 +5148,8 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
-                id="374">
-                <a href="#374">374</a>
+                id="394">
+                <a href="#394">394</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
@@ -4901,8 +5161,8 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
-                id="375">
-                <a href="#375">375</a>
+                id="395">
+                <a href="#395">395</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
@@ -4914,8 +5174,8 @@
         </div><div class="columns p-0 m-0">
             <div
                 class="column is-1 is-narrow p-0 has-text-centered"
-                id="376">
-                <a href="#376">376</a>
+                id="396">
+                <a href="#396">396</a>
             </div>
             <div
                 class="column is-1 is-narrow p-0 has-text-centered has-text-success-light has-background-success">
@@ -4927,7 +5187,7 @@
         </div></div>
         <footer class="footer">
             <div class="content has-text-centered">
-                <p class="heading">Date: 2023-02-02 18:26</p>
+                <p class="heading">Date: 2023-02-02 18:35</p>
             </div>
         </footer>
     </body>
