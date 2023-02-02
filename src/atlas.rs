@@ -444,7 +444,7 @@ impl<'a> GrainReader<'a> {
 
     pub const fn length(&self) -> u32 {
         match self {
-            GrainReader::InWal(reader) => reader.chunk_length(),
+            GrainReader::InWal(reader) => reader.chunk_length() - 9,
             GrainReader::InStratum(reader) => reader.length,
         }
     }

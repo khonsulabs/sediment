@@ -188,6 +188,8 @@ impl<T> From<PoisonError<T>> for Error {
 
 #[test]
 fn basic() {
+    use std::io::Read;
+
     let path = Path::new("test");
     if path.exists() {
         std::fs::remove_dir_all(path).unwrap();
@@ -204,13 +206,17 @@ fn basic() {
     assert_eq!(db.embedded_header().unwrap(), Some(grain));
 
     let verify = |db: &Database| {
-        let read_contents = db
-            .read(grain)
-            .unwrap()
-            .expect("grain not found")
-            .read_all_data()
-            .unwrap();
-        assert_eq!(read_contents, b"hello, world");
+        let mut reader = db.read(grain).unwrap().expect("grain not found");
+        assert_eq!(reader.length(), 12);
+        assert_eq!(reader.bytes_remaining(), reader.length());
+        let mut read_contents = [0; 12];
+        reader.read_exact(&mut read_contents[..6]).unwrap();
+        assert_eq!(reader.bytes_remaining(), 6);
+        reader.read_exact(&mut read_contents[6..]).unwrap();
+        assert_eq!(reader.bytes_remaining(), 0);
+        assert_eq!(&read_contents[..], b"hello, world");
+
+        assert_eq!(reader.read(&mut read_contents).unwrap(), 0);
 
         let commit = db.commit_log_head().unwrap().expect("commit log missing");
         assert_eq!(commit.transaction_id, tx_id);
@@ -343,6 +349,7 @@ fn sediment_checkpoint_loop() {
 
     // Configure the WAL to checkpoint after 10 bytes -- "hello, world" is 12.
     let mut grains_written = Vec::new();
+    let mut headers_written = Vec::new();
     let mut tx_id = TransactionId::default();
     for i in 0_usize..10 {
         let db = Config::for_directory(path)
@@ -355,6 +362,11 @@ fn sediment_checkpoint_loop() {
             tx.archive(*last_grain).unwrap();
         }
         grains_written.push(new_grain);
+        // The old headers are automatically archived.
+        let new_header = tx.write(&i.to_be_bytes()).unwrap();
+        tx.set_embedded_header(Some(new_header)).unwrap();
+        headers_written.push(new_header);
+
         tx.checkpoint_to(tx_id).unwrap();
         tx_id = tx.commit().unwrap();
 
@@ -372,13 +384,18 @@ fn sediment_checkpoint_loop() {
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     // Because we archived all grains except the last one, we should only be able to read the last grain
-
-    for (index, grain) in grains_written.iter().enumerate() {
+    for (index, (grain, header)) in grains_written.iter().zip(&headers_written).enumerate() {
         let result = db.read(*grain).unwrap();
+        let header_result = db.read(*header).unwrap();
         if index >= grains_written.len() - 2 {
             let contents = result.expect("grain not found").read_all_data().unwrap();
             assert_eq!(contents, &index.to_be_bytes());
-        } else if let Some(grain) = result {
+            let contents = header_result
+                .expect("grain not found")
+                .read_all_data()
+                .unwrap();
+            assert_eq!(contents, &index.to_be_bytes());
+        } else if let Some(grain) = result.or(header_result) {
             // Because grain IDs can be reused, we may have "lucked" out and
             // stumbled upon another written grain. If we get an error reading
             // the data or the contents aren't what we expect, this is a passed
@@ -390,6 +407,34 @@ fn sediment_checkpoint_loop() {
             // None means the grain couldn't be read.
         }
     }
+
+    db.shutdown().unwrap();
+
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn rollback() {
+    let path = Path::new("rollback");
+    if path.exists() {
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    let db = Database::recover(path).unwrap();
+    let mut tx = db.begin_transaction().unwrap();
+    let grain = tx.write(b"hello, world").unwrap();
+    println!("Wrote {grain:?}");
+    tx.set_embedded_header(Some(grain)).unwrap();
+    assert!(db.read(grain).unwrap().is_none());
+    drop(tx);
+
+    // Ensure we still didn't get it published.
+    assert!(db.read(grain).unwrap().is_none());
+
+    // Trying again, we should get the same grain id back.
+    let mut tx = db.begin_transaction().unwrap();
+    assert_eq!(tx.write(b"hello, world").unwrap(), grain);
+    drop(tx);
 
     db.shutdown().unwrap();
 
