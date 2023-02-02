@@ -395,6 +395,51 @@
 <a href="#395" id="395">395</a>
 <a href="#396" id="396">396</a>
 <a href="#397" id="397">397</a>
+<a href="#398" id="398">398</a>
+<a href="#399" id="399">399</a>
+<a href="#400" id="400">400</a>
+<a href="#401" id="401">401</a>
+<a href="#402" id="402">402</a>
+<a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
+<a href="#439" id="439">439</a>
+<a href="#440" id="440">440</a>
+<a href="#441" id="441">441</a>
+<a href="#442" id="442">442</a>
 </pre><pre class="rust"><code><span class="attr">#![forbid(unsafe_code)]
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>};
@@ -585,6 +630,8 @@
 
 <span class="attr">#[test]
 </span><span class="kw">fn </span>basic() {
+    <span class="kw">use </span>std::io::Read;
+
     <span class="kw">let </span>path = Path::new(<span class="string">&quot;test&quot;</span>);
     <span class="kw">if </span>path.exists() {
         std::fs::remove_dir_all(path).unwrap();
@@ -601,13 +648,17 @@
     <span class="macro">assert_eq!</span>(db.embedded_header().unwrap(), <span class="prelude-val">Some</span>(grain));
 
     <span class="kw">let </span>verify = |db: <span class="kw-2">&amp;</span>Database| {
-        <span class="kw">let </span>read_contents = db
-            .read(grain)
-            .unwrap()
-            .expect(<span class="string">&quot;grain not found&quot;</span>)
-            .read_all_data()
-            .unwrap();
-        <span class="macro">assert_eq!</span>(read_contents, <span class="string">b&quot;hello, world&quot;</span>);
+        <span class="kw">let </span><span class="kw-2">mut </span>reader = db.read(grain).unwrap().expect(<span class="string">&quot;grain not found&quot;</span>);
+        <span class="macro">assert_eq!</span>(reader.length(), <span class="number">12</span>);
+        <span class="macro">assert_eq!</span>(reader.bytes_remaining(), reader.length());
+        <span class="kw">let </span><span class="kw-2">mut </span>read_contents = [<span class="number">0</span>; <span class="number">12</span>];
+        reader.read_exact(<span class="kw-2">&amp;mut </span>read_contents[..<span class="number">6</span>]).unwrap();
+        <span class="macro">assert_eq!</span>(reader.bytes_remaining(), <span class="number">6</span>);
+        reader.read_exact(<span class="kw-2">&amp;mut </span>read_contents[<span class="number">6</span>..]).unwrap();
+        <span class="macro">assert_eq!</span>(reader.bytes_remaining(), <span class="number">0</span>);
+        <span class="macro">assert_eq!</span>(<span class="kw-2">&amp;</span>read_contents[..], <span class="string">b&quot;hello, world&quot;</span>);
+
+        <span class="macro">assert_eq!</span>(reader.read(<span class="kw-2">&amp;mut </span>read_contents).unwrap(), <span class="number">0</span>);
 
         <span class="kw">let </span>commit = db.commit_log_head().unwrap().expect(<span class="string">&quot;commit log missing&quot;</span>);
         <span class="macro">assert_eq!</span>(commit.transaction_id, tx_id);
@@ -740,6 +791,7 @@
 
     <span class="comment">// Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.
     </span><span class="kw">let </span><span class="kw-2">mut </span>grains_written = Vec::new();
+    <span class="kw">let </span><span class="kw-2">mut </span>headers_written = Vec::new();
     <span class="kw">let </span><span class="kw-2">mut </span>tx_id = TransactionId::default();
     <span class="kw">for </span>i <span class="kw">in </span><span class="number">0_usize</span>..<span class="number">10 </span>{
         <span class="kw">let </span>db = Config::for_directory(path)
@@ -752,6 +804,11 @@
             tx.archive(<span class="kw-2">*</span>last_grain).unwrap();
         }
         grains_written.push(new_grain);
+        <span class="comment">// The old headers are automatically archived.
+        </span><span class="kw">let </span>new_header = tx.write(<span class="kw-2">&amp;</span>i.to_be_bytes()).unwrap();
+        tx.set_embedded_header(<span class="prelude-val">Some</span>(new_header)).unwrap();
+        headers_written.push(new_header);
+
         tx.checkpoint_to(tx_id).unwrap();
         tx_id = tx.commit().unwrap();
 
@@ -769,13 +826,18 @@
     </span>std::thread::sleep(std::time::Duration::from_millis(<span class="number">100</span>));
 
     <span class="comment">// Because we archived all grains except the last one, we should only be able to read the last grain
-
-    </span><span class="kw">for </span>(index, grain) <span class="kw">in </span>grains_written.iter().enumerate() {
+    </span><span class="kw">for </span>(index, (grain, header)) <span class="kw">in </span>grains_written.iter().zip(<span class="kw-2">&amp;</span>headers_written).enumerate() {
         <span class="kw">let </span>result = db.read(<span class="kw-2">*</span>grain).unwrap();
+        <span class="kw">let </span>header_result = db.read(<span class="kw-2">*</span>header).unwrap();
         <span class="kw">if </span>index &gt;= grains_written.len() - <span class="number">2 </span>{
             <span class="kw">let </span>contents = result.expect(<span class="string">&quot;grain not found&quot;</span>).read_all_data().unwrap();
             <span class="macro">assert_eq!</span>(contents, <span class="kw-2">&amp;</span>index.to_be_bytes());
-        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(grain) = result {
+            <span class="kw">let </span>contents = header_result
+                .expect(<span class="string">&quot;grain not found&quot;</span>)
+                .read_all_data()
+                .unwrap();
+            <span class="macro">assert_eq!</span>(contents, <span class="kw-2">&amp;</span>index.to_be_bytes());
+        } <span class="kw">else if let </span><span class="prelude-val">Some</span>(grain) = result.or(header_result) {
             <span class="comment">// Because grain IDs can be reused, we may have &quot;lucked&quot; out and
             // stumbled upon another written grain. If we get an error reading
             // the data or the contents aren&#39;t what we expect, this is a passed
@@ -787,6 +849,34 @@
             <span class="comment">// None means the grain couldn&#39;t be read.
         </span>}
     }
+
+    db.shutdown().unwrap();
+
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>rollback() {
+    <span class="kw">let </span>path = Path::new(<span class="string">&quot;rollback&quot;</span>);
+    <span class="kw">if </span>path.exists() {
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    <span class="kw">let </span>db = Database::recover(path).unwrap();
+    <span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction().unwrap();
+    <span class="kw">let </span>grain = tx.write(<span class="string">b&quot;hello, world&quot;</span>).unwrap();
+    <span class="macro">println!</span>(<span class="string">&quot;Wrote {grain:?}&quot;</span>);
+    tx.set_embedded_header(<span class="prelude-val">Some</span>(grain)).unwrap();
+    <span class="macro">assert!</span>(db.read(grain).unwrap().is_none());
+    drop(tx);
+
+    <span class="comment">// Ensure we still didn&#39;t get it published.
+    </span><span class="macro">assert!</span>(db.read(grain).unwrap().is_none());
+
+    <span class="comment">// Trying again, we should get the same grain id back.
+    </span><span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction().unwrap();
+    <span class="macro">assert_eq!</span>(tx.write(<span class="string">b&quot;hello, world&quot;</span>).unwrap(), grain);
+    drop(tx);
 
     db.shutdown().unwrap();
 
