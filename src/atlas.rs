@@ -1,25 +1,21 @@
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    fs::{File, OpenOptions},
-    io::{BufReader, Read, Seek},
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, Read, Seek};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use okaywal::{ChunkReader, LogPosition, WriteAheadLog};
 use tinyvec::ArrayVec;
 
-use crate::{
-    allocations::FreeLocations,
-    basinmap::BasinMap,
-    format::{
-        BasinAndStratum, BasinId, GrainAllocationStatus, GrainId, GrainIndex, StratumHeader,
-        StratumId, TransactionId,
-    },
-    store::{BasinState, Store},
-    util::{u32_to_usize, usize_to_u32},
-    Error, Result,
+use crate::allocations::FreeLocations;
+use crate::basinmap::BasinMap;
+use crate::format::{
+    BasinAndStratum, BasinId, GrainAllocationStatus, GrainId, GrainIndex, StratumHeader, StratumId,
+    TransactionId,
 };
+use crate::store::{BasinState, Store};
+use crate::util::{u32_to_usize, usize_to_u32};
+use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct Atlas {

@@ -1,14 +1,13 @@
-use std::{
-    fmt::{Display, Write as _},
-    io::{BufWriter, Read, Write},
-    ops::{AddAssign, Deref, DerefMut},
-    str::FromStr,
-};
+use std::fmt::{Display, Write as _};
+use std::io::{BufWriter, Read, Write};
+use std::ops::{AddAssign, Deref, DerefMut};
+use std::str::FromStr;
 
 use crc32c::crc32c;
 use okaywal::EntryId;
 
-use crate::{store::Duplicable, Error, Result};
+use crate::store::Duplicable;
+use crate::{Error, Result};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct GrainId(u64);
@@ -549,6 +548,7 @@ pub struct StratumFileHeader {
 
 impl StratumFileHeader {
     const BYTES: u64 = StratumHeader::BYTES * 2;
+
     pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
         let first_header = StratumHeader::read_from(&mut file, scratch)?;
         let second_header = StratumHeader::read_from(&mut file, scratch)?;
@@ -730,6 +730,7 @@ where
     pub fn new(writer: W) -> Self {
         Self { writer, crc32: 0 }
     }
+
     pub fn crc32(&self) -> u32 {
         self.crc32
     }

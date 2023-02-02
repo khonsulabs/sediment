@@ -1,20 +1,16 @@
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Seek},
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Seek};
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::{
-    basinmap::BasinMap,
-    format::{
-        BasinAndStratum, BasinId, IndexFile, IndexHeader, StratumFileHeader, StratumHeader,
-        StratumId, TransactionId,
-    },
-    fsync::{FSyncBatch, FSyncManager},
-    Result,
+use crate::basinmap::BasinMap;
+use crate::format::{
+    BasinAndStratum, BasinId, IndexFile, IndexHeader, StratumFileHeader, StratumHeader, StratumId,
+    TransactionId,
 };
+use crate::fsync::{FSyncBatch, FSyncManager};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct Store {

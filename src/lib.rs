@@ -1,24 +1,20 @@
 #![forbid(unsafe_code)]
 
-use std::{
-    io::{self},
-    num::TryFromIntError,
-    path::Path,
-    sync::{Arc, PoisonError},
-};
+use std::io::{self};
+use std::num::TryFromIntError;
+use std::path::Path;
+use std::sync::{Arc, PoisonError};
 
 use okaywal::WriteAheadLog;
 pub use transaction::Transaction;
 
-use crate::{
-    atlas::{Atlas, GrainReader},
-    checkpointer::Checkpointer,
-    commit_log::{CommitLogEntry, CommitLogs},
-    config::Config,
-    format::{GrainId, Stored, TransactionId},
-    store::Store,
-    transaction::TransactionLock,
-};
+use crate::atlas::{Atlas, GrainReader};
+use crate::checkpointer::Checkpointer;
+use crate::commit_log::{CommitLogEntry, CommitLogs};
+use crate::config::Config;
+use crate::format::{GrainId, Stored, TransactionId};
+use crate::store::Store;
+use crate::transaction::TransactionLock;
 
 mod allocations;
 mod atlas;

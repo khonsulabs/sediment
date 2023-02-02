@@ -1,14 +1,10 @@
-use std::{
-    collections::{hash_map, HashMap},
-    io::{Read, Write},
-    sync::{Arc, Condvar, Mutex},
-};
+use std::collections::{hash_map, HashMap};
+use std::io::{Read, Write};
+use std::sync::{Arc, Condvar, Mutex};
 
-use crate::{
-    format::{ByteUtil, GrainId, Stored, TransactionId},
-    util::{u32_to_usize, usize_to_u32},
-    Database, Result,
-};
+use crate::format::{ByteUtil, GrainId, Stored, TransactionId};
+use crate::util::{u32_to_usize, usize_to_u32};
+use crate::{Database, Result};
 
 #[derive(Debug)]
 pub struct CommitLogEntry {

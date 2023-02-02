@@ -13,6 +13,7 @@ impl<T> BasinMap<T> {
             basins: [None, None, None, None, None, None, None, None],
         }
     }
+
     pub fn get_or_insert_with(&mut self, index: BasinId, default: impl FnOnce() -> T) -> &mut T {
         if self[index].is_none() {
             self[index] = Some(default());
@@ -50,9 +51,8 @@ impl<T> IndexMut<BasinId> for BasinMap<T> {
 }
 
 impl<'a, T> IntoIterator for &'a BasinMap<T> {
-    type Item = (BasinId, &'a T);
-
     type IntoIter = Iter<'a, T>;
+    type Item = (BasinId, &'a T);
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {

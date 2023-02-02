@@ -1,19 +1,15 @@
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Condvar, Mutex},
-};
+use std::collections::VecDeque;
+use std::sync::{Arc, Condvar, Mutex};
 
 use crc32c::crc32c;
 use okaywal::{EntryWriter, LogPosition};
 
-use crate::{
-    atlas::IndexMetadata,
-    commit_log::{CommitLogEntry, NewGrain},
-    format::{GrainId, TransactionId},
-    util::usize_to_u32,
-    wal::WalChunk,
-    Database, Result,
-};
+use crate::atlas::IndexMetadata;
+use crate::commit_log::{CommitLogEntry, NewGrain};
+use crate::format::{GrainId, TransactionId};
+use crate::util::usize_to_u32;
+use crate::wal::WalChunk;
+use crate::{Database, Result};
 
 #[derive(Debug)]
 pub struct Transaction<'db> {

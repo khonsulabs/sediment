@@ -1,12 +1,11 @@
-use std::{
-    sync::{Arc, Weak},
-    thread::JoinHandle,
-};
+use std::sync::{Arc, Weak};
+use std::thread::JoinHandle;
 
 use okaywal::WriteAheadLog;
 use watchable::{Watchable, Watcher};
 
-use crate::{format::TransactionId, Data, Database, Error, Result};
+use crate::format::TransactionId;
+use crate::{Data, Database, Error, Result};
 
 #[derive(Debug)]
 pub struct Checkpointer {

@@ -1,16 +1,12 @@
-use std::{
-    io::{self, BufWriter, Read, Seek, SeekFrom, Write},
-    sync::{Arc, Weak},
-};
+use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::sync::{Arc, Weak};
 
 use okaywal::{EntryId, LogManager, ReadChunkResult, WriteAheadLog};
 
-use crate::{
-    format::{ByteUtil, GrainAllocationInfo, GrainAllocationStatus, GrainId, TransactionId},
-    store::BasinState,
-    util::{u32_to_usize, usize_to_u32},
-    Data as DatabaseData, Database, Error, Result,
-};
+use crate::format::{ByteUtil, GrainAllocationInfo, GrainAllocationStatus, GrainId, TransactionId};
+use crate::store::BasinState;
+use crate::util::{u32_to_usize, usize_to_u32};
+use crate::{Data as DatabaseData, Database, Error, Result};
 
 #[derive(Debug)]
 pub struct WalManager {
@@ -262,6 +258,7 @@ pub enum WalChunk<'a> {
 impl<'a> WalChunk<'a> {
     pub const COMMAND_LENGTH: u32 = 9;
     pub const COMMAND_LENGTH_USIZE: usize = Self::COMMAND_LENGTH as usize;
+
     pub fn read(buffer: &'a [u8]) -> Result<Self> {
         if buffer.len() < Self::COMMAND_LENGTH_USIZE {
             todo!("error: buffer too short")
@@ -287,7 +284,7 @@ impl<'a> WalChunk<'a> {
             )))),
             255 => {
                 Ok(Self::FinishTransaction {
-                    commit_log_entry: GrainId::from_bytes(&buffer[1..9]).unwrap(), // TODO real error,
+                    commit_log_entry: GrainId::from_bytes(&buffer[1..9]).unwrap(), /* TODO real error, */
                 })
             }
             _ => todo!("invalid chunk"),

@@ -1,7 +1,13 @@
-use std::{fmt::Debug, num::NonZeroUsize, ops::Range, path::Path, sync::Arc};
+use std::fmt::Debug;
+use std::num::NonZeroUsize;
+use std::ops::Range;
+use std::path::Path;
+use std::sync::Arc;
 
-use rand::{prelude::StdRng, Rng, SeedableRng};
-use sediment::{format::TransactionId, Database};
+use rand::prelude::StdRng;
+use rand::{Rng, SeedableRng};
+use sediment::format::TransactionId;
+use sediment::Database;
 use timings::{Benchmark, BenchmarkImplementation, Label, LabeledTimings, Timings};
 
 const ITERS: u128 = 100;
@@ -324,13 +330,9 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SqliteThr
 
 #[cfg(feature = "rocksdb")]
 mod rocksdb {
-    use std::{
-        path::Path,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            Arc,
-        },
-    };
+    use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
     use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch, WriteOptions, DB};
     use timings::{BenchmarkImplementation, LabeledTimings, Timings};

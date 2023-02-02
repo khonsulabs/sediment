@@ -1,8 +1,6 @@
-use std::{
-    fs::File,
-    sync::{Arc, Condvar, Mutex},
-    thread::{self, available_parallelism, JoinHandle},
-};
+use std::fs::File;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::{self, available_parallelism, JoinHandle};
 
 use flume::{Receiver, Sender};
 
@@ -19,6 +17,7 @@ impl FSyncManager {
             data: Mutex::new(ThreadState::Uninitialized { maximum_threads }),
         }
     }
+
     pub fn shutdown(&self) -> Result<()> {
         let mut data = self.data.lock()?;
         if let ThreadState::Running(ManagerThread {
