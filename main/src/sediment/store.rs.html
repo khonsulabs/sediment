@@ -792,7 +792,7 @@
                     &amp;&amp; (first.transaction_id &gt; second.transaction_id || !second_is_valid);
                 <span class="kw">let </span>second_is_newest = second_is_valid
                     &amp;&amp; (second.transaction_id &gt; first.transaction_id || !first_is_valid);
-                <span class="kw">if </span>(first_is_newest &amp;&amp; first_is_valid) || (second_is_newest &amp;&amp; second_is_valid) {
+                <span class="kw">if </span>first_is_newest || second_is_newest {
                     <span class="prelude-val">Ok</span>(())
                 } <span class="kw">else </span>{
                     <span class="prelude-val">Err</span>(Error::VerificationFailed)
