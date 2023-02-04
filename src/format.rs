@@ -1,12 +1,11 @@
 use std::fmt::{Display, Write as _};
-use std::io::{BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Seek, Write};
 use std::ops::{AddAssign, Deref, DerefMut};
 use std::str::FromStr;
 
 use crc32c::crc32c;
 use okaywal::EntryId;
 
-use crate::store::Duplicable;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -410,6 +409,46 @@ impl IndexFile {
     }
 }
 
+pub struct FileHeader<T> {
+    pub first: Option<T>,
+    pub second: Option<T>,
+}
+
+impl<T> FileHeader<T>
+where
+    T: Duplicable,
+{
+    pub fn read_from<R: Read + Seek>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
+        let first_header = T::read_from(&mut file, scratch);
+        if first_header.is_err() {
+            file.seek(std::io::SeekFrom::Start(IndexHeader::BYTES))?;
+        }
+        let second_header = T::read_from(&mut file, scratch);
+        match (first_header, second_header) {
+            (Ok(first_header), Ok(second_header)) => Ok(Self {
+                first: Some(first_header),
+                second: Some(second_header),
+            }),
+            (Err(err), Err(_)) => Err(err),
+            (Ok(first_header), Err(_)) => Ok(Self {
+                first: Some(first_header),
+                second: None,
+            }),
+            (Err(_), Ok(second_header)) => Ok(Self {
+                first: None,
+                second: Some(second_header),
+            }),
+        }
+    }
+}
+
+pub trait Duplicable: Sized {
+    const BYTES: u64;
+
+    fn read_from<R: Read>(reader: R, scratch: &mut Vec<u8>) -> Result<Self>;
+    fn write_to<W: Write>(&mut self, writer: W) -> Result<()>;
+}
+
 /// A header inside of an "Index" file.
 ///
 /// This data structure is serialized as:
@@ -433,34 +472,7 @@ pub struct IndexHeader {
 impl Duplicable for IndexHeader {
     const BYTES: u64 = 44;
 
-    fn write_to<W: std::io::Write>(&mut self, writer: W) -> Result<()> {
-        let mut writer = ChecksumWriter::new(writer);
-        writer.write_all(&self.transaction_id.to_be_bytes())?;
-        writer.write_all(
-            &self
-                .embedded_header_data
-                .unwrap_or(GrainId::NONE)
-                .0
-                .to_be_bytes(),
-        )?;
-        writer.write_all(
-            &self
-                .commit_log_head
-                .unwrap_or(GrainId::NONE)
-                .0
-                .to_be_bytes(),
-        )?;
-        writer.write_all(&self.checkpoint_target.to_be_bytes())?;
-        writer.write_all(&self.checkpointed_to.to_be_bytes())?;
-        let (_, crc32) = writer.write_crc32_and_finish()?;
-        self.crc32 = crc32;
-
-        Ok(())
-    }
-}
-
-impl IndexHeader {
-    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
+    fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
         scratch.resize(44, 0);
         file.read_exact(scratch)?;
         let crc32 = u32::from_be_bytes(scratch[40..].try_into().expect("u32 is 4 bytes"));
@@ -489,6 +501,31 @@ impl IndexHeader {
             checkpointed_to,
             crc32,
         })
+    }
+
+    fn write_to<W: std::io::Write>(&mut self, writer: W) -> Result<()> {
+        let mut writer = ChecksumWriter::new(writer);
+        writer.write_all(&self.transaction_id.to_be_bytes())?;
+        writer.write_all(
+            &self
+                .embedded_header_data
+                .unwrap_or(GrainId::NONE)
+                .0
+                .to_be_bytes(),
+        )?;
+        writer.write_all(
+            &self
+                .commit_log_head
+                .unwrap_or(GrainId::NONE)
+                .0
+                .to_be_bytes(),
+        )?;
+        writer.write_all(&self.checkpoint_target.to_be_bytes())?;
+        writer.write_all(&self.checkpointed_to.to_be_bytes())?;
+        let (_, crc32) = writer.write_crc32_and_finish()?;
+        self.crc32 = crc32;
+
+        Ok(())
     }
 }
 
@@ -569,8 +606,12 @@ impl StratumHeader {
     pub const fn grain_info(&self, index: usize) -> GrainAllocationInfo {
         GrainAllocationInfo(self.grains[index])
     }
+}
 
-    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
+impl Duplicable for StratumHeader {
+    const BYTES: u64 = 16_384;
+
+    fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
         scratch.resize(16_384, 0);
         file.read_exact(scratch)?;
 
@@ -602,10 +643,6 @@ impl StratumHeader {
             crc32,
         })
     }
-}
-
-impl Duplicable for StratumHeader {
-    const BYTES: u64 = 16_384;
 
     fn write_to<W: std::io::Write>(&mut self, writer: W) -> Result<()> {
         let mut writer = ChecksumWriter::new(BufWriter::new(writer));

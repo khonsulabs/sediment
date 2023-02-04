@@ -167,6 +167,8 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("the service has shut down")]
     Shutdown,
+    #[error("database verification failed")]
+    VerificationFailed,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -287,17 +289,19 @@ fn wal_checkpoint_loop() {
     // Configure the WAL to checkpoint after 10 bytes -- "hello, world" is 12.
     let mut grains_written = Vec::new();
     for i in 0_usize..10 {
+        println!("{i}");
         let db = Config::for_directory(path)
             .configure_wal(|wal| wal.checkpoint_after_bytes(10))
             .recover()
             .unwrap();
         let mut tx = db.begin_transaction().unwrap();
-        let grain = tx.write(&i.to_be_bytes()).unwrap();
+        let grain = dbg!(tx.write(&i.to_be_bytes()).unwrap());
         assert!(db.read(grain).unwrap().is_none());
         grains_written.push(grain);
         tx.commit().unwrap();
 
         for (index, grain) in grains_written.iter().enumerate() {
+            dbg!(grain);
             let contents = db
                 .read(*grain)
                 .unwrap()

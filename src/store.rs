@@ -1,16 +1,21 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek};
+use std::io::{self, BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crc32c::crc32c;
+
 use crate::basinmap::BasinMap;
+use crate::commit_log::CommitLogEntry;
 use crate::format::{
-    BasinAndStratum, BasinId, IndexFile, IndexHeader, StratumFileHeader, StratumHeader, StratumId,
-    TransactionId,
+    BasinAndStratum, BasinId, Duplicable, FileHeader, GrainId, IndexHeader, StratumHeader,
+    StratumId, TransactionId,
 };
 use crate::fsync::{FSyncBatch, FSyncManager};
-use crate::Result;
+use crate::util::u32_to_usize;
+use crate::{Error, Result};
 
 #[derive(Debug)]
 pub struct Store {
@@ -54,7 +59,7 @@ impl DiskState {
         let index_path = path.join("index");
 
         let mut scratch = Vec::new();
-        let discovered_strata = discover_strata(path, &mut scratch)?;
+        let mut discovered_strata = discover_strata(path, &mut scratch)?;
 
         if index_path.exists() {
             let mut index_writer = OpenOptions::new()
@@ -62,55 +67,62 @@ impl DiskState {
                 .write(true)
                 .open(&index_path)?;
 
-            let file_header = IndexFile::read_from(&mut index_writer, &mut scratch)?;
+            let file_header =
+                FileHeader::<IndexHeader>::read_from(&mut index_writer, &mut scratch)?;
 
             // TODO After the commit log is implemented, verify the final commit
             // or roll back if a partial write is detected.
 
-            let index = if file_header.first_header.transaction_id
-                > file_header.second_header.transaction_id
-            {
-                Duplicated {
-                    active: file_header.first_header,
-                    first_is_active: true,
-                }
-            } else {
-                Duplicated {
-                    active: file_header.second_header,
-                    first_is_active: false,
-                }
-            };
-
-            let mut basins = BasinMap::new();
-            for stratum in discovered_strata {
-                let header = if stratum.header.first_header.transaction_id
-                    > stratum.header.second_header.transaction_id
-                {
-                    Duplicated {
-                        active: stratum.header.first_header,
-                        first_is_active: true,
+            let (mut first_is_active, mut active, older) =
+                match dbg!((file_header.first, file_header.second)) {
+                    (Some(first), Some(second)) => {
+                        if first.transaction_id > second.transaction_id {
+                            (true, first, Some(second))
+                        } else {
+                            (false, second, Some(first))
+                        }
                     }
-                } else {
-                    Duplicated {
-                        active: stratum.header.second_header,
-                        first_is_active: false,
-                    }
+                    (Some(first), None) => (true, first, None),
+                    (None, Some(second)) => (false, second, None),
+                    (None, None) => unreachable!("FileHeader will return an error"),
                 };
 
-                let basin = basins.get_or_insert_with(stratum.id.basin(), || {
-                    BasinState::default_for(stratum.id.basin())
-                });
-                assert_eq!(
-                    basin.stratum.len(),
-                    stratum.id.stratum().as_usize(),
-                    "strata are non-sequential"
-                );
+            let mut strata_to_clean = None;
+            match (BasinMap::verify(&active, &mut discovered_strata), older) {
+                (Ok(_), _) => {}
+                (Err(_), Some(older)) => {
+                    BasinMap::verify(&older, &mut discovered_strata)?;
+                    active = older;
+                    first_is_active = !first_is_active;
+                    let mut invalid_strata = Vec::new();
+                    for (id, stratum) in &discovered_strata {
+                        if stratum.validate(active.transaction_id).is_err() {
+                            invalid_strata.push(*id);
+                        }
+                    }
+                    strata_to_clean = Some(invalid_strata);
+                }
+                (Err(err), None) => return Err(err),
+            };
 
-                basin.stratum.push(StratumState {
-                    path: Arc::new(path.join(stratum.id.to_string())),
-                    header,
-                    file: Some(stratum.file),
-                });
+            let mut basins = BasinMap::load_from(&active, discovered_strata, path)?;
+
+            let mut index = Duplicated {
+                active,
+                first_is_active,
+            };
+
+            if let Some(strata_to_clean) = strata_to_clean {
+                for id in strata_to_clean {
+                    let basin = basins[id.basin()].as_mut().expect("just loaded");
+                    let stratum = &mut basin.stratum[id.stratum().as_usize()];
+                    stratum
+                        .header
+                        .write_to(stratum.file.as_mut().expect("just loaded"))?;
+                }
+
+                index.write_to(&mut index_writer)?;
+                index_writer.sync_data()?;
             }
 
             Ok(Self {
@@ -183,12 +195,6 @@ where
     }
 }
 
-pub trait Duplicable: Sized {
-    const BYTES: u64;
-
-    fn write_to<W: io::Write>(&mut self, writer: W) -> Result<()>;
-}
-
 #[derive(Debug)]
 pub struct BasinState {
     pub id: BasinId,
@@ -221,23 +227,23 @@ impl BasinState {
     }
 }
 
-fn discover_strata(path: &Path, scratch: &mut Vec<u8>) -> Result<Vec<UnverifiedStratum>> {
-    let mut discovered = Vec::new();
+fn discover_strata(
+    path: &Path,
+    scratch: &mut Vec<u8>,
+) -> Result<BTreeMap<BasinAndStratum, UnverifiedStratum>> {
+    let mut discovered = BTreeMap::new();
 
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         if let Some(name) = entry.file_name().to_str() {
             if let Ok(basin_and_stratum) = BasinAndStratum::from_str(name) {
-                discovered.push(UnverifiedStratum::read_from(
-                    &entry.path(),
+                discovered.insert(
                     basin_and_stratum,
-                    scratch,
-                )?);
+                    UnverifiedStratum::read_from(&entry.path(), basin_and_stratum, scratch)?,
+                );
             }
         }
     }
-
-    discovered.sort_by(|a, b| a.id.cmp(&b.id));
 
     Ok(discovered)
 }
@@ -296,16 +302,175 @@ impl StratumState {
     }
 }
 
-struct UnverifiedStratum {
-    id: BasinAndStratum,
-    header: StratumFileHeader,
-    file: File,
+pub struct UnverifiedStratum {
+    pub id: BasinAndStratum,
+    pub header: FileHeader<StratumHeader>,
+    pub file: File,
 }
 
 impl UnverifiedStratum {
     pub fn read_from(path: &Path, id: BasinAndStratum, scratch: &mut Vec<u8>) -> Result<Self> {
         let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-        let header = StratumFileHeader::read_from(&mut file, scratch)?;
+        let header = FileHeader::read_from(&mut file, scratch)?;
         Ok(Self { id, header, file })
+    }
+
+    pub fn validate(&self, transaction: TransactionId) -> Result<()> {
+        match (&self.header.first, &self.header.second) {
+            (Some(first), Some(second)) => {
+                let first_is_valid = first.transaction_id <= transaction;
+                let first_is_newest = first.transaction_id > second.transaction_id;
+                let second_is_valid = second.transaction_id <= transaction;
+                if first_is_newest && first_is_valid || (!first_is_newest && second_is_valid) {
+                    Ok(())
+                } else {
+                    Err(Error::VerificationFailed)
+                }
+            }
+            (Some(active), _) | (_, Some(active)) if active.transaction_id <= transaction => Ok(()),
+            _ => Err(Error::VerificationFailed),
+        }
+    }
+}
+
+impl BasinMap<BasinState> {
+    pub fn verify(
+        index: &IndexHeader,
+        discovered_strata: &mut BTreeMap<BasinAndStratum, UnverifiedStratum>,
+    ) -> Result<()> {
+        for stratum in discovered_strata.values() {
+            match (&stratum.header.first, &stratum.header.second) {
+                (Some(first), Some(second)) => {
+                    let first_is_valid = first.transaction_id <= index.transaction_id;
+                    let first_is_newest = first.transaction_id > second.transaction_id;
+                    let second_is_valid = second.transaction_id <= index.transaction_id;
+                    if !(first_is_newest && first_is_valid || (!first_is_newest && second_is_valid))
+                    {
+                        return Err(Error::VerificationFailed);
+                    }
+                }
+                (Some(active), _) | (_, Some(active))
+                    if active.transaction_id <= index.transaction_id => {}
+                _ => {
+                    return Err(Error::VerificationFailed);
+                }
+            }
+        }
+
+        let mut scratch = Vec::new();
+        if let Some(commit_log_head) = index.commit_log_head {
+            if let Some(stratum) = discovered_strata.get_mut(&commit_log_head.basin_and_stratum()) {
+                let mut reader = BufReader::new(&mut stratum.file);
+                verify_read_grain(
+                    commit_log_head,
+                    &mut reader,
+                    index.transaction_id,
+                    &mut scratch,
+                )?;
+                let commit_log_entry = CommitLogEntry::read_from(&scratch[..])?;
+                for new_grain in &commit_log_entry.new_grains {
+                    verify_read_grain(
+                        new_grain.id,
+                        &mut reader,
+                        index.transaction_id,
+                        &mut scratch,
+                    )?;
+                }
+            } else {
+                // Couldn't find the stratum with the commit log.
+                return Err(Error::VerificationFailed);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn load_from(
+        index: &IndexHeader,
+        discovered_strata: BTreeMap<BasinAndStratum, UnverifiedStratum>,
+        directory: &Path,
+    ) -> Result<Self> {
+        let mut basins = Self::new();
+        for stratum in discovered_strata.into_values() {
+            let header = match (stratum.header.first, stratum.header.second) {
+                (Some(first), Some(second)) => {
+                    // Because we've already verified this, we can trust that if
+                    // the first is larger and still valid, we should use it,
+                    // otherwise we can use the second.
+                    if first.transaction_id > second.transaction_id
+                        && first.transaction_id <= index.transaction_id
+                    {
+                        Duplicated {
+                            active: first,
+                            first_is_active: true,
+                        }
+                    } else {
+                        Duplicated {
+                            active: second,
+                            first_is_active: false,
+                        }
+                    }
+                }
+                (Some(active), _) if active.transaction_id <= index.transaction_id => Duplicated {
+                    active,
+                    first_is_active: true,
+                },
+                (_, Some(active)) if active.transaction_id <= index.transaction_id => Duplicated {
+                    active,
+                    first_is_active: false,
+                },
+                _ => unreachable!("verify() is called before load_from"),
+            };
+
+            let basin = basins.get_or_insert_with(stratum.id.basin(), || {
+                BasinState::default_for(stratum.id.basin())
+            });
+            assert_eq!(
+                basin.stratum.len(),
+                stratum.id.stratum().as_usize(),
+                "strata are non-sequential"
+            );
+
+            basin.stratum.push(StratumState {
+                path: Arc::new(directory.join(stratum.id.to_string())),
+                header,
+                file: Some(stratum.file),
+            });
+        }
+        Ok(basins)
+    }
+}
+
+fn verify_read_grain(
+    grain: GrainId,
+    file: &mut BufReader<&mut File>,
+    transaction_id: TransactionId,
+    buffer: &mut Vec<u8>,
+) -> Result<()> {
+    file.seek(io::SeekFrom::Start(grain.file_position()))?;
+    let mut eight_bytes = [0; 8];
+    file.read_exact(&mut eight_bytes)?;
+    let grain_transaction_id = TransactionId::from_be_bytes(eight_bytes);
+    if grain_transaction_id != transaction_id {
+        return Err(Error::VerificationFailed);
+    }
+
+    let mut four_bytes = [0; 4];
+    file.read_exact(&mut four_bytes)?;
+    let length = u32::from_be_bytes(four_bytes);
+
+    let length = u32_to_usize(length)?;
+    buffer.resize(length, 0);
+    file.read_exact(buffer)?;
+
+    let computed_crc = crc32c(buffer);
+
+    file.read_exact(&mut four_bytes)?;
+    let stored_crc = u32::from_be_bytes(four_bytes);
+
+    if computed_crc == stored_crc {
+        Ok(())
+    } else {
+        Err(Error::ChecksumFailed)
     }
 }
