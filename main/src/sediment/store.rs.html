@@ -466,6 +466,42 @@
 <a href="#466" id="466">466</a>
 <a href="#467" id="467">467</a>
 <a href="#468" id="468">468</a>
+<a href="#469" id="469">469</a>
+<a href="#470" id="470">470</a>
+<a href="#471" id="471">471</a>
+<a href="#472" id="472">472</a>
+<a href="#473" id="473">473</a>
+<a href="#474" id="474">474</a>
+<a href="#475" id="475">475</a>
+<a href="#476" id="476">476</a>
+<a href="#477" id="477">477</a>
+<a href="#478" id="478">478</a>
+<a href="#479" id="479">479</a>
+<a href="#480" id="480">480</a>
+<a href="#481" id="481">481</a>
+<a href="#482" id="482">482</a>
+<a href="#483" id="483">483</a>
+<a href="#484" id="484">484</a>
+<a href="#485" id="485">485</a>
+<a href="#486" id="486">486</a>
+<a href="#487" id="487">487</a>
+<a href="#488" id="488">488</a>
+<a href="#489" id="489">489</a>
+<a href="#490" id="490">490</a>
+<a href="#491" id="491">491</a>
+<a href="#492" id="492">492</a>
+<a href="#493" id="493">493</a>
+<a href="#494" id="494">494</a>
+<a href="#495" id="495">495</a>
+<a href="#496" id="496">496</a>
+<a href="#497" id="497">497</a>
+<a href="#498" id="498">498</a>
+<a href="#499" id="499">499</a>
+<a href="#500" id="500">500</a>
+<a href="#501" id="501">501</a>
+<a href="#502" id="502">502</a>
+<a href="#503" id="503">503</a>
+<a href="#504" id="504">504</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
 <span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
@@ -538,10 +574,7 @@
             <span class="kw">let </span>file_header =
                 FileHeader::&lt;IndexHeader&gt;::read_from(<span class="kw-2">&amp;mut </span>index_writer, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
 
-            <span class="comment">// TODO After the commit log is implemented, verify the final commit
-            // or roll back if a partial write is detected.
-
-            </span><span class="kw">let </span>(<span class="kw-2">mut </span>first_is_active, <span class="kw-2">mut </span>active, older) =
+            <span class="kw">let </span>(<span class="kw-2">mut </span>first_is_active, <span class="kw-2">mut </span>active, older) =
                 <span class="kw">match </span>(file_header.first, file_header.second) {
                     (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
                         <span class="kw">if </span>first.transaction_id &gt; second.transaction_id {
@@ -560,11 +593,15 @@
                 (<span class="prelude-val">Ok</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; {}
                 (<span class="prelude-val">Err</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(older)) =&gt; {
                     BasinMap::verify(<span class="kw-2">&amp;</span>older, <span class="kw-2">&amp;mut </span>discovered_strata)<span class="question-mark">?</span>;
+
                     active = older;
                     first_is_active = !first_is_active;
+
                     <span class="kw">let </span><span class="kw-2">mut </span>invalid_strata = Vec::new();
                     <span class="kw">for </span>(id, stratum) <span class="kw">in </span><span class="kw-2">&amp;</span>discovered_strata {
-                        <span class="kw">if </span>stratum.validate(active.transaction_id).is_err() {
+                        <span class="kw">if </span>stratum.should_exist(<span class="kw-2">&amp;</span>active)
+                            &amp;&amp; stratum.needs_cleanup(active.transaction_id)
+                        {
                             invalid_strata.push(<span class="kw-2">*</span>id);
                         }
                     }
@@ -634,6 +671,12 @@
 
     <span class="kw">pub fn </span>write_header(<span class="kw-2">&amp;mut </span><span class="self">self</span>, transaction_id: TransactionId, sync: <span class="kw-2">&amp;</span>FSyncBatch) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="self">self</span>.index.active.transaction_id = transaction_id;
+        <span class="kw">for </span>(basin, count) <span class="kw">in </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.basins)
+            .into_iter()
+            .zip(<span class="kw-2">&amp;mut </span><span class="self">self</span>.index.active.basin_strata_count)
+        {
+            <span class="kw-2">*</span>count = basin.<span class="number">1</span>.stratum.len() <span class="kw">as </span>u64;
+        }
         <span class="self">self</span>.index.write_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>.index_writer)<span class="question-mark">?</span>;
 
         sync.queue_fsync_data(<span class="self">self</span>.index_writer.try_clone()<span class="question-mark">?</span>)<span class="question-mark">?</span>;
@@ -792,7 +835,7 @@
                     &amp;&amp; (first.transaction_id &gt; second.transaction_id || !second_is_valid);
                 <span class="kw">let </span>second_is_newest = second_is_valid
                     &amp;&amp; (second.transaction_id &gt; first.transaction_id || !first_is_valid);
-                <span class="kw">if </span>first_is_newest || second_is_newest {
+                <span class="kw">if </span>first_is_newest || second_is_newest || first.transaction_id == <span class="number">0 </span>{
                     <span class="prelude-val">Ok</span>(())
                 } <span class="kw">else </span>{
                     <span class="prelude-val">Err</span>(Error::VerificationFailed)
@@ -800,6 +843,21 @@
             }
             (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active)) <span class="kw">if </span>active.transaction_id &lt;= transaction =&gt; <span class="prelude-val">Ok</span>(()),
             <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(Error::VerificationFailed),
+        }
+    }
+
+    <span class="kw">pub fn </span>should_exist(<span class="kw-2">&amp;</span><span class="self">self</span>, index: <span class="kw-2">&amp;</span>IndexHeader) -&gt; bool {
+        <span class="self">self</span>.id.stratum().as_u64() &lt; index.basin_strata_count[usize::from(<span class="self">self</span>.id.basin().index())]
+    }
+
+    <span class="kw">pub fn </span>needs_cleanup(<span class="kw-2">&amp;</span><span class="self">self</span>, transaction: TransactionId) -&gt; bool {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.header.first, <span class="kw-2">&amp;</span><span class="self">self</span>.header.second) {
+            (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
+                <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= transaction;
+                <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= transaction;
+                !first_is_valid || !second_is_valid
+            }
+            <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
         }
     }
 }
@@ -810,7 +868,9 @@
         discovered_strata: <span class="kw-2">&amp;mut </span>BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.values() {
-            stratum.validate(index.transaction_id)<span class="question-mark">?</span>;
+            <span class="kw">if </span>stratum.should_exist(index) {
+                stratum.validate(index.transaction_id)<span class="question-mark">?</span>;
+            }
         }
 
         <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
@@ -849,7 +909,12 @@
         directory: <span class="kw-2">&amp;</span>Path,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>basins = <span class="self">Self</span>::new();
-        <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.into_values() {
+        <span class="kw">for </span><span class="kw-2">mut </span>stratum <span class="kw">in </span>discovered_strata.into_values() {
+            <span class="kw">if </span>!stratum.should_exist(index) {
+                std::fs::remove_file(directory.join(stratum.id.to_string()))<span class="question-mark">?</span>;
+                <span class="kw">continue</span>;
+            }
+
             <span class="kw">let </span>header = <span class="kw">match </span>(stratum.header.first, stratum.header.second) {
                 (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
                     <span class="comment">// Because we&#39;ve already verified this, we can trust that if
@@ -878,6 +943,13 @@
                     active,
                     first_is_active: <span class="bool-val">false</span>,
                 },
+                (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(stratum
+                        .header
+                        .error
+                        .take()
+                        .expect(<span class="string">&quot;no header requires error&quot;</span>))
+                }
                 <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;verify() is called before load_from&quot;</span>),
             };
 

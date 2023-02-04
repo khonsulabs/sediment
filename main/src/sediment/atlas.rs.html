@@ -546,6 +546,7 @@
 <a href="#546" id="546">546</a>
 <a href="#547" id="547">547</a>
 <a href="#548" id="548">548</a>
+<a href="#549" id="549">549</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::{HashMap, HashSet, VecDeque};
 <span class="kw">use </span>std::fs::{File, OpenOptions};
 <span class="kw">use </span>std::io::{BufReader, Read, Seek};
@@ -870,11 +871,12 @@
     <span class="kw">pub fn </span>check_grain_validity(<span class="kw-2">&amp;</span><span class="self">self</span>, grain: GrainId) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="kw">let </span>basin = <span class="self">self</span>.basins[grain.basin_id()]
             .as_ref()
-            .expect(<span class="string">&quot;basin missing&quot;</span>);
+            .ok_or(Error::GrainNotAllocated)<span class="question-mark">?</span>;
+
         <span class="kw">let </span>stratum = basin
             .strata
             .get(grain.stratum_id().as_usize())
-            .expect(<span class="string">&quot;stratum missing&quot;</span>);
+            .ok_or(Error::GrainNotAllocated)<span class="question-mark">?</span>;
         <span class="kw">if </span>stratum.known_grains.contains(<span class="kw-2">&amp;</span>grain.local_grain_index()) {
             <span class="prelude-val">Ok</span>(())
         } <span class="kw">else </span>{
