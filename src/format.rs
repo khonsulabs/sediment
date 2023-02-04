@@ -143,6 +143,10 @@ impl StratumId {
     pub const fn as_usize(self) -> usize {
         self.0 as usize
     }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
 }
 
 impl Display for StratumId {
@@ -366,6 +370,12 @@ impl From<TransactionId> for EntryId {
     }
 }
 
+impl PartialEq<u64> for TransactionId {
+    fn eq(&self, other: &u64) -> bool {
+        self.0 == *other
+    }
+}
+
 impl PartialEq<EntryId> for TransactionId {
     fn eq(&self, other: &EntryId) -> bool {
         self.0 == other.0
@@ -412,6 +422,7 @@ impl IndexFile {
 pub struct FileHeader<T> {
     pub first: Option<T>,
     pub second: Option<T>,
+    pub error: Option<Error>,
 }
 
 impl<T> FileHeader<T>
@@ -428,15 +439,22 @@ where
             (Ok(first_header), Ok(second_header)) => Ok(Self {
                 first: Some(first_header),
                 second: Some(second_header),
+                error: None,
             }),
-            (Err(err), Err(_)) => Err(err),
+            (Err(err), Err(_)) => Ok(Self {
+                first: None,
+                second: None,
+                error: Some(err),
+            }),
             (Ok(first_header), Err(_)) => Ok(Self {
                 first: Some(first_header),
                 second: None,
+                error: None,
             }),
             (Err(_), Ok(second_header)) => Ok(Self {
                 first: None,
                 second: Some(second_header),
+                error: None,
             }),
         }
     }
@@ -456,7 +474,10 @@ pub trait Duplicable: Sized {
 /// - `transaction_id`: 8 bytes
 /// - `embedded_header_data`: 8 bytes
 /// - `commit_log_head`: 8 bytes
-/// - `crc32`: 4 bytes (checksum of previous 24 bytes)
+/// - `checkpoint_target`: 8 bytes
+/// - `checkpointed_to`: 8 bytes
+/// - `basin_strata_count`: 8 x 6 bytes (48 bytes).
+/// - `crc32`: 4 bytes (checksum of previous 88 bytes)
 ///
 /// The total header length is 36 bytes.
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
@@ -466,32 +487,45 @@ pub struct IndexHeader {
     pub commit_log_head: Option<GrainId>,
     pub checkpoint_target: TransactionId,
     pub checkpointed_to: TransactionId,
+    pub basin_strata_count: [u64; 8],
     pub crc32: u32,
 }
 
 impl Duplicable for IndexHeader {
-    const BYTES: u64 = 44;
+    const BYTES: u64 = 92;
 
     fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
-        scratch.resize(44, 0);
+        scratch.resize(Self::BYTES as usize, 0);
         file.read_exact(scratch)?;
-        let crc32 = u32::from_be_bytes(scratch[40..].try_into().expect("u32 is 4 bytes"));
-        let computed_crc = crc32c(&scratch[..40]);
+        let crc32 = u32::from_be_bytes(scratch[88..].try_into().expect("u32 is 4 bytes"));
+        let computed_crc = crc32c(&scratch[..88]);
         if crc32 != computed_crc {
             return Err(Error::ChecksumFailed);
         }
 
+        let (transaction_bytes, remaining) = scratch.split_at(8);
         let transaction_id = TransactionId(u64::from_be_bytes(
-            scratch[..8].try_into().expect("u64 is 8 bytes"),
+            transaction_bytes.try_into().expect("u64 is 8 bytes"),
         ));
-        let embedded_header_data = GrainId::from_bytes(&scratch[8..16]);
-        let commit_log_head = GrainId::from_bytes(&scratch[16..24]);
+        let (embedded_header_bytes, remaining) = remaining.split_at(8);
+        let embedded_header_data = GrainId::from_bytes(embedded_header_bytes);
+        let (commit_log_head_bytes, remaining) = remaining.split_at(8);
+        let commit_log_head = GrainId::from_bytes(commit_log_head_bytes);
+        let (checkpoint_target_bytes, remaining) = remaining.split_at(8);
         let checkpoint_target = TransactionId(u64::from_be_bytes(
-            scratch[24..32].try_into().expect("u64 is 8 bytes"),
+            checkpoint_target_bytes.try_into().expect("u64 is 8 bytes"),
         ));
+        let (checkpointed_to_bytes, mut remaining) = remaining.split_at(8);
         let checkpointed_to = TransactionId(u64::from_be_bytes(
-            scratch[32..40].try_into().expect("u64 is 8 bytes"),
+            checkpointed_to_bytes.try_into().expect("u64 is 8 bytes"),
         ));
+        let mut basin_strata_count = [0; 8];
+        for count in &mut basin_strata_count {
+            let mut padded_bytes = [0; 8];
+            padded_bytes[2..].copy_from_slice(&remaining[..6]);
+            remaining = &remaining[6..];
+            *count = u64::from_be_bytes(padded_bytes);
+        }
 
         Ok(Self {
             transaction_id,
@@ -499,6 +533,7 @@ impl Duplicable for IndexHeader {
             commit_log_head,
             checkpoint_target,
             checkpointed_to,
+            basin_strata_count,
             crc32,
         })
     }
@@ -522,6 +557,9 @@ impl Duplicable for IndexHeader {
         )?;
         writer.write_all(&self.checkpoint_target.to_be_bytes())?;
         writer.write_all(&self.checkpointed_to.to_be_bytes())?;
+        for count in &self.basin_strata_count {
+            writer.write_all(&count.to_be_bytes()[2..])?;
+        }
         let (_, crc32) = writer.write_crc32_and_finish()?;
         self.crc32 = crc32;
 

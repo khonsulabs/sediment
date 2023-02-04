@@ -70,9 +70,6 @@ impl DiskState {
             let file_header =
                 FileHeader::<IndexHeader>::read_from(&mut index_writer, &mut scratch)?;
 
-            // TODO After the commit log is implemented, verify the final commit
-            // or roll back if a partial write is detected.
-
             let (mut first_is_active, mut active, older) =
                 match (file_header.first, file_header.second) {
                     (Some(first), Some(second)) => {
@@ -92,11 +89,15 @@ impl DiskState {
                 (Ok(_), _) => {}
                 (Err(_), Some(older)) => {
                     BasinMap::verify(&older, &mut discovered_strata)?;
+
                     active = older;
                     first_is_active = !first_is_active;
+
                     let mut invalid_strata = Vec::new();
                     for (id, stratum) in &discovered_strata {
-                        if stratum.validate(active.transaction_id).is_err() {
+                        if stratum.should_exist(&active)
+                            && stratum.needs_cleanup(active.transaction_id)
+                        {
                             invalid_strata.push(*id);
                         }
                     }
@@ -166,6 +167,12 @@ impl DiskState {
 
     pub fn write_header(&mut self, transaction_id: TransactionId, sync: &FSyncBatch) -> Result<()> {
         self.index.active.transaction_id = transaction_id;
+        for (basin, count) in (&self.basins)
+            .into_iter()
+            .zip(&mut self.index.active.basin_strata_count)
+        {
+            *count = basin.1.stratum.len() as u64;
+        }
         self.index.write_to(&mut self.index_writer)?;
 
         sync.queue_fsync_data(self.index_writer.try_clone()?)?;
@@ -324,7 +331,7 @@ impl UnverifiedStratum {
                     && (first.transaction_id > second.transaction_id || !second_is_valid);
                 let second_is_newest = second_is_valid
                     && (second.transaction_id > first.transaction_id || !first_is_valid);
-                if first_is_newest || second_is_newest {
+                if first_is_newest || second_is_newest || first.transaction_id == 0 {
                     Ok(())
                 } else {
                     Err(Error::VerificationFailed)
@@ -332,6 +339,21 @@ impl UnverifiedStratum {
             }
             (Some(active), _) | (_, Some(active)) if active.transaction_id <= transaction => Ok(()),
             _ => Err(Error::VerificationFailed),
+        }
+    }
+
+    pub fn should_exist(&self, index: &IndexHeader) -> bool {
+        self.id.stratum().as_u64() < index.basin_strata_count[usize::from(self.id.basin().index())]
+    }
+
+    pub fn needs_cleanup(&self, transaction: TransactionId) -> bool {
+        match (&self.header.first, &self.header.second) {
+            (Some(first), Some(second)) => {
+                let first_is_valid = first.transaction_id <= transaction;
+                let second_is_valid = second.transaction_id <= transaction;
+                !first_is_valid || !second_is_valid
+            }
+            _ => true,
         }
     }
 }
@@ -342,7 +364,9 @@ impl BasinMap<BasinState> {
         discovered_strata: &mut BTreeMap<BasinAndStratum, UnverifiedStratum>,
     ) -> Result<()> {
         for stratum in discovered_strata.values() {
-            stratum.validate(index.transaction_id)?;
+            if stratum.should_exist(index) {
+                stratum.validate(index.transaction_id)?;
+            }
         }
 
         let mut scratch = Vec::new();
@@ -381,7 +405,12 @@ impl BasinMap<BasinState> {
         directory: &Path,
     ) -> Result<Self> {
         let mut basins = Self::new();
-        for stratum in discovered_strata.into_values() {
+        for mut stratum in discovered_strata.into_values() {
+            if !stratum.should_exist(index) {
+                std::fs::remove_file(directory.join(stratum.id.to_string()))?;
+                continue;
+            }
+
             let header = match (stratum.header.first, stratum.header.second) {
                 (Some(first), Some(second)) => {
                     // Because we've already verified this, we can trust that if
@@ -410,6 +439,13 @@ impl BasinMap<BasinState> {
                     active,
                     first_is_active: false,
                 },
+                (None, None) => {
+                    return Err(stratum
+                        .header
+                        .error
+                        .take()
+                        .expect("no header requires error"))
+                }
                 _ => unreachable!("verify() is called before load_from"),
             };
 

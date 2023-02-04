@@ -322,11 +322,12 @@ impl Data {
     pub fn check_grain_validity(&self, grain: GrainId) -> Result<()> {
         let basin = self.basins[grain.basin_id()]
             .as_ref()
-            .expect("basin missing");
+            .ok_or(Error::GrainNotAllocated)?;
+
         let stratum = basin
             .strata
             .get(grain.stratum_id().as_usize())
-            .expect("stratum missing");
+            .ok_or(Error::GrainNotAllocated)?;
         if stratum.known_grains.contains(&grain.local_grain_index()) {
             Ok(())
         } else {

@@ -367,6 +367,13 @@ fn last_write_rollback() {
     // being written but the directory metadata not being synchronized, causing
     // the file's record to be entirely lost.
     test_write_after(&[WriteCommand::RemoveStratum]);
+    // Test overwriting the headers with 0 -- an edge case where the file record
+    // was synced but the headers weren't.
+    test_write_after(&[WriteCommand::Write {
+        target: Target::Stratum,
+        offset: 0,
+        bytes: &[1; 16_384 * 2],
+    }]);
 
     // Test overwriting a grain's transaction ID in both the first and second
     // headers.
