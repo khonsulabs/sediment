@@ -1,9 +1,9 @@
-use std::fs;
-use std::io::Read;
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Seek, Write};
 use std::path::Path;
 
 use crate::config::Config;
-use crate::format::TransactionId;
+use crate::format::{Duplicable, IndexHeader, StratumHeader, TransactionId};
 use crate::Database;
 
 #[test]
@@ -259,4 +259,168 @@ fn rollback() {
     db.shutdown().unwrap();
 
     fs::remove_dir_all(path).unwrap();
+}
+
+enum WriteCommand {
+    Write {
+        target: Target,
+        offset: u64,
+        bytes: &'static [u8],
+    },
+
+    DoNothing,
+}
+
+enum Target {
+    Grain,
+    Stratum,
+    Index,
+}
+
+#[test]
+fn last_write_rollback() {
+    fn test_write_after(commands: &[WriteCommand]) {
+        let path = Path::new("last-write");
+        if path.exists() {
+            fs::remove_dir_all(path).unwrap();
+        }
+
+        let mut written_grains = Vec::new();
+        let mut rolled_back_grains = Vec::new();
+        let mut commands = commands.iter();
+        let mut index = 0_usize;
+        loop {
+            let db = Config::for_directory(path)
+                .configure_wal(|wal| wal.checkpoint_after_bytes(10))
+                .recover()
+                .unwrap();
+
+            for (grain_id, expected_data) in &written_grains {
+                assert_eq!(
+                    db.read(*grain_id)
+                        .unwrap()
+                        .expect("grain missing")
+                        .read_all_data()
+                        .unwrap(),
+                    expected_data
+                )
+            }
+
+            for (grain_id, expected_data) in &rolled_back_grains {
+                if let Some(reader) = db.read(*grain_id).unwrap() {
+                    // The grain id can be reused, but the contents shouldn't
+                    // match. Note that this rollback required forcibly changing
+                    // bits after the transaction was written. In a normal crash
+                    // or power outage scenario, the grain id wouldn't have been
+                    // returned until the data is fully synced to disk.
+                    assert_ne!(reader.read_all_data().unwrap(), expected_data);
+                }
+            }
+
+            let mut tx = db.begin_transaction().unwrap();
+            let data = index.to_be_bytes();
+            index += 1;
+            let grain_id = dbg!(tx.write(&data).unwrap());
+            tx.commit().unwrap();
+
+            db.shutdown().unwrap();
+
+            match commands.next() {
+                Some(WriteCommand::Write {
+                    target,
+                    offset,
+                    bytes,
+                }) => {
+                    let mut file = match target {
+                        Target::Grain | Target::Stratum => OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(path.join(grain_id.basin_and_stratum().to_string()))
+                            .unwrap(),
+                        Target::Index => OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .open(path.join("index"))
+                            .unwrap(),
+                    };
+                    let position = match target {
+                        Target::Grain => grain_id.file_position() + *offset,
+                        Target::Stratum | Target::Index => *offset,
+                    };
+                    file.seek(std::io::SeekFrom::Start(position)).unwrap();
+                    file.write_all(bytes).unwrap();
+                    rolled_back_grains.push((grain_id, data));
+                }
+                Some(WriteCommand::DoNothing) => written_grains.push((grain_id, data)),
+                None => break,
+            }
+        }
+
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    // Test overwriting a grain's transaction ID in both the first and second
+    // headers.
+    test_write_after(&[WriteCommand::Write {
+        target: Target::Grain,
+        offset: 0,
+        bytes: &[0xFF],
+    }]);
+
+    test_write_after(&[
+        WriteCommand::DoNothing,
+        WriteCommand::Write {
+            target: Target::Grain,
+            offset: 0,
+            bytes: &[0xFF],
+        },
+    ]);
+
+    // Test mutating the grain data, causing its CRC to fail to validate.
+    test_write_after(&[WriteCommand::Write {
+        target: Target::Grain,
+        offset: 13,
+        bytes: &[0xFF],
+    }]);
+
+    test_write_after(&[
+        WriteCommand::DoNothing,
+        WriteCommand::Write {
+            target: Target::Grain,
+            offset: 13,
+            bytes: &[0xFF],
+        },
+    ]);
+
+    // Test overwriting the stratum header.
+    test_write_after(&[WriteCommand::Write {
+        target: Target::Stratum,
+        offset: 0,
+        bytes: &[0xFF],
+    }]);
+
+    test_write_after(&[
+        WriteCommand::DoNothing,
+        WriteCommand::Write {
+            target: Target::Stratum,
+            offset: StratumHeader::BYTES,
+            bytes: &[0xFF],
+        },
+    ]);
+
+    // Test mucking with the index file
+    test_write_after(&[WriteCommand::Write {
+        target: Target::Index,
+        offset: 0,
+        bytes: &[0xFF],
+    }]);
+
+    test_write_after(&[
+        WriteCommand::DoNothing,
+        WriteCommand::Write {
+            target: Target::Index,
+            offset: IndexHeader::BYTES,
+            bytes: &[0xFF],
+        },
+    ]);
 }

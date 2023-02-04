@@ -421,7 +421,7 @@ where
     pub fn read_from<R: Read + Seek>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
         let first_header = T::read_from(&mut file, scratch);
         if first_header.is_err() {
-            file.seek(std::io::SeekFrom::Start(IndexHeader::BYTES))?;
+            file.seek(std::io::SeekFrom::Start(T::BYTES))?;
         }
         let second_header = T::read_from(&mut file, scratch);
         match (first_header, second_header) {

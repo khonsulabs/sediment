@@ -74,7 +74,7 @@ impl DiskState {
             // or roll back if a partial write is detected.
 
             let (mut first_is_active, mut active, older) =
-                match dbg!((file_header.first, file_header.second)) {
+                match (file_header.first, file_header.second) {
                     (Some(first), Some(second)) => {
                         if first.transaction_id > second.transaction_id {
                             (true, first, Some(second))
@@ -319,9 +319,12 @@ impl UnverifiedStratum {
         match (&self.header.first, &self.header.second) {
             (Some(first), Some(second)) => {
                 let first_is_valid = first.transaction_id <= transaction;
-                let first_is_newest = first.transaction_id > second.transaction_id;
                 let second_is_valid = second.transaction_id <= transaction;
-                if first_is_newest && first_is_valid || (!first_is_newest && second_is_valid) {
+                let first_is_newest = first_is_valid
+                    && (first.transaction_id > second.transaction_id || !second_is_valid);
+                let second_is_newest = second_is_valid
+                    && (second.transaction_id > first.transaction_id || !first_is_valid);
+                if (first_is_newest && first_is_valid) || (second_is_newest && second_is_valid) {
                     Ok(())
                 } else {
                     Err(Error::VerificationFailed)
@@ -339,22 +342,7 @@ impl BasinMap<BasinState> {
         discovered_strata: &mut BTreeMap<BasinAndStratum, UnverifiedStratum>,
     ) -> Result<()> {
         for stratum in discovered_strata.values() {
-            match (&stratum.header.first, &stratum.header.second) {
-                (Some(first), Some(second)) => {
-                    let first_is_valid = first.transaction_id <= index.transaction_id;
-                    let first_is_newest = first.transaction_id > second.transaction_id;
-                    let second_is_valid = second.transaction_id <= index.transaction_id;
-                    if !(first_is_newest && first_is_valid || (!first_is_newest && second_is_valid))
-                    {
-                        return Err(Error::VerificationFailed);
-                    }
-                }
-                (Some(active), _) | (_, Some(active))
-                    if active.transaction_id <= index.transaction_id => {}
-                _ => {
-                    return Err(Error::VerificationFailed);
-                }
-            }
+            stratum.validate(index.transaction_id)?;
         }
 
         let mut scratch = Vec::new();
@@ -365,6 +353,7 @@ impl BasinMap<BasinState> {
                     commit_log_head,
                     &mut reader,
                     index.transaction_id,
+                    None,
                     &mut scratch,
                 )?;
                 let commit_log_entry = CommitLogEntry::read_from(&scratch[..])?;
@@ -373,6 +362,7 @@ impl BasinMap<BasinState> {
                         new_grain.id,
                         &mut reader,
                         index.transaction_id,
+                        Some(new_grain.crc32),
                         &mut scratch,
                     )?;
                 }
@@ -397,9 +387,10 @@ impl BasinMap<BasinState> {
                     // Because we've already verified this, we can trust that if
                     // the first is larger and still valid, we should use it,
                     // otherwise we can use the second.
-                    if first.transaction_id > second.transaction_id
-                        && first.transaction_id <= index.transaction_id
-                    {
+                    let first_is_valid = first.transaction_id <= index.transaction_id;
+                    let second_is_valid = second.transaction_id <= index.transaction_id;
+                    let first_is_newest = first.transaction_id > second.transaction_id;
+                    if (first_is_newest && first_is_valid) || !second_is_valid {
                         Duplicated {
                             active: first,
                             first_is_active: true,
@@ -445,6 +436,7 @@ fn verify_read_grain(
     grain: GrainId,
     file: &mut BufReader<&mut File>,
     transaction_id: TransactionId,
+    expected_crc: Option<u32>,
     buffer: &mut Vec<u8>,
 ) -> Result<()> {
     file.seek(io::SeekFrom::Start(grain.file_position()))?;
@@ -468,7 +460,7 @@ fn verify_read_grain(
     file.read_exact(&mut four_bytes)?;
     let stored_crc = u32::from_be_bytes(four_bytes);
 
-    if computed_crc == stored_crc {
+    if computed_crc == stored_crc && expected_crc.map_or(true, |expected| expected == stored_crc) {
         Ok(())
     } else {
         Err(Error::ChecksumFailed)
