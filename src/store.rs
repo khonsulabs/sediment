@@ -324,7 +324,7 @@ impl UnverifiedStratum {
                     && (first.transaction_id > second.transaction_id || !second_is_valid);
                 let second_is_newest = second_is_valid
                     && (second.transaction_id > first.transaction_id || !first_is_valid);
-                if (first_is_newest && first_is_valid) || (second_is_newest && second_is_valid) {
+                if first_is_newest || second_is_newest {
                     Ok(())
                 } else {
                     Err(Error::VerificationFailed)

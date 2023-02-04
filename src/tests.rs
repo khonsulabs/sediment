@@ -267,7 +267,7 @@ enum WriteCommand {
         offset: u64,
         bytes: &'static [u8],
     },
-
+    RemoveStratum,
     DoNothing,
 }
 
@@ -351,6 +351,10 @@ fn last_write_rollback() {
                     file.write_all(bytes).unwrap();
                     rolled_back_grains.push((grain_id, data));
                 }
+                Some(WriteCommand::RemoveStratum) => {
+                    std::fs::remove_file(path.join(grain_id.basin_and_stratum().to_string()))
+                        .unwrap();
+                }
                 Some(WriteCommand::DoNothing) => written_grains.push((grain_id, data)),
                 None => break,
             }
@@ -358,6 +362,11 @@ fn last_write_rollback() {
 
         fs::remove_dir_all(path).unwrap();
     }
+
+    // Test removing the stratum after it's been created. This simulates a file
+    // being written but the directory metadata not being synchronized, causing
+    // the file's record to be entirely lost.
+    test_write_after(&[WriteCommand::RemoveStratum]);
 
     // Test overwriting a grain's transaction ID in both the first and second
     // headers.
