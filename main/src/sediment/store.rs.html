@@ -466,14 +466,6 @@
 <a href="#466" id="466">466</a>
 <a href="#467" id="467">467</a>
 <a href="#468" id="468">468</a>
-<a href="#469" id="469">469</a>
-<a href="#470" id="470">470</a>
-<a href="#471" id="471">471</a>
-<a href="#472" id="472">472</a>
-<a href="#473" id="473">473</a>
-<a href="#474" id="474">474</a>
-<a href="#475" id="475">475</a>
-<a href="#476" id="476">476</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
 <span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
@@ -550,7 +542,7 @@
             // or roll back if a partial write is detected.
 
             </span><span class="kw">let </span>(<span class="kw-2">mut </span>first_is_active, <span class="kw-2">mut </span>active, older) =
-                <span class="kw">match </span><span class="macro">dbg!</span>((file_header.first, file_header.second)) {
+                <span class="kw">match </span>(file_header.first, file_header.second) {
                     (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
                         <span class="kw">if </span>first.transaction_id &gt; second.transaction_id {
                             (<span class="bool-val">true</span>, first, <span class="prelude-val">Some</span>(second))
@@ -795,9 +787,12 @@
         <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.header.first, <span class="kw-2">&amp;</span><span class="self">self</span>.header.second) {
             (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
                 <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= transaction;
-                <span class="kw">let </span>first_is_newest = first.transaction_id &gt; second.transaction_id;
                 <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= transaction;
-                <span class="kw">if </span>first_is_newest &amp;&amp; first_is_valid || (!first_is_newest &amp;&amp; second_is_valid) {
+                <span class="kw">let </span>first_is_newest = first_is_valid
+                    &amp;&amp; (first.transaction_id &gt; second.transaction_id || !second_is_valid);
+                <span class="kw">let </span>second_is_newest = second_is_valid
+                    &amp;&amp; (second.transaction_id &gt; first.transaction_id || !first_is_valid);
+                <span class="kw">if </span>(first_is_newest &amp;&amp; first_is_valid) || (second_is_newest &amp;&amp; second_is_valid) {
                     <span class="prelude-val">Ok</span>(())
                 } <span class="kw">else </span>{
                     <span class="prelude-val">Err</span>(Error::VerificationFailed)
@@ -815,22 +810,7 @@
         discovered_strata: <span class="kw-2">&amp;mut </span>BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.values() {
-            <span class="kw">match </span>(<span class="kw-2">&amp;</span>stratum.header.first, <span class="kw-2">&amp;</span>stratum.header.second) {
-                (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
-                    <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= index.transaction_id;
-                    <span class="kw">let </span>first_is_newest = first.transaction_id &gt; second.transaction_id;
-                    <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= index.transaction_id;
-                    <span class="kw">if </span>!(first_is_newest &amp;&amp; first_is_valid || (!first_is_newest &amp;&amp; second_is_valid))
-                    {
-                        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
-                    }
-                }
-                (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active))
-                    <span class="kw">if </span>active.transaction_id &lt;= index.transaction_id =&gt; {}
-                <span class="kw">_ </span>=&gt; {
-                    <span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
-                }
-            }
+            stratum.validate(index.transaction_id)<span class="question-mark">?</span>;
         }
 
         <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
@@ -841,6 +821,7 @@
                     commit_log_head,
                     <span class="kw-2">&amp;mut </span>reader,
                     index.transaction_id,
+                    <span class="prelude-val">None</span>,
                     <span class="kw-2">&amp;mut </span>scratch,
                 )<span class="question-mark">?</span>;
                 <span class="kw">let </span>commit_log_entry = CommitLogEntry::read_from(<span class="kw-2">&amp;</span>scratch[..])<span class="question-mark">?</span>;
@@ -849,6 +830,7 @@
                         new_grain.id,
                         <span class="kw-2">&amp;mut </span>reader,
                         index.transaction_id,
+                        <span class="prelude-val">Some</span>(new_grain.crc32),
                         <span class="kw-2">&amp;mut </span>scratch,
                     )<span class="question-mark">?</span>;
                 }
@@ -873,9 +855,10 @@
                     <span class="comment">// Because we&#39;ve already verified this, we can trust that if
                     // the first is larger and still valid, we should use it,
                     // otherwise we can use the second.
-                    </span><span class="kw">if </span>first.transaction_id &gt; second.transaction_id
-                        &amp;&amp; first.transaction_id &lt;= index.transaction_id
-                    {
+                    </span><span class="kw">let </span>first_is_valid = first.transaction_id &lt;= index.transaction_id;
+                    <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= index.transaction_id;
+                    <span class="kw">let </span>first_is_newest = first.transaction_id &gt; second.transaction_id;
+                    <span class="kw">if </span>(first_is_newest &amp;&amp; first_is_valid) || !second_is_valid {
                         Duplicated {
                             active: first,
                             first_is_active: <span class="bool-val">true</span>,
@@ -921,6 +904,7 @@
     grain: GrainId,
     file: <span class="kw-2">&amp;mut </span>BufReader&lt;<span class="kw-2">&amp;mut </span>File&gt;,
     transaction_id: TransactionId,
+    expected_crc: <span class="prelude-ty">Option</span>&lt;u32&gt;,
     buffer: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
 ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
     file.seek(io::SeekFrom::Start(grain.file_position()))<span class="question-mark">?</span>;
@@ -944,7 +928,7 @@
     file.read_exact(<span class="kw-2">&amp;mut </span>four_bytes)<span class="question-mark">?</span>;
     <span class="kw">let </span>stored_crc = u32::from_be_bytes(four_bytes);
 
-    <span class="kw">if </span>computed_crc == stored_crc {
+    <span class="kw">if </span>computed_crc == stored_crc &amp;&amp; expected_crc.map_or(<span class="bool-val">true</span>, |expected| expected == stored_crc) {
         <span class="prelude-val">Ok</span>(())
     } <span class="kw">else </span>{
         <span class="prelude-val">Err</span>(Error::ChecksumFailed)
