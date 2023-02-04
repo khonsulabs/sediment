@@ -309,19 +309,189 @@
 <a href="#309" id="309">309</a>
 <a href="#310" id="310">310</a>
 <a href="#311" id="311">311</a>
-</pre><pre class="rust"><code><span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
-<span class="kw">use </span>std::io::{<span class="self">self</span>, Seek};
+<a href="#312" id="312">312</a>
+<a href="#313" id="313">313</a>
+<a href="#314" id="314">314</a>
+<a href="#315" id="315">315</a>
+<a href="#316" id="316">316</a>
+<a href="#317" id="317">317</a>
+<a href="#318" id="318">318</a>
+<a href="#319" id="319">319</a>
+<a href="#320" id="320">320</a>
+<a href="#321" id="321">321</a>
+<a href="#322" id="322">322</a>
+<a href="#323" id="323">323</a>
+<a href="#324" id="324">324</a>
+<a href="#325" id="325">325</a>
+<a href="#326" id="326">326</a>
+<a href="#327" id="327">327</a>
+<a href="#328" id="328">328</a>
+<a href="#329" id="329">329</a>
+<a href="#330" id="330">330</a>
+<a href="#331" id="331">331</a>
+<a href="#332" id="332">332</a>
+<a href="#333" id="333">333</a>
+<a href="#334" id="334">334</a>
+<a href="#335" id="335">335</a>
+<a href="#336" id="336">336</a>
+<a href="#337" id="337">337</a>
+<a href="#338" id="338">338</a>
+<a href="#339" id="339">339</a>
+<a href="#340" id="340">340</a>
+<a href="#341" id="341">341</a>
+<a href="#342" id="342">342</a>
+<a href="#343" id="343">343</a>
+<a href="#344" id="344">344</a>
+<a href="#345" id="345">345</a>
+<a href="#346" id="346">346</a>
+<a href="#347" id="347">347</a>
+<a href="#348" id="348">348</a>
+<a href="#349" id="349">349</a>
+<a href="#350" id="350">350</a>
+<a href="#351" id="351">351</a>
+<a href="#352" id="352">352</a>
+<a href="#353" id="353">353</a>
+<a href="#354" id="354">354</a>
+<a href="#355" id="355">355</a>
+<a href="#356" id="356">356</a>
+<a href="#357" id="357">357</a>
+<a href="#358" id="358">358</a>
+<a href="#359" id="359">359</a>
+<a href="#360" id="360">360</a>
+<a href="#361" id="361">361</a>
+<a href="#362" id="362">362</a>
+<a href="#363" id="363">363</a>
+<a href="#364" id="364">364</a>
+<a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
+<a href="#381" id="381">381</a>
+<a href="#382" id="382">382</a>
+<a href="#383" id="383">383</a>
+<a href="#384" id="384">384</a>
+<a href="#385" id="385">385</a>
+<a href="#386" id="386">386</a>
+<a href="#387" id="387">387</a>
+<a href="#388" id="388">388</a>
+<a href="#389" id="389">389</a>
+<a href="#390" id="390">390</a>
+<a href="#391" id="391">391</a>
+<a href="#392" id="392">392</a>
+<a href="#393" id="393">393</a>
+<a href="#394" id="394">394</a>
+<a href="#395" id="395">395</a>
+<a href="#396" id="396">396</a>
+<a href="#397" id="397">397</a>
+<a href="#398" id="398">398</a>
+<a href="#399" id="399">399</a>
+<a href="#400" id="400">400</a>
+<a href="#401" id="401">401</a>
+<a href="#402" id="402">402</a>
+<a href="#403" id="403">403</a>
+<a href="#404" id="404">404</a>
+<a href="#405" id="405">405</a>
+<a href="#406" id="406">406</a>
+<a href="#407" id="407">407</a>
+<a href="#408" id="408">408</a>
+<a href="#409" id="409">409</a>
+<a href="#410" id="410">410</a>
+<a href="#411" id="411">411</a>
+<a href="#412" id="412">412</a>
+<a href="#413" id="413">413</a>
+<a href="#414" id="414">414</a>
+<a href="#415" id="415">415</a>
+<a href="#416" id="416">416</a>
+<a href="#417" id="417">417</a>
+<a href="#418" id="418">418</a>
+<a href="#419" id="419">419</a>
+<a href="#420" id="420">420</a>
+<a href="#421" id="421">421</a>
+<a href="#422" id="422">422</a>
+<a href="#423" id="423">423</a>
+<a href="#424" id="424">424</a>
+<a href="#425" id="425">425</a>
+<a href="#426" id="426">426</a>
+<a href="#427" id="427">427</a>
+<a href="#428" id="428">428</a>
+<a href="#429" id="429">429</a>
+<a href="#430" id="430">430</a>
+<a href="#431" id="431">431</a>
+<a href="#432" id="432">432</a>
+<a href="#433" id="433">433</a>
+<a href="#434" id="434">434</a>
+<a href="#435" id="435">435</a>
+<a href="#436" id="436">436</a>
+<a href="#437" id="437">437</a>
+<a href="#438" id="438">438</a>
+<a href="#439" id="439">439</a>
+<a href="#440" id="440">440</a>
+<a href="#441" id="441">441</a>
+<a href="#442" id="442">442</a>
+<a href="#443" id="443">443</a>
+<a href="#444" id="444">444</a>
+<a href="#445" id="445">445</a>
+<a href="#446" id="446">446</a>
+<a href="#447" id="447">447</a>
+<a href="#448" id="448">448</a>
+<a href="#449" id="449">449</a>
+<a href="#450" id="450">450</a>
+<a href="#451" id="451">451</a>
+<a href="#452" id="452">452</a>
+<a href="#453" id="453">453</a>
+<a href="#454" id="454">454</a>
+<a href="#455" id="455">455</a>
+<a href="#456" id="456">456</a>
+<a href="#457" id="457">457</a>
+<a href="#458" id="458">458</a>
+<a href="#459" id="459">459</a>
+<a href="#460" id="460">460</a>
+<a href="#461" id="461">461</a>
+<a href="#462" id="462">462</a>
+<a href="#463" id="463">463</a>
+<a href="#464" id="464">464</a>
+<a href="#465" id="465">465</a>
+<a href="#466" id="466">466</a>
+<a href="#467" id="467">467</a>
+<a href="#468" id="468">468</a>
+<a href="#469" id="469">469</a>
+<a href="#470" id="470">470</a>
+<a href="#471" id="471">471</a>
+<a href="#472" id="472">472</a>
+<a href="#473" id="473">473</a>
+<a href="#474" id="474">474</a>
+<a href="#475" id="475">475</a>
+<a href="#476" id="476">476</a>
+</pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
+<span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
+<span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
 <span class="kw">use </span>std::path::{Path, PathBuf};
 <span class="kw">use </span>std::str::FromStr;
 <span class="kw">use </span>std::sync::{Arc, Mutex, MutexGuard};
 
+<span class="kw">use </span>crc32c::crc32c;
+
 <span class="kw">use </span><span class="kw">crate</span>::basinmap::BasinMap;
+<span class="kw">use </span><span class="kw">crate</span>::commit_log::CommitLogEntry;
 <span class="kw">use </span><span class="kw">crate</span>::format::{
-    BasinAndStratum, BasinId, IndexFile, IndexHeader, StratumFileHeader, StratumHeader, StratumId,
-    TransactionId,
+    BasinAndStratum, BasinId, Duplicable, FileHeader, GrainId, IndexHeader, StratumHeader,
+    StratumId, TransactionId,
 };
 <span class="kw">use </span><span class="kw">crate</span>::fsync::{FSyncBatch, FSyncManager};
-<span class="kw">use </span><span class="kw">crate</span>::Result;
+<span class="kw">use </span><span class="kw">crate</span>::util::u32_to_usize;
+<span class="kw">use crate</span>::{Error, <span class="prelude-ty">Result</span>};
 
 <span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>Store {
@@ -365,7 +535,7 @@
         <span class="kw">let </span>index_path = path.join(<span class="string">&quot;index&quot;</span>);
 
         <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
-        <span class="kw">let </span>discovered_strata = discover_strata(path, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>discovered_strata = discover_strata(path, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
 
         <span class="kw">if </span>index_path.exists() {
             <span class="kw">let </span><span class="kw-2">mut </span>index_writer = OpenOptions::new()
@@ -373,55 +543,62 @@
                 .write(<span class="bool-val">true</span>)
                 .open(<span class="kw-2">&amp;</span>index_path)<span class="question-mark">?</span>;
 
-            <span class="kw">let </span>file_header = IndexFile::read_from(<span class="kw-2">&amp;mut </span>index_writer, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
+            <span class="kw">let </span>file_header =
+                FileHeader::&lt;IndexHeader&gt;::read_from(<span class="kw-2">&amp;mut </span>index_writer, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
 
             <span class="comment">// TODO After the commit log is implemented, verify the final commit
             // or roll back if a partial write is detected.
 
-            </span><span class="kw">let </span>index = <span class="kw">if </span>file_header.first_header.transaction_id
-                &gt; file_header.second_header.transaction_id
-            {
-                Duplicated {
-                    active: file_header.first_header,
-                    first_is_active: <span class="bool-val">true</span>,
-                }
-            } <span class="kw">else </span>{
-                Duplicated {
-                    active: file_header.second_header,
-                    first_is_active: <span class="bool-val">false</span>,
-                }
-            };
-
-            <span class="kw">let </span><span class="kw-2">mut </span>basins = BasinMap::new();
-            <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata {
-                <span class="kw">let </span>header = <span class="kw">if </span>stratum.header.first_header.transaction_id
-                    &gt; stratum.header.second_header.transaction_id
-                {
-                    Duplicated {
-                        active: stratum.header.first_header,
-                        first_is_active: <span class="bool-val">true</span>,
+            </span><span class="kw">let </span>(<span class="kw-2">mut </span>first_is_active, <span class="kw-2">mut </span>active, older) =
+                <span class="kw">match </span><span class="macro">dbg!</span>((file_header.first, file_header.second)) {
+                    (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
+                        <span class="kw">if </span>first.transaction_id &gt; second.transaction_id {
+                            (<span class="bool-val">true</span>, first, <span class="prelude-val">Some</span>(second))
+                        } <span class="kw">else </span>{
+                            (<span class="bool-val">false</span>, second, <span class="prelude-val">Some</span>(first))
+                        }
                     }
-                } <span class="kw">else </span>{
-                    Duplicated {
-                        active: stratum.header.second_header,
-                        first_is_active: <span class="bool-val">false</span>,
-                    }
+                    (<span class="prelude-val">Some</span>(first), <span class="prelude-val">None</span>) =&gt; (<span class="bool-val">true</span>, first, <span class="prelude-val">None</span>),
+                    (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(second)) =&gt; (<span class="bool-val">false</span>, second, <span class="prelude-val">None</span>),
+                    (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;FileHeader will return an error&quot;</span>),
                 };
 
-                <span class="kw">let </span>basin = basins.get_or_insert_with(stratum.id.basin(), || {
-                    BasinState::default_for(stratum.id.basin())
-                });
-                <span class="macro">assert_eq!</span>(
-                    basin.stratum.len(),
-                    stratum.id.stratum().as_usize(),
-                    <span class="string">&quot;strata are non-sequential&quot;
-                </span>);
+            <span class="kw">let </span><span class="kw-2">mut </span>strata_to_clean = <span class="prelude-val">None</span>;
+            <span class="kw">match </span>(BasinMap::verify(<span class="kw-2">&amp;</span>active, <span class="kw-2">&amp;mut </span>discovered_strata), older) {
+                (<span class="prelude-val">Ok</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; {}
+                (<span class="prelude-val">Err</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(older)) =&gt; {
+                    BasinMap::verify(<span class="kw-2">&amp;</span>older, <span class="kw-2">&amp;mut </span>discovered_strata)<span class="question-mark">?</span>;
+                    active = older;
+                    first_is_active = !first_is_active;
+                    <span class="kw">let </span><span class="kw-2">mut </span>invalid_strata = Vec::new();
+                    <span class="kw">for </span>(id, stratum) <span class="kw">in </span><span class="kw-2">&amp;</span>discovered_strata {
+                        <span class="kw">if </span>stratum.validate(active.transaction_id).is_err() {
+                            invalid_strata.push(<span class="kw-2">*</span>id);
+                        }
+                    }
+                    strata_to_clean = <span class="prelude-val">Some</span>(invalid_strata);
+                }
+                (<span class="prelude-val">Err</span>(err), <span class="prelude-val">None</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(err),
+            };
 
-                basin.stratum.push(StratumState {
-                    path: Arc::new(path.join(stratum.id.to_string())),
-                    header,
-                    file: <span class="prelude-val">Some</span>(stratum.file),
-                });
+            <span class="kw">let </span><span class="kw-2">mut </span>basins = BasinMap::load_from(<span class="kw-2">&amp;</span>active, discovered_strata, path)<span class="question-mark">?</span>;
+
+            <span class="kw">let </span><span class="kw-2">mut </span>index = Duplicated {
+                active,
+                first_is_active,
+            };
+
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(strata_to_clean) = strata_to_clean {
+                <span class="kw">for </span>id <span class="kw">in </span>strata_to_clean {
+                    <span class="kw">let </span>basin = basins[id.basin()].as_mut().expect(<span class="string">&quot;just loaded&quot;</span>);
+                    <span class="kw">let </span>stratum = <span class="kw-2">&amp;mut </span>basin.stratum[id.stratum().as_usize()];
+                    stratum
+                        .header
+                        .write_to(stratum.file.as_mut().expect(<span class="string">&quot;just loaded&quot;</span>))<span class="question-mark">?</span>;
+                }
+
+                index.write_to(<span class="kw-2">&amp;mut </span>index_writer)<span class="question-mark">?</span>;
+                index_writer.sync_data()<span class="question-mark">?</span>;
             }
 
             <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
@@ -494,12 +671,6 @@
     }
 }
 
-<span class="kw">pub trait </span>Duplicable: Sized {
-    <span class="kw">const </span>BYTES: u64;
-
-    <span class="kw">fn </span>write_to&lt;W: io::Write&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, writer: W) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt;;
-}
-
 <span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>BasinState {
     <span class="kw">pub </span>id: BasinId,
@@ -532,23 +703,23 @@
     }
 }
 
-<span class="kw">fn </span>discover_strata(path: <span class="kw-2">&amp;</span>Path, scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;UnverifiedStratum&gt;&gt; {
-    <span class="kw">let </span><span class="kw-2">mut </span>discovered = Vec::new();
+<span class="kw">fn </span>discover_strata(
+    path: <span class="kw-2">&amp;</span>Path,
+    scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;&gt; {
+    <span class="kw">let </span><span class="kw-2">mut </span>discovered = BTreeMap::new();
 
     <span class="kw">for </span>entry <span class="kw">in </span>fs::read_dir(path)<span class="question-mark">? </span>{
         <span class="kw">let </span>entry = entry<span class="question-mark">?</span>;
         <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = entry.file_name().to_str() {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(basin_and_stratum) = BasinAndStratum::from_str(name) {
-                discovered.push(UnverifiedStratum::read_from(
-                    <span class="kw-2">&amp;</span>entry.path(),
+                discovered.insert(
                     basin_and_stratum,
-                    scratch,
-                )<span class="question-mark">?</span>);
+                    UnverifiedStratum::read_from(<span class="kw-2">&amp;</span>entry.path(), basin_and_stratum, scratch)<span class="question-mark">?</span>,
+                );
             }
         }
     }
-
-    discovered.sort_by(|a, b| a.id.cmp(<span class="kw-2">&amp;</span>b.id));
 
     <span class="prelude-val">Ok</span>(discovered)
 }
@@ -607,17 +778,176 @@
     }
 }
 
-<span class="kw">struct </span>UnverifiedStratum {
-    id: BasinAndStratum,
-    header: StratumFileHeader,
-    file: File,
+<span class="kw">pub struct </span>UnverifiedStratum {
+    <span class="kw">pub </span>id: BasinAndStratum,
+    <span class="kw">pub </span>header: FileHeader&lt;StratumHeader&gt;,
+    <span class="kw">pub </span>file: File,
 }
 
 <span class="kw">impl </span>UnverifiedStratum {
     <span class="kw">pub fn </span>read_from(path: <span class="kw-2">&amp;</span>Path, id: BasinAndStratum, scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>file = OpenOptions::new().read(<span class="bool-val">true</span>).write(<span class="bool-val">true</span>).open(path)<span class="question-mark">?</span>;
-        <span class="kw">let </span>header = StratumFileHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
+        <span class="kw">let </span>header = FileHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ id, header, file })
+    }
+
+    <span class="kw">pub fn </span>validate(<span class="kw-2">&amp;</span><span class="self">self</span>, transaction: TransactionId) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.header.first, <span class="kw-2">&amp;</span><span class="self">self</span>.header.second) {
+            (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
+                <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= transaction;
+                <span class="kw">let </span>first_is_newest = first.transaction_id &gt; second.transaction_id;
+                <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= transaction;
+                <span class="kw">if </span>first_is_newest &amp;&amp; first_is_valid || (!first_is_newest &amp;&amp; second_is_valid) {
+                    <span class="prelude-val">Ok</span>(())
+                } <span class="kw">else </span>{
+                    <span class="prelude-val">Err</span>(Error::VerificationFailed)
+                }
+            }
+            (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active)) <span class="kw">if </span>active.transaction_id &lt;= transaction =&gt; <span class="prelude-val">Ok</span>(()),
+            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(Error::VerificationFailed),
+        }
+    }
+}
+
+<span class="kw">impl </span>BasinMap&lt;BasinState&gt; {
+    <span class="kw">pub fn </span>verify(
+        index: <span class="kw-2">&amp;</span>IndexHeader,
+        discovered_strata: <span class="kw-2">&amp;mut </span>BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.values() {
+            <span class="kw">match </span>(<span class="kw-2">&amp;</span>stratum.header.first, <span class="kw-2">&amp;</span>stratum.header.second) {
+                (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
+                    <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= index.transaction_id;
+                    <span class="kw">let </span>first_is_newest = first.transaction_id &gt; second.transaction_id;
+                    <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= index.transaction_id;
+                    <span class="kw">if </span>!(first_is_newest &amp;&amp; first_is_valid || (!first_is_newest &amp;&amp; second_is_valid))
+                    {
+                        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
+                    }
+                }
+                (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active))
+                    <span class="kw">if </span>active.transaction_id &lt;= index.transaction_id =&gt; {}
+                <span class="kw">_ </span>=&gt; {
+                    <span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
+                }
+            }
+        }
+
+        <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(commit_log_head) = index.commit_log_head {
+            <span class="kw">if let </span><span class="prelude-val">Some</span>(stratum) = discovered_strata.get_mut(<span class="kw-2">&amp;</span>commit_log_head.basin_and_stratum()) {
+                <span class="kw">let </span><span class="kw-2">mut </span>reader = BufReader::new(<span class="kw-2">&amp;mut </span>stratum.file);
+                verify_read_grain(
+                    commit_log_head,
+                    <span class="kw-2">&amp;mut </span>reader,
+                    index.transaction_id,
+                    <span class="kw-2">&amp;mut </span>scratch,
+                )<span class="question-mark">?</span>;
+                <span class="kw">let </span>commit_log_entry = CommitLogEntry::read_from(<span class="kw-2">&amp;</span>scratch[..])<span class="question-mark">?</span>;
+                <span class="kw">for </span>new_grain <span class="kw">in </span><span class="kw-2">&amp;</span>commit_log_entry.new_grains {
+                    verify_read_grain(
+                        new_grain.id,
+                        <span class="kw-2">&amp;mut </span>reader,
+                        index.transaction_id,
+                        <span class="kw-2">&amp;mut </span>scratch,
+                    )<span class="question-mark">?</span>;
+                }
+            } <span class="kw">else </span>{
+                <span class="comment">// Couldn&#39;t find the stratum with the commit log.
+                </span><span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
+            }
+        }
+
+        <span class="prelude-val">Ok</span>(())
+    }
+
+    <span class="kw">pub fn </span>load_from(
+        index: <span class="kw-2">&amp;</span>IndexHeader,
+        discovered_strata: BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
+        directory: <span class="kw-2">&amp;</span>Path,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>basins = <span class="self">Self</span>::new();
+        <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.into_values() {
+            <span class="kw">let </span>header = <span class="kw">match </span>(stratum.header.first, stratum.header.second) {
+                (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
+                    <span class="comment">// Because we&#39;ve already verified this, we can trust that if
+                    // the first is larger and still valid, we should use it,
+                    // otherwise we can use the second.
+                    </span><span class="kw">if </span>first.transaction_id &gt; second.transaction_id
+                        &amp;&amp; first.transaction_id &lt;= index.transaction_id
+                    {
+                        Duplicated {
+                            active: first,
+                            first_is_active: <span class="bool-val">true</span>,
+                        }
+                    } <span class="kw">else </span>{
+                        Duplicated {
+                            active: second,
+                            first_is_active: <span class="bool-val">false</span>,
+                        }
+                    }
+                }
+                (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) <span class="kw">if </span>active.transaction_id &lt;= index.transaction_id =&gt; Duplicated {
+                    active,
+                    first_is_active: <span class="bool-val">true</span>,
+                },
+                (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active)) <span class="kw">if </span>active.transaction_id &lt;= index.transaction_id =&gt; Duplicated {
+                    active,
+                    first_is_active: <span class="bool-val">false</span>,
+                },
+                <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;verify() is called before load_from&quot;</span>),
+            };
+
+            <span class="kw">let </span>basin = basins.get_or_insert_with(stratum.id.basin(), || {
+                BasinState::default_for(stratum.id.basin())
+            });
+            <span class="macro">assert_eq!</span>(
+                basin.stratum.len(),
+                stratum.id.stratum().as_usize(),
+                <span class="string">&quot;strata are non-sequential&quot;
+            </span>);
+
+            basin.stratum.push(StratumState {
+                path: Arc::new(directory.join(stratum.id.to_string())),
+                header,
+                file: <span class="prelude-val">Some</span>(stratum.file),
+            });
+        }
+        <span class="prelude-val">Ok</span>(basins)
+    }
+}
+
+<span class="kw">fn </span>verify_read_grain(
+    grain: GrainId,
+    file: <span class="kw-2">&amp;mut </span>BufReader&lt;<span class="kw-2">&amp;mut </span>File&gt;,
+    transaction_id: TransactionId,
+    buffer: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    file.seek(io::SeekFrom::Start(grain.file_position()))<span class="question-mark">?</span>;
+    <span class="kw">let </span><span class="kw-2">mut </span>eight_bytes = [<span class="number">0</span>; <span class="number">8</span>];
+    file.read_exact(<span class="kw-2">&amp;mut </span>eight_bytes)<span class="question-mark">?</span>;
+    <span class="kw">let </span>grain_transaction_id = TransactionId::from_be_bytes(eight_bytes);
+    <span class="kw">if </span>grain_transaction_id != transaction_id {
+        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
+    }
+
+    <span class="kw">let </span><span class="kw-2">mut </span>four_bytes = [<span class="number">0</span>; <span class="number">4</span>];
+    file.read_exact(<span class="kw-2">&amp;mut </span>four_bytes)<span class="question-mark">?</span>;
+    <span class="kw">let </span>length = u32::from_be_bytes(four_bytes);
+
+    <span class="kw">let </span>length = u32_to_usize(length)<span class="question-mark">?</span>;
+    buffer.resize(length, <span class="number">0</span>);
+    file.read_exact(buffer)<span class="question-mark">?</span>;
+
+    <span class="kw">let </span>computed_crc = crc32c(buffer);
+
+    file.read_exact(<span class="kw-2">&amp;mut </span>four_bytes)<span class="question-mark">?</span>;
+    <span class="kw">let </span>stored_crc = u32::from_be_bytes(four_bytes);
+
+    <span class="kw">if </span>computed_crc == stored_crc {
+        <span class="prelude-val">Ok</span>(())
+    } <span class="kw">else </span>{
+        <span class="prelude-val">Err</span>(Error::ChecksumFailed)
     }
 }
 </code></pre></div>

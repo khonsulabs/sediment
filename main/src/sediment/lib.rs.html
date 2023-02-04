@@ -440,6 +440,10 @@
 <a href="#440" id="440">440</a>
 <a href="#441" id="441">441</a>
 <a href="#442" id="442">442</a>
+<a href="#443" id="443">443</a>
+<a href="#444" id="444">444</a>
+<a href="#445" id="445">445</a>
+<a href="#446" id="446">446</a>
 </pre><pre class="rust"><code><span class="attr">#![forbid(unsafe_code)]
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>};
@@ -609,6 +613,8 @@
     </span>Io(<span class="attr">#[from] </span>io::Error),
     <span class="attr">#[error(<span class="string">&quot;the service has shut down&quot;</span>)]
     </span>Shutdown,
+    <span class="attr">#[error(<span class="string">&quot;database verification failed&quot;</span>)]
+    </span>VerificationFailed,
 }
 
 <span class="kw">pub type </span><span class="prelude-ty">Result</span>&lt;T, E = Error&gt; = std::result::Result&lt;T, E&gt;;
@@ -729,17 +735,19 @@
     <span class="comment">// Configure the WAL to checkpoint after 10 bytes -- &quot;hello, world&quot; is 12.
     </span><span class="kw">let </span><span class="kw-2">mut </span>grains_written = Vec::new();
     <span class="kw">for </span>i <span class="kw">in </span><span class="number">0_usize</span>..<span class="number">10 </span>{
+        <span class="macro">println!</span>(<span class="string">&quot;{i}&quot;</span>);
         <span class="kw">let </span>db = Config::for_directory(path)
             .configure_wal(|wal| wal.checkpoint_after_bytes(<span class="number">10</span>))
             .recover()
             .unwrap();
         <span class="kw">let </span><span class="kw-2">mut </span>tx = db.begin_transaction().unwrap();
-        <span class="kw">let </span>grain = tx.write(<span class="kw-2">&amp;</span>i.to_be_bytes()).unwrap();
+        <span class="kw">let </span>grain = <span class="macro">dbg!</span>(tx.write(<span class="kw-2">&amp;</span>i.to_be_bytes()).unwrap());
         <span class="macro">assert!</span>(db.read(grain).unwrap().is_none());
         grains_written.push(grain);
         tx.commit().unwrap();
 
         <span class="kw">for </span>(index, grain) <span class="kw">in </span>grains_written.iter().enumerate() {
+            <span class="macro">dbg!</span>(grain);
             <span class="kw">let </span>contents = db
                 .read(<span class="kw-2">*</span>grain)
                 .unwrap()
