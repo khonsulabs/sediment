@@ -330,9 +330,7 @@ impl UnverifiedStratum {
         if first.is_some() || second.is_some() {
             Ok(())
         } else {
-            Err(Error::verification_failed(
-                "the only valid header isn't valid",
-            ))
+            Err(Error::verification_failed("neither header is valid"))
         }
     }
 
@@ -341,23 +339,7 @@ impl UnverifiedStratum {
     }
 
     pub fn needs_cleanup(&self, commit_log: Option<&CommitLogEntry>) -> bool {
-        let commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
-            commit_log.transaction_id
-        });
-        match (&self.header.first, &self.header.second) {
-            (Some(first), Some(second)) => {
-                let first_is_valid = first.transaction_id < commit_transaction
-                    || (first.transaction_id == commit_transaction
-                        && commit_log
-                            .map_or(true, |commit_log| first.reflects_changes_from(commit_log)));
-                let second_is_valid = second.transaction_id < commit_transaction
-                    || (second.transaction_id == commit_transaction
-                        && commit_log
-                            .map_or(true, |commit_log| second.reflects_changes_from(commit_log)));
-                !first_is_valid || !second_is_valid
-            }
-            _ => true,
-        }
+        !matches!(self.headers_valid(commit_log), (Some(_), Some(_)))
     }
 
     fn headers_valid(
@@ -439,7 +421,7 @@ impl BasinMap<BasinState> {
         directory: &Path,
     ) -> Result<Self> {
         let mut basins = Self::new();
-        for mut stratum in discovered_strata.into_values() {
+        for stratum in discovered_strata.into_values() {
             if !stratum.should_exist(index) {
                 std::fs::remove_file(directory.join(stratum.id.to_string()))?;
                 continue;
@@ -468,22 +450,16 @@ impl BasinMap<BasinState> {
                     first_is_active: false,
                 },
                 (None, None) => {
-                    return Err(stratum
-                        .header
-                        .error
-                        .take()
-                        .expect("no header requires error"))
+                    unreachable!("error is handled in validation phase")
                 }
             };
 
             let basin = basins.get_or_insert_with(stratum.id.basin(), || {
                 BasinState::default_for(stratum.id.basin())
             });
-            assert_eq!(
-                basin.stratum.len(),
-                stratum.id.stratum().as_usize(),
-                "strata are non-sequential"
-            );
+            if stratum.id.stratum().as_usize() != basin.stratum.len() {
+                return Err(Error::verification_failed("strata are non-sequential"));
+            }
 
             basin.stratum.push(StratumState {
                 path: Arc::new(directory.join(stratum.id.to_string())),

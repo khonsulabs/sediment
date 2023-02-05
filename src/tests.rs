@@ -3,7 +3,9 @@ use std::io::{Read, Seek, Write};
 use std::path::Path;
 
 use crate::config::Config;
-use crate::format::{Duplicable, IndexHeader, StratumHeader, TransactionId};
+use crate::format::{
+    BasinAndStratum, Duplicable, IndexHeader, StratumHeader, StratumId, TransactionId,
+};
 use crate::Database;
 
 #[test]
@@ -261,16 +263,18 @@ fn rollback() {
     fs::remove_dir_all(path).unwrap();
 }
 
+#[derive(Clone)]
 enum WriteCommand<'a> {
     Write {
         target: Target,
         offset: u64,
         bytes: &'a [u8],
     },
-    RemoveStratum,
+    RemoveStratum(Option<StratumId>),
     DoNothing,
 }
 
+#[derive(Clone)]
 enum Target {
     Grain,
     Stratum,
@@ -279,7 +283,8 @@ enum Target {
 
 #[test]
 fn last_write_rollback() {
-    fn test_write_after(commands: &[WriteCommand]) {
+    #[track_caller]
+    fn test_write_after(commands: &[WriteCommand], expect_error: bool) {
         let path = Path::new("last-write");
         if path.exists() {
             fs::remove_dir_all(path).unwrap();
@@ -292,12 +297,16 @@ fn last_write_rollback() {
         loop {
             let db = Config::for_directory(path)
                 .configure_wal(|wal| wal.checkpoint_after_bytes(10))
-                .recover()
-                .unwrap();
+                .recover();
+            let db = match db {
+                Ok(db) => db,
+                Err(_) if commands.len() == 0 && expect_error => break,
+                Err(err) => unreachable!("error when not expected: {err}"),
+            };
 
             for (grain_id, expected_data) in &written_grains {
                 assert_eq!(
-                    db.read(*grain_id)
+                    &db.read(*grain_id)
                         .unwrap()
                         .expect("grain missing")
                         .read_all_data()
@@ -313,14 +322,20 @@ fn last_write_rollback() {
                     // bits after the transaction was written. In a normal crash
                     // or power outage scenario, the grain id wouldn't have been
                     // returned until the data is fully synced to disk.
-                    assert_ne!(reader.read_all_data().unwrap(), expected_data);
+                    assert_ne!(&reader.read_all_data().unwrap(), expected_data);
                 }
             }
 
             let mut tx = db.begin_transaction().unwrap();
-            let data = index.to_be_bytes();
+            let data = index
+                .to_be_bytes()
+                .into_iter()
+                .cycle()
+                .take(2000)
+                .collect::<Vec<_>>();
             index += 1;
             let grain_id = dbg!(tx.write(&data).unwrap());
+            assert_eq!(grain_id.grain_count(), 63);
             tx.commit().unwrap();
 
             db.shutdown().unwrap();
@@ -351,11 +366,16 @@ fn last_write_rollback() {
                     file.write_all(bytes).unwrap();
                     rolled_back_grains.push((grain_id, data));
                 }
-                Some(WriteCommand::RemoveStratum) => {
+                Some(WriteCommand::RemoveStratum(Some(stratum))) => {
+                    let id = BasinAndStratum::from_parts(grain_id.basin_id(), *stratum);
+                    std::fs::remove_file(path.join(id.to_string())).unwrap();
+                }
+                Some(WriteCommand::RemoveStratum(None)) => {
                     std::fs::remove_file(path.join(grain_id.basin_and_stratum().to_string()))
                         .unwrap();
                 }
                 Some(WriteCommand::DoNothing) => written_grains.push((grain_id, data)),
+                None if expect_error => unreachable!("expected error but no error was encountered"),
                 None => break,
             }
         }
@@ -366,14 +386,40 @@ fn last_write_rollback() {
     // Test removing the stratum after it's been created. This simulates a file
     // being written but the directory metadata not being synchronized, causing
     // the file's record to be entirely lost.
-    test_write_after(&[WriteCommand::RemoveStratum]);
+    test_write_after(&[WriteCommand::RemoveStratum(None)], false);
     // Test overwriting the headers with 0 -- an edge case where the file record
     // was synced but the headers weren't.
-    test_write_after(&[WriteCommand::Write {
-        target: Target::Stratum,
-        offset: 0,
-        bytes: &[1; 16_384 * 2],
-    }]);
+    test_write_after(
+        &[WriteCommand::Write {
+            target: Target::Stratum,
+            offset: 0,
+            bytes: &[1; 16_384],
+        }],
+        false,
+    );
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Stratum,
+                offset: StratumHeader::BYTES,
+                bytes: &[1; 16_384 * 2],
+            },
+        ],
+        false,
+    );
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Stratum,
+                offset: 0,
+                bytes: &[1; 16_384 * 2],
+            },
+        ],
+        true,
+    );
     // Test overwriting the header with a valid but incorrect header. This
     // shouldn't ever happen in practice, because recovery is supposed to
     // overwrite the bad headers.
@@ -381,85 +427,123 @@ fn last_write_rollback() {
     let mut valid_header_bytes = Vec::new();
     valid_header.transaction_id = TransactionId::from(1);
     valid_header.write_to(&mut valid_header_bytes).unwrap();
-    test_write_after(&[WriteCommand::Write {
-        target: Target::Stratum,
-        offset: 0,
-        bytes: &valid_header_bytes,
-    }]);
+    test_write_after(
+        &[WriteCommand::Write {
+            target: Target::Stratum,
+            offset: 0,
+            bytes: &valid_header_bytes,
+        }],
+        false,
+    );
     valid_header.transaction_id = TransactionId::from(2);
     valid_header_bytes.clear();
     valid_header.write_to(&mut valid_header_bytes).unwrap();
-    test_write_after(&[
-        WriteCommand::DoNothing,
-        WriteCommand::Write {
-            target: Target::Stratum,
-            offset: StratumHeader::BYTES,
-            bytes: &valid_header_bytes,
-        },
-    ]);
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Stratum,
+                offset: StratumHeader::BYTES,
+                bytes: &valid_header_bytes,
+            },
+        ],
+        false,
+    );
 
     // Test overwriting a grain's transaction ID in both the first and second
     // headers.
-    test_write_after(&[WriteCommand::Write {
-        target: Target::Grain,
-        offset: 0,
-        bytes: &[0xFF],
-    }]);
-
-    test_write_after(&[
-        WriteCommand::DoNothing,
-        WriteCommand::Write {
+    test_write_after(
+        &[WriteCommand::Write {
             target: Target::Grain,
             offset: 0,
             bytes: &[0xFF],
-        },
-    ]);
+        }],
+        false,
+    );
+
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Grain,
+                offset: 0,
+                bytes: &[0xFF],
+            },
+        ],
+        false,
+    );
 
     // Test mutating the grain data, causing its CRC to fail to validate.
-    test_write_after(&[WriteCommand::Write {
-        target: Target::Grain,
-        offset: 13,
-        bytes: &[0xFF],
-    }]);
-
-    test_write_after(&[
-        WriteCommand::DoNothing,
-        WriteCommand::Write {
+    test_write_after(
+        &[WriteCommand::Write {
             target: Target::Grain,
             offset: 13,
             bytes: &[0xFF],
-        },
-    ]);
+        }],
+        false,
+    );
+
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Grain,
+                offset: 13,
+                bytes: &[0xFF],
+            },
+        ],
+        false,
+    );
 
     // Test overwriting the stratum header.
-    test_write_after(&[WriteCommand::Write {
-        target: Target::Stratum,
-        offset: 0,
-        bytes: &[0xFF],
-    }]);
-
-    test_write_after(&[
-        WriteCommand::DoNothing,
-        WriteCommand::Write {
+    test_write_after(
+        &[WriteCommand::Write {
             target: Target::Stratum,
-            offset: StratumHeader::BYTES,
+            offset: 0,
             bytes: &[0xFF],
-        },
-    ]);
+        }],
+        false,
+    );
+
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Stratum,
+                offset: StratumHeader::BYTES,
+                bytes: &[0xFF],
+            },
+        ],
+        false,
+    );
 
     // Test mucking with the index file
-    test_write_after(&[WriteCommand::Write {
-        target: Target::Index,
-        offset: 0,
-        bytes: &[0xFF],
-    }]);
-
-    test_write_after(&[
-        WriteCommand::DoNothing,
-        WriteCommand::Write {
+    test_write_after(
+        &[WriteCommand::Write {
             target: Target::Index,
-            offset: IndexHeader::BYTES,
+            offset: 0,
             bytes: &[0xFF],
-        },
-    ]);
+        }],
+        false,
+    );
+
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Index,
+                offset: IndexHeader::BYTES,
+                bytes: &[0xFF],
+            },
+        ],
+        false,
+    );
+
+    // Write enough data to need two stratum, then remove the first to receiven
+    // error. There are 3 grains required at the current allocation strategy for
+    // a commit log entry that describes 1 new grain. The test function writes
+    // each grain such that it takes up 63 consecutive grains.
+    let mut commands = vec![WriteCommand::DoNothing; 16_372 / (3 + 63) + 1];
+    *commands.last_mut().unwrap() = WriteCommand::RemoveStratum(Some(StratumId::new(0).unwrap()));
+    test_write_after(&commands, true);
 }
