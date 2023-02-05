@@ -163,8 +163,10 @@ pub enum Error {
     GrainTooLarge,
     #[error("an invalid grain id was encountered")]
     InvalidGrainId,
-    #[error("value too large for target: {0}")]
-    ValueOutOfBounds(#[from] TryFromIntError),
+    #[error("the transaction id is not valid for this database")]
+    InvalidTransactionId,
+    #[error("value too large for target")]
+    ValueOutOfBounds,
     #[error("io error: {0}")]
     Io(#[from] io::Error),
     #[error("the service has shut down")]
@@ -193,5 +195,11 @@ impl From<Error> for io::Error {
 impl<T> From<PoisonError<T>> for Error {
     fn from(_: PoisonError<T>) -> Self {
         Self::LockPoisoned
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(_: TryFromIntError) -> Self {
+        Self::ValueOutOfBounds
     }
 }

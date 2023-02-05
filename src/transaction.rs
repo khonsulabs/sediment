@@ -9,7 +9,7 @@ use crate::commit_log::{CommitLogEntry, NewGrain};
 use crate::format::{GrainId, TransactionId};
 use crate::util::usize_to_u32;
 use crate::wal::WalChunk;
-use crate::{Database, Result};
+use crate::{Database, Error, Result};
 
 #[derive(Debug)]
 pub struct Transaction<'db> {
@@ -118,7 +118,7 @@ impl<'db> Transaction<'db> {
             // already the checkpoint target
             return Ok(());
         } else if tx_id >= entry.id() {
-            todo!("checkpointing too new of a transaction")
+            return Err(Error::InvalidTransactionId);
         }
 
         let mut chunk = entry.begin_chunk(WalChunk::COMMAND_LENGTH)?;
@@ -137,7 +137,7 @@ impl<'db> Transaction<'db> {
             // already the checkpoint target
             return Ok(());
         } else if tx_id >= entry.id() {
-            todo!("checkpointing too new of a transaction")
+            return Err(Error::InvalidTransactionId);
         }
 
         let mut chunk = entry.begin_chunk(WalChunk::COMMAND_LENGTH)?;

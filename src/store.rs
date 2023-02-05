@@ -162,7 +162,7 @@ impl DiskState {
                     basins: BasinMap::new(),
                 })
             } else {
-                todo!("error: existing strata found without a valid index")
+                Err(Error::verification_failed("existing strata found without an index file. If this is intentional, clean the directory being used for the database."))
             }
         }
     }

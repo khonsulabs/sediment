@@ -240,11 +240,14 @@ impl LogManager for WalManager {
 
             Ok(())
         } else {
-            todo!("error")
+            // TODO OkayWAL should have a way to be told "shut down" from this
+            // callback.
+            Err(io::Error::from(Error::Shutdown))
         }
     }
 }
 
+#[derive(Debug)]
 pub enum WalChunk<'a> {
     NewGrainInWal { id: GrainId, data: &'a [u8] },
     ArchiveGrain(GrainId),
@@ -261,18 +264,20 @@ impl<'a> WalChunk<'a> {
 
     pub fn read(buffer: &'a [u8]) -> Result<Self> {
         if buffer.len() < Self::COMMAND_LENGTH_USIZE {
-            todo!("error: buffer too short")
+            return Err(Error::ValueOutOfBounds);
         }
         let kind = buffer[0];
         match kind {
             0 => Ok(Self::NewGrainInWal {
-                id: GrainId::from_bytes(&buffer[1..9]).unwrap(), // TODO real error,
+                id: GrainId::from_bytes(&buffer[1..9]).ok_or(Error::InvalidGrainId)?,
                 data: &buffer[9..],
             }),
             1 => Ok(Self::ArchiveGrain(
-                GrainId::from_bytes(&buffer[1..9]).unwrap(),
+                GrainId::from_bytes(&buffer[1..9]).ok_or(Error::InvalidGrainId)?,
             )),
-            2 => Ok(Self::FreeGrain(GrainId::from_bytes(&buffer[1..9]).unwrap())),
+            2 => Ok(Self::FreeGrain(
+                GrainId::from_bytes(&buffer[1..9]).ok_or(Error::InvalidGrainId)?,
+            )),
             3 => Ok(Self::UpdatedEmbeddedHeader(GrainId::from_bytes(
                 &buffer[1..9],
             ))),
@@ -282,12 +287,11 @@ impl<'a> WalChunk<'a> {
             5 => Ok(Self::CheckpointedTo(TransactionId::from(EntryId(
                 u64::from_be_bytes(buffer[1..9].try_into().expect("u64 is 8 bytes")),
             )))),
-            255 => {
-                Ok(Self::FinishTransaction {
-                    commit_log_entry: GrainId::from_bytes(&buffer[1..9]).unwrap(), /* TODO real error, */
-                })
-            }
-            _ => todo!("invalid chunk"),
+            255 => Ok(Self::FinishTransaction {
+                commit_log_entry: GrainId::from_bytes(&buffer[1..9])
+                    .ok_or(Error::InvalidGrainId)?,
+            }),
+            _ => Err(Error::verification_failed("invalid wal chunk")),
         }
     }
 
@@ -349,4 +353,13 @@ impl<'a> WalChunk<'a> {
         writer.write_all(&commit_log_entry_id.to_be_bytes())?;
         Ok(())
     }
+}
+
+#[test]
+fn wal_chunk_error_tests() {
+    // The valid WalChunks are all tested by virtue of testing sediment. The
+    // errors, however, are nearly impossible to simulate due to the wal being
+    // completely abstracted away.
+    let Error::VerificationFailed(_) = WalChunk::read(&[254,0,0,0,0,0,0,0,0]).unwrap_err() else { unreachable!() };
+    let Error::ValueOutOfBounds = WalChunk::read(&[254]).unwrap_err() else { unreachable!() };
 }

@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::format::{
     BasinAndStratum, Duplicable, IndexHeader, StratumHeader, StratumId, TransactionId,
 };
-use crate::Database;
+use crate::{Database, Error};
 
 #[test]
 fn basic() {
@@ -271,6 +271,7 @@ enum WriteCommand<'a> {
         bytes: &'a [u8],
     },
     RemoveStratum(Option<StratumId>),
+    RemoveIndex,
     DoNothing,
 }
 
@@ -373,6 +374,9 @@ fn last_write_rollback() {
                 Some(WriteCommand::RemoveStratum(None)) => {
                     std::fs::remove_file(path.join(grain_id.basin_and_stratum().to_string()))
                         .unwrap();
+                }
+                Some(WriteCommand::RemoveIndex) => {
+                    std::fs::remove_file(path.join("index")).unwrap();
                 }
                 Some(WriteCommand::DoNothing) => written_grains.push((grain_id, data)),
                 None if expect_error => unreachable!("expected error but no error was encountered"),
@@ -539,6 +543,10 @@ fn last_write_rollback() {
         false,
     );
 
+    // Test removing the index file. This should generate an error because the
+    // existing strata can be found.
+    test_write_after(&[WriteCommand::RemoveIndex], true);
+
     // Write enough data to need two stratum, then remove the first to receiven
     // error. There are 3 grains required at the current allocation strategy for
     // a commit log entry that describes 1 new grain. The test function writes
@@ -546,4 +554,27 @@ fn last_write_rollback() {
     let mut commands = vec![WriteCommand::DoNothing; 16_372 / (3 + 63) + 1];
     *commands.last_mut().unwrap() = WriteCommand::RemoveStratum(Some(StratumId::new(0).unwrap()));
     test_write_after(&commands, true);
+}
+
+#[test]
+fn invalid_checkpointing() {
+    let path = Path::new("invalid-checkpointing");
+    if path.exists() {
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    let db = Database::recover(path).unwrap();
+    let mut tx = db.begin_transaction().unwrap();
+    assert!(matches!(
+        tx.checkpoint_to(TransactionId::from(1)).unwrap_err(),
+        Error::InvalidTransactionId
+    ));
+    assert!(matches!(
+        tx.checkpointed_to(TransactionId::from(1)).unwrap_err(),
+        Error::InvalidTransactionId
+    ));
+    drop(tx);
+
+    db.shutdown().unwrap();
+    fs::remove_dir_all(path).unwrap();
 }
