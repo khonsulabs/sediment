@@ -256,7 +256,7 @@ fn rollback() {
     // Trying again, we should get the same grain id back.
     let mut tx = db.begin_transaction().unwrap();
     assert_eq!(tx.write(b"hello, world").unwrap(), grain);
-    drop(tx);
+    tx.rollback().unwrap();
 
     db.shutdown().unwrap();
 
@@ -403,7 +403,7 @@ fn last_write_rollback() {
             WriteCommand::Write {
                 target: Target::Stratum,
                 offset: StratumHeader::BYTES,
-                bytes: &[1; 16_384 * 2],
+                bytes: &[1; 16_384],
             },
         ],
         false,

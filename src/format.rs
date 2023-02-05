@@ -59,7 +59,7 @@ impl GrainId {
     pub(crate) const fn file_position(self) -> u64 {
         let grain_size = self.basin_id().grain_stripe_bytes() as u64;
         let index = self.local_grain_index().as_u16() as u64;
-        let header_size = StratumFileHeader::BYTES * 2;
+        let header_size = StratumHeader::BYTES * 2;
 
         header_size + index * grain_size
     }
@@ -123,6 +123,24 @@ impl Display for GrainId {
         let local_index = self.local_grain_id();
         write!(f, "{basin_and_stratum}-{local_index}")
     }
+}
+
+#[test]
+fn grain_id_strings() {
+    let zero = GrainId(0);
+    assert_eq!(zero.to_string(), "00-0");
+    let none = GrainId::NONE;
+    assert_eq!(none.to_string(), "71ffffffffff-fffff");
+    assert_eq!(
+        GrainId::from_str("71ffffffffff-fffff").unwrap(),
+        GrainId::NONE
+    );
+    assert!(GrainId::from_str("72fffffffffff-fffff").is_err());
+    assert!(GrainId::from_str("71fffffffffff-1fffff").is_err());
+    assert!(GrainId::from_str("81fffffffffff-3fff").is_err());
+    assert!(GrainId::from_str("---").is_err());
+    assert!(GrainId::from_str("71ffffffffff-FFFFFFFFFFFFFFFFF").is_err());
+    assert!(GrainId::from_str("0FFFFFFFFFFFFFFFFF-3fff").is_err());
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -282,12 +300,6 @@ impl AddAssign<u8> for GrainIndex {
     }
 }
 
-impl Display for GrainIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:0x}", self.0)
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LocalGrainId(u64);
 
@@ -313,21 +325,6 @@ impl Display for LocalGrainId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:0x}", self.0)
     }
-}
-
-#[test]
-fn grain_id_strings() {
-    let zero = GrainId(0);
-    assert_eq!(zero.to_string(), "00-0");
-    let none = GrainId::NONE;
-    assert_eq!(none.to_string(), "71ffffffffff-fffff");
-    assert_eq!(
-        GrainId::from_str("71ffffffffff-fffff").unwrap(),
-        GrainId::NONE
-    );
-    assert!(GrainId::from_str("72fffffffffff-fffff").is_err());
-    assert!(GrainId::from_str("71fffffffffff-1fffff").is_err());
-    assert!(GrainId::from_str("81fffffffffff-3fff").is_err());
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Default)]
@@ -382,37 +379,6 @@ impl PartialEq<EntryId> for TransactionId {
 impl PartialOrd<EntryId> for TransactionId {
     fn partial_cmp(&self, other: &EntryId) -> Option<std::cmp::Ordering> {
         self.0.partial_cmp(&other.0)
-    }
-}
-
-/// The root file of a Sediment datastore.
-///
-/// Index files are the root of a Sediment database. The header is responsible
-/// for pointing to several key pieces of data, which will be stored within the
-/// other files.
-///
-/// The Index file is serialized in this fashion:
-///
-/// - Magic code + version (4 bytes)
-/// - [`IndexHeader`]
-/// - [`IndexHeader`]
-///
-/// The record with the highest transaction id should be checked upon recovery
-/// to ensure that `embedded_header_data` is written with the same
-/// [`TransactionId`].
-pub struct IndexFile {
-    pub first_header: IndexHeader,
-    pub second_header: IndexHeader,
-}
-
-impl IndexFile {
-    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
-        let first_header = IndexHeader::read_from(&mut file, scratch)?;
-        let second_header = IndexHeader::read_from(&mut file, scratch)?;
-        Ok(Self {
-            first_header,
-            second_header,
-        })
     }
 }
 
@@ -477,6 +443,22 @@ pub trait Duplicable: Sized {
 /// - `crc32`: 4 bytes (checksum of previous 88 bytes)
 ///
 /// The total header length is 36 bytes.
+///
+/// # About the Index file
+///
+/// Index files are the root of a Sediment database. The header is responsible
+/// for pointing to several key pieces of data, which will be stored within the
+/// other files.
+///
+/// The Index file is serialized in this fashion:
+///
+/// - Magic code + version (4 bytes)
+/// - [`IndexHeader`]
+/// - [`IndexHeader`]
+///
+/// The record with the highest transaction id should be checked upon recovery
+/// to ensure that `embedded_header_data` is written with the same
+/// [`TransactionId`].
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct IndexHeader {
     pub transaction_id: TransactionId,
@@ -564,12 +546,25 @@ impl Duplicable for IndexHeader {
     }
 }
 
-/// The complete header of a Stratum file, which contains the data written to
-/// the Sediment database.
+/// Each Stratum header is 16kb, and describes the state of allocation of each
+/// grain within the Stratum.
 ///
-/// The header is two [`StratumHeader`]s serialized one after another. The
-/// header with the latest [`TransactionId`] is considered the current record.
-/// When updating the header, the inactive copy should be overwritten.
+/// It is serialized as:
+///
+/// - [`TransactionId`]: 8 bytes
+/// - [`GrainAllocationInfo`]: 16,372 one-byte entries
+/// - CRC32: 4 bytes
+///
+/// The grain size is determined by the name of the file that contains the
+/// header.
+///
+/// # About Statum files
+///
+/// Strata contain the data written to the Sediment database.
+///
+/// The header consists of two [`StratumHeader`]s serialized one after another.
+/// The header with the latest [`TransactionId`] is considered the current
+/// record. When updating the header, the inactive copy should be overwritten.
 ///
 /// If an aborted write is detected and a rollback needs to happen, the rolled
 /// back header should be overwritten with a second copy of the previous
@@ -601,35 +596,6 @@ impl Duplicable for IndexHeader {
 /// grains, not every local grain index will point to the start of a grain
 /// record. The [`StratumHeader`] must be used to determine if a given local
 /// grain index is valid before trusting the data stored.
-pub struct StratumFileHeader {
-    pub first_header: StratumHeader,
-    pub second_header: StratumHeader,
-}
-
-impl StratumFileHeader {
-    const BYTES: u64 = StratumHeader::BYTES * 2;
-
-    pub fn read_from<R: Read>(mut file: R, scratch: &mut Vec<u8>) -> Result<Self> {
-        let first_header = StratumHeader::read_from(&mut file, scratch)?;
-        let second_header = StratumHeader::read_from(&mut file, scratch)?;
-        Ok(Self {
-            first_header,
-            second_header,
-        })
-    }
-}
-
-/// Each Stratum header is 16kb, and describes the state of allocation of each
-/// grain within the Stratum.
-///
-/// It is serialized as:
-///
-/// - [`TransactionId`]: 8 bytes
-/// - [`GrainAllocationInfo`]: 16,372 one-byte entries
-/// - CRC32: 4 bytes
-///
-/// The grain size is determined by the name of the file that contains the
-/// header.
 #[derive(Debug)]
 pub struct StratumHeader {
     pub transaction_id: TransactionId,
