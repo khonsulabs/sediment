@@ -671,7 +671,7 @@
                     basins: BasinMap::new(),
                 })
             } <span class="kw">else </span>{
-                <span class="macro">todo!</span>(<span class="string">&quot;error: existing strata found without a valid index&quot;</span>)
+                <span class="prelude-val">Err</span>(Error::verification_failed(<span class="string">&quot;existing strata found without an index file. If this is intentional, clean the directory being used for the database.&quot;</span>))
             }
         }
     }
