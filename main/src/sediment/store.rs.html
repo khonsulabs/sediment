@@ -502,6 +502,35 @@
 <a href="#502" id="502">502</a>
 <a href="#503" id="503">503</a>
 <a href="#504" id="504">504</a>
+<a href="#505" id="505">505</a>
+<a href="#506" id="506">506</a>
+<a href="#507" id="507">507</a>
+<a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a>
+<a href="#510" id="510">510</a>
+<a href="#511" id="511">511</a>
+<a href="#512" id="512">512</a>
+<a href="#513" id="513">513</a>
+<a href="#514" id="514">514</a>
+<a href="#515" id="515">515</a>
+<a href="#516" id="516">516</a>
+<a href="#517" id="517">517</a>
+<a href="#518" id="518">518</a>
+<a href="#519" id="519">519</a>
+<a href="#520" id="520">520</a>
+<a href="#521" id="521">521</a>
+<a href="#522" id="522">522</a>
+<a href="#523" id="523">523</a>
+<a href="#524" id="524">524</a>
+<a href="#525" id="525">525</a>
+<a href="#526" id="526">526</a>
+<a href="#527" id="527">527</a>
+<a href="#528" id="528">528</a>
+<a href="#529" id="529">529</a>
+<a href="#530" id="530">530</a>
+<a href="#531" id="531">531</a>
+<a href="#532" id="532">532</a>
+<a href="#533" id="533">533</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
 <span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
@@ -589,10 +618,10 @@
                 };
 
             <span class="kw">let </span><span class="kw-2">mut </span>strata_to_clean = <span class="prelude-val">None</span>;
-            <span class="kw">match </span>(BasinMap::verify(<span class="kw-2">&amp;</span>active, <span class="kw-2">&amp;mut </span>discovered_strata), older) {
-                (<span class="prelude-val">Ok</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; {}
+            <span class="kw">let </span>commit_log = <span class="kw">match </span>(BasinMap::verify(<span class="kw-2">&amp;</span>active, <span class="kw-2">&amp;mut </span>discovered_strata), older) {
+                (<span class="prelude-val">Ok</span>(commit_log), <span class="kw">_</span>) =&gt; commit_log,
                 (<span class="prelude-val">Err</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(older)) =&gt; {
-                    BasinMap::verify(<span class="kw-2">&amp;</span>older, <span class="kw-2">&amp;mut </span>discovered_strata)<span class="question-mark">?</span>;
+                    <span class="kw">let </span>commit_log = BasinMap::verify(<span class="kw-2">&amp;</span>older, <span class="kw-2">&amp;mut </span>discovered_strata)<span class="question-mark">?</span>;
 
                     active = older;
                     first_is_active = !first_is_active;
@@ -600,17 +629,19 @@
                     <span class="kw">let </span><span class="kw-2">mut </span>invalid_strata = Vec::new();
                     <span class="kw">for </span>(id, stratum) <span class="kw">in </span><span class="kw-2">&amp;</span>discovered_strata {
                         <span class="kw">if </span>stratum.should_exist(<span class="kw-2">&amp;</span>active)
-                            &amp;&amp; stratum.needs_cleanup(active.transaction_id)
+                            &amp;&amp; stratum.needs_cleanup(commit_log.as_ref())
                         {
                             invalid_strata.push(<span class="kw-2">*</span>id);
                         }
                     }
                     strata_to_clean = <span class="prelude-val">Some</span>(invalid_strata);
+                    commit_log
                 }
                 (<span class="prelude-val">Err</span>(err), <span class="prelude-val">None</span>) =&gt; <span class="kw">return </span><span class="prelude-val">Err</span>(err),
             };
 
-            <span class="kw">let </span><span class="kw-2">mut </span>basins = BasinMap::load_from(<span class="kw-2">&amp;</span>active, discovered_strata, path)<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>basins =
+                BasinMap::load_from(<span class="kw-2">&amp;</span>active, commit_log.as_ref(), discovered_strata, path)<span class="question-mark">?</span>;
 
             <span class="kw">let </span><span class="kw-2">mut </span>index = Duplicated {
                 active,
@@ -826,23 +857,15 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ id, header, file })
     }
 
-    <span class="kw">pub fn </span>validate(<span class="kw-2">&amp;</span><span class="self">self</span>, transaction: TransactionId) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
-        <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.header.first, <span class="kw-2">&amp;</span><span class="self">self</span>.header.second) {
-            (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
-                <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= transaction;
-                <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= transaction;
-                <span class="kw">let </span>first_is_newest = first_is_valid
-                    &amp;&amp; (first.transaction_id &gt; second.transaction_id || !second_is_valid);
-                <span class="kw">let </span>second_is_newest = second_is_valid
-                    &amp;&amp; (second.transaction_id &gt; first.transaction_id || !first_is_valid);
-                <span class="kw">if </span>first_is_newest || second_is_newest || first.transaction_id == <span class="number">0 </span>{
-                    <span class="prelude-val">Ok</span>(())
-                } <span class="kw">else </span>{
-                    <span class="prelude-val">Err</span>(Error::VerificationFailed)
-                }
-            }
-            (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) | (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active)) <span class="kw">if </span>active.transaction_id &lt;= transaction =&gt; <span class="prelude-val">Ok</span>(()),
-            <span class="kw">_ </span>=&gt; <span class="prelude-val">Err</span>(Error::VerificationFailed),
+    <span class="kw">pub fn </span>validate(<span class="kw-2">&amp;</span><span class="self">self</span>, commit_log: <span class="kw-2">&amp;</span>CommitLogEntry) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        <span class="kw">let </span>(first, second) = <span class="self">self</span>.headers_valid(<span class="prelude-val">Some</span>(commit_log));
+
+        <span class="kw">if </span>first.is_some() || second.is_some() {
+            <span class="prelude-val">Ok</span>(())
+        } <span class="kw">else </span>{
+            <span class="prelude-val">Err</span>(Error::verification_failed(
+                <span class="string">&quot;the only valid header isn&#39;t valid&quot;</span>,
+            ))
         }
     }
 
@@ -850,15 +873,54 @@
         <span class="self">self</span>.id.stratum().as_u64() &lt; index.basin_strata_count[usize::from(<span class="self">self</span>.id.basin().index())]
     }
 
-    <span class="kw">pub fn </span>needs_cleanup(<span class="kw-2">&amp;</span><span class="self">self</span>, transaction: TransactionId) -&gt; bool {
+    <span class="kw">pub fn </span>needs_cleanup(<span class="kw-2">&amp;</span><span class="self">self</span>, commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;) -&gt; bool {
+        <span class="kw">let </span>commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
+            commit_log.transaction_id
+        });
         <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.header.first, <span class="kw-2">&amp;</span><span class="self">self</span>.header.second) {
             (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
-                <span class="kw">let </span>first_is_valid = first.transaction_id &lt;= transaction;
-                <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= transaction;
+                <span class="kw">let </span>first_is_valid = first.transaction_id &lt; commit_transaction
+                    || (first.transaction_id == commit_transaction
+                        &amp;&amp; commit_log
+                            .map_or(<span class="bool-val">true</span>, |commit_log| first.reflects_changes_from(commit_log)));
+                <span class="kw">let </span>second_is_valid = second.transaction_id &lt; commit_transaction
+                    || (second.transaction_id == commit_transaction
+                        &amp;&amp; commit_log
+                            .map_or(<span class="bool-val">true</span>, |commit_log| second.reflects_changes_from(commit_log)));
                 !first_is_valid || !second_is_valid
             }
             <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
         }
+    }
+
+    <span class="kw">fn </span>headers_valid(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;,
+    ) -&gt; (<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>StratumHeader&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>StratumHeader&gt;) {
+        <span class="kw">fn </span>is_valid(
+            header: <span class="kw-2">&amp;</span>StratumHeader,
+            commit_transaction: TransactionId,
+            commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;,
+        ) -&gt; bool {
+            header.transaction_id &lt; commit_transaction
+                || (header.transaction_id == commit_transaction
+                    &amp;&amp; commit_log
+                        .map_or(<span class="bool-val">true</span>, |commit_log| header.reflects_changes_from(commit_log)))
+        }
+        <span class="kw">let </span>commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
+            commit_log.transaction_id
+        });
+        <span class="kw">let </span>first = <span class="self">self
+            </span>.header
+            .first
+            .as_ref()
+            .and_then(|first| is_valid(first, commit_transaction, commit_log).then_some(first));
+        <span class="kw">let </span>second =
+            <span class="self">self</span>.header.second.as_ref().and_then(|second| {
+                is_valid(second, commit_transaction, commit_log).then_some(second)
+            });
+
+        (first, second)
     }
 }
 
@@ -866,13 +928,7 @@
     <span class="kw">pub fn </span>verify(
         index: <span class="kw-2">&amp;</span>IndexHeader,
         discovered_strata: <span class="kw-2">&amp;mut </span>BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
-        <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.values() {
-            <span class="kw">if </span>stratum.should_exist(index) {
-                stratum.validate(index.transaction_id)<span class="question-mark">?</span>;
-            }
-        }
-
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;CommitLogEntry&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
         <span class="kw">if let </span><span class="prelude-val">Some</span>(commit_log_head) = index.commit_log_head {
             <span class="kw">if let </span><span class="prelude-val">Some</span>(stratum) = discovered_strata.get_mut(<span class="kw-2">&amp;</span>commit_log_head.basin_and_stratum()) {
@@ -894,17 +950,24 @@
                         <span class="kw-2">&amp;mut </span>scratch,
                     )<span class="question-mark">?</span>;
                 }
+
+                <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.values() {
+                    <span class="kw">if </span>stratum.should_exist(index) {
+                        stratum.validate(<span class="kw-2">&amp;</span>commit_log_entry)<span class="question-mark">?</span>;
+                    }
+                }
+                <span class="kw">return </span><span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(commit_log_entry));
             } <span class="kw">else </span>{
-                <span class="comment">// Couldn&#39;t find the stratum with the commit log.
-                </span><span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
+                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::verification_failed(<span class="string">&quot;commit log stratum not found&quot;</span>));
             }
         }
 
-        <span class="prelude-val">Ok</span>(())
+        <span class="prelude-val">Ok</span>(<span class="prelude-val">None</span>)
     }
 
     <span class="kw">pub fn </span>load_from(
         index: <span class="kw-2">&amp;</span>IndexHeader,
+        commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;,
         discovered_strata: BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
         directory: <span class="kw-2">&amp;</span>Path,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
@@ -915,32 +978,26 @@
                 <span class="kw">continue</span>;
             }
 
-            <span class="kw">let </span>header = <span class="kw">match </span>(stratum.header.first, stratum.header.second) {
+            <span class="kw">let </span>header = <span class="kw">match </span>stratum.headers_valid(commit_log) {
                 (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
-                    <span class="comment">// Because we&#39;ve already verified this, we can trust that if
-                    // the first is larger and still valid, we should use it,
-                    // otherwise we can use the second.
-                    </span><span class="kw">let </span>first_is_valid = first.transaction_id &lt;= index.transaction_id;
-                    <span class="kw">let </span>second_is_valid = second.transaction_id &lt;= index.transaction_id;
-                    <span class="kw">let </span>first_is_newest = first.transaction_id &gt; second.transaction_id;
-                    <span class="kw">if </span>(first_is_newest &amp;&amp; first_is_valid) || !second_is_valid {
+                    <span class="kw">if </span>first.transaction_id &gt;= second.transaction_id {
                         Duplicated {
-                            active: first,
+                            active: stratum.header.first.expect(<span class="string">&quot;just matched&quot;</span>),
                             first_is_active: <span class="bool-val">true</span>,
                         }
                     } <span class="kw">else </span>{
                         Duplicated {
-                            active: second,
+                            active: stratum.header.second.expect(<span class="string">&quot;just matched&quot;</span>),
                             first_is_active: <span class="bool-val">false</span>,
                         }
                     }
                 }
-                (<span class="prelude-val">Some</span>(active), <span class="kw">_</span>) <span class="kw">if </span>active.transaction_id &lt;= index.transaction_id =&gt; Duplicated {
-                    active,
+                (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; Duplicated {
+                    active: stratum.header.first.expect(<span class="string">&quot;just matched&quot;</span>),
                     first_is_active: <span class="bool-val">true</span>,
                 },
-                (<span class="kw">_</span>, <span class="prelude-val">Some</span>(active)) <span class="kw">if </span>active.transaction_id &lt;= index.transaction_id =&gt; Duplicated {
-                    active,
+                (<span class="kw">_</span>, <span class="prelude-val">Some</span>(<span class="kw">_</span>)) =&gt; Duplicated {
+                    active: stratum.header.second.expect(<span class="string">&quot;just matched&quot;</span>),
                     first_is_active: <span class="bool-val">false</span>,
                 },
                 (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; {
@@ -950,7 +1007,6 @@
                         .take()
                         .expect(<span class="string">&quot;no header requires error&quot;</span>))
                 }
-                <span class="kw">_ </span>=&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;verify() is called before load_from&quot;</span>),
             };
 
             <span class="kw">let </span>basin = basins.get_or_insert_with(stratum.id.basin(), || {
@@ -984,7 +1040,9 @@
     file.read_exact(<span class="kw-2">&amp;mut </span>eight_bytes)<span class="question-mark">?</span>;
     <span class="kw">let </span>grain_transaction_id = TransactionId::from_be_bytes(eight_bytes);
     <span class="kw">if </span>grain_transaction_id != transaction_id {
-        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::VerificationFailed);
+        <span class="kw">return </span><span class="prelude-val">Err</span>(Error::verification_failed(
+            <span class="string">&quot;new grain was written in a different transaction&quot;</span>,
+        ));
     }
 
     <span class="kw">let </span><span class="kw-2">mut </span>four_bytes = [<span class="number">0</span>; <span class="number">4</span>];

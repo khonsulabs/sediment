@@ -189,6 +189,12 @@
 <a href="#189" id="189">189</a>
 <a href="#190" id="190">190</a>
 <a href="#191" id="191">191</a>
+<a href="#192" id="192">192</a>
+<a href="#193" id="193">193</a>
+<a href="#194" id="194">194</a>
+<a href="#195" id="195">195</a>
+<a href="#196" id="196">196</a>
+<a href="#197" id="197">197</a>
 </pre><pre class="rust"><code><span class="attr">#![forbid(unsafe_code)]
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>};
@@ -360,8 +366,14 @@
     </span>Io(<span class="attr">#[from] </span>io::Error),
     <span class="attr">#[error(<span class="string">&quot;the service has shut down&quot;</span>)]
     </span>Shutdown,
-    <span class="attr">#[error(<span class="string">&quot;database verification failed&quot;</span>)]
-    </span>VerificationFailed,
+    <span class="attr">#[error(<span class="string">&quot;database verification failed: {0}&quot;</span>)]
+    </span>VerificationFailed(String),
+}
+
+<span class="kw">impl </span>Error {
+    <span class="kw">fn </span>verification_failed(reason: <span class="kw">impl </span>Into&lt;String&gt;) -&gt; <span class="self">Self </span>{
+        <span class="self">Self</span>::VerificationFailed(reason.into())
+    }
 }
 
 <span class="kw">pub type </span><span class="prelude-ty">Result</span>&lt;T, E = Error&gt; = std::result::Result&lt;T, E&gt;;
