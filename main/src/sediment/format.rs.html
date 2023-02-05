@@ -844,40 +844,6 @@
 <a href="#844" id="844">844</a>
 <a href="#845" id="845">845</a>
 <a href="#846" id="846">846</a>
-<a href="#847" id="847">847</a>
-<a href="#848" id="848">848</a>
-<a href="#849" id="849">849</a>
-<a href="#850" id="850">850</a>
-<a href="#851" id="851">851</a>
-<a href="#852" id="852">852</a>
-<a href="#853" id="853">853</a>
-<a href="#854" id="854">854</a>
-<a href="#855" id="855">855</a>
-<a href="#856" id="856">856</a>
-<a href="#857" id="857">857</a>
-<a href="#858" id="858">858</a>
-<a href="#859" id="859">859</a>
-<a href="#860" id="860">860</a>
-<a href="#861" id="861">861</a>
-<a href="#862" id="862">862</a>
-<a href="#863" id="863">863</a>
-<a href="#864" id="864">864</a>
-<a href="#865" id="865">865</a>
-<a href="#866" id="866">866</a>
-<a href="#867" id="867">867</a>
-<a href="#868" id="868">868</a>
-<a href="#869" id="869">869</a>
-<a href="#870" id="870">870</a>
-<a href="#871" id="871">871</a>
-<a href="#872" id="872">872</a>
-<a href="#873" id="873">873</a>
-<a href="#874" id="874">874</a>
-<a href="#875" id="875">875</a>
-<a href="#876" id="876">876</a>
-<a href="#877" id="877">877</a>
-<a href="#878" id="878">878</a>
-<a href="#879" id="879">879</a>
-<a href="#880" id="880">880</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::fmt::{Display, Write <span class="kw">as _</span>};
 <span class="kw">use </span>std::io::{BufWriter, Read, Seek, Write};
 <span class="kw">use </span>std::ops::{AddAssign, Deref, DerefMut};
@@ -939,7 +905,7 @@
     <span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const fn </span>file_position(<span class="self">self</span>) -&gt; u64 {
         <span class="kw">let </span>grain_size = <span class="self">self</span>.basin_id().grain_stripe_bytes() <span class="kw">as </span>u64;
         <span class="kw">let </span>index = <span class="self">self</span>.local_grain_index().as_u16() <span class="kw">as </span>u64;
-        <span class="kw">let </span>header_size = StratumFileHeader::BYTES * <span class="number">2</span>;
+        <span class="kw">let </span>header_size = StratumHeader::BYTES * <span class="number">2</span>;
 
         header_size + index * grain_size
     }
@@ -1003,6 +969,24 @@
         <span class="kw">let </span>local_index = <span class="self">self</span>.local_grain_id();
         <span class="macro">write!</span>(f, <span class="string">&quot;{basin_and_stratum}-{local_index}&quot;</span>)
     }
+}
+
+<span class="attr">#[test]
+</span><span class="kw">fn </span>grain_id_strings() {
+    <span class="kw">let </span>zero = GrainId(<span class="number">0</span>);
+    <span class="macro">assert_eq!</span>(zero.to_string(), <span class="string">&quot;00-0&quot;</span>);
+    <span class="kw">let </span>none = GrainId::NONE;
+    <span class="macro">assert_eq!</span>(none.to_string(), <span class="string">&quot;71ffffffffff-fffff&quot;</span>);
+    <span class="macro">assert_eq!</span>(
+        GrainId::from_str(<span class="string">&quot;71ffffffffff-fffff&quot;</span>).unwrap(),
+        GrainId::NONE
+    );
+    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;72fffffffffff-fffff&quot;</span>).is_err());
+    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;71fffffffffff-1fffff&quot;</span>).is_err());
+    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;81fffffffffff-3fff&quot;</span>).is_err());
+    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;---&quot;</span>).is_err());
+    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;71ffffffffff-FFFFFFFFFFFFFFFFF&quot;</span>).is_err());
+    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;0FFFFFFFFFFFFFFFFF-3fff&quot;</span>).is_err());
 }
 
 <span class="attr">#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -1162,12 +1146,6 @@
     }
 }
 
-<span class="kw">impl </span>Display <span class="kw">for </span>GrainIndex {
-    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
-        <span class="macro">write!</span>(f, <span class="string">&quot;{:0x}&quot;</span>, <span class="self">self</span>.<span class="number">0</span>)
-    }
-}
-
 <span class="attr">#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 </span><span class="kw">pub struct </span>LocalGrainId(u64);
 
@@ -1193,21 +1171,6 @@
     <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>std::fmt::Formatter&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; std::fmt::Result {
         <span class="macro">write!</span>(f, <span class="string">&quot;{:0x}&quot;</span>, <span class="self">self</span>.<span class="number">0</span>)
     }
-}
-
-<span class="attr">#[test]
-</span><span class="kw">fn </span>grain_id_strings() {
-    <span class="kw">let </span>zero = GrainId(<span class="number">0</span>);
-    <span class="macro">assert_eq!</span>(zero.to_string(), <span class="string">&quot;00-0&quot;</span>);
-    <span class="kw">let </span>none = GrainId::NONE;
-    <span class="macro">assert_eq!</span>(none.to_string(), <span class="string">&quot;71ffffffffff-fffff&quot;</span>);
-    <span class="macro">assert_eq!</span>(
-        GrainId::from_str(<span class="string">&quot;71ffffffffff-fffff&quot;</span>).unwrap(),
-        GrainId::NONE
-    );
-    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;72fffffffffff-fffff&quot;</span>).is_err());
-    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;71fffffffffff-1fffff&quot;</span>).is_err());
-    <span class="macro">assert!</span>(GrainId::from_str(<span class="string">&quot;81fffffffffff-3fff&quot;</span>).is_err());
 }
 
 <span class="attr">#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Default)]
@@ -1262,37 +1225,6 @@
 <span class="kw">impl </span>PartialOrd&lt;EntryId&gt; <span class="kw">for </span>TransactionId {
     <span class="kw">fn </span>partial_cmp(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>EntryId) -&gt; <span class="prelude-ty">Option</span>&lt;std::cmp::Ordering&gt; {
         <span class="self">self</span>.<span class="number">0</span>.partial_cmp(<span class="kw-2">&amp;</span>other.<span class="number">0</span>)
-    }
-}
-
-<span class="doccomment">/// The root file of a Sediment datastore.
-///
-/// Index files are the root of a Sediment database. The header is responsible
-/// for pointing to several key pieces of data, which will be stored within the
-/// other files.
-///
-/// The Index file is serialized in this fashion:
-///
-/// - Magic code + version (4 bytes)
-/// - [`IndexHeader`]
-/// - [`IndexHeader`]
-///
-/// The record with the highest transaction id should be checked upon recovery
-/// to ensure that `embedded_header_data` is written with the same
-/// [`TransactionId`].
-</span><span class="kw">pub struct </span>IndexFile {
-    <span class="kw">pub </span>first_header: IndexHeader,
-    <span class="kw">pub </span>second_header: IndexHeader,
-}
-
-<span class="kw">impl </span>IndexFile {
-    <span class="kw">pub fn </span>read_from&lt;R: Read&gt;(<span class="kw-2">mut </span>file: R, scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>first_header = IndexHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
-        <span class="kw">let </span>second_header = IndexHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-            first_header,
-            second_header,
-        })
     }
 }
 
@@ -1357,6 +1289,22 @@
 /// - `crc32`: 4 bytes (checksum of previous 88 bytes)
 ///
 /// The total header length is 36 bytes.
+///
+/// # About the Index file
+///
+/// Index files are the root of a Sediment database. The header is responsible
+/// for pointing to several key pieces of data, which will be stored within the
+/// other files.
+///
+/// The Index file is serialized in this fashion:
+///
+/// - Magic code + version (4 bytes)
+/// - [`IndexHeader`]
+/// - [`IndexHeader`]
+///
+/// The record with the highest transaction id should be checked upon recovery
+/// to ensure that `embedded_header_data` is written with the same
+/// [`TransactionId`].
 </span><span class="attr">#[derive(Debug, Clone, Eq, PartialEq, Default)]
 </span><span class="kw">pub struct </span>IndexHeader {
     <span class="kw">pub </span>transaction_id: TransactionId,
@@ -1444,12 +1392,25 @@
     }
 }
 
-<span class="doccomment">/// The complete header of a Stratum file, which contains the data written to
-/// the Sediment database.
+<span class="doccomment">/// Each Stratum header is 16kb, and describes the state of allocation of each
+/// grain within the Stratum.
 ///
-/// The header is two [`StratumHeader`]s serialized one after another. The
-/// header with the latest [`TransactionId`] is considered the current record.
-/// When updating the header, the inactive copy should be overwritten.
+/// It is serialized as:
+///
+/// - [`TransactionId`]: 8 bytes
+/// - [`GrainAllocationInfo`]: 16,372 one-byte entries
+/// - CRC32: 4 bytes
+///
+/// The grain size is determined by the name of the file that contains the
+/// header.
+///
+/// # About Statum files
+///
+/// Strata contain the data written to the Sediment database.
+///
+/// The header consists of two [`StratumHeader`]s serialized one after another.
+/// The header with the latest [`TransactionId`] is considered the current
+/// record. When updating the header, the inactive copy should be overwritten.
 ///
 /// If an aborted write is detected and a rollback needs to happen, the rolled
 /// back header should be overwritten with a second copy of the previous
@@ -1481,35 +1442,6 @@
 /// grains, not every local grain index will point to the start of a grain
 /// record. The [`StratumHeader`] must be used to determine if a given local
 /// grain index is valid before trusting the data stored.
-</span><span class="kw">pub struct </span>StratumFileHeader {
-    <span class="kw">pub </span>first_header: StratumHeader,
-    <span class="kw">pub </span>second_header: StratumHeader,
-}
-
-<span class="kw">impl </span>StratumFileHeader {
-    <span class="kw">const </span>BYTES: u64 = StratumHeader::BYTES * <span class="number">2</span>;
-
-    <span class="kw">pub fn </span>read_from&lt;R: Read&gt;(<span class="kw-2">mut </span>file: R, scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>first_header = StratumHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
-        <span class="kw">let </span>second_header = StratumHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-            first_header,
-            second_header,
-        })
-    }
-}
-
-<span class="doccomment">/// Each Stratum header is 16kb, and describes the state of allocation of each
-/// grain within the Stratum.
-///
-/// It is serialized as:
-///
-/// - [`TransactionId`]: 8 bytes
-/// - [`GrainAllocationInfo`]: 16,372 one-byte entries
-/// - CRC32: 4 bytes
-///
-/// The grain size is determined by the name of the file that contains the
-/// header.
 </span><span class="attr">#[derive(Debug)]
 </span><span class="kw">pub struct </span>StratumHeader {
     <span class="kw">pub </span>transaction_id: TransactionId,
