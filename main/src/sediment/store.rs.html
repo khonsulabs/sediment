@@ -507,30 +507,6 @@
 <a href="#507" id="507">507</a>
 <a href="#508" id="508">508</a>
 <a href="#509" id="509">509</a>
-<a href="#510" id="510">510</a>
-<a href="#511" id="511">511</a>
-<a href="#512" id="512">512</a>
-<a href="#513" id="513">513</a>
-<a href="#514" id="514">514</a>
-<a href="#515" id="515">515</a>
-<a href="#516" id="516">516</a>
-<a href="#517" id="517">517</a>
-<a href="#518" id="518">518</a>
-<a href="#519" id="519">519</a>
-<a href="#520" id="520">520</a>
-<a href="#521" id="521">521</a>
-<a href="#522" id="522">522</a>
-<a href="#523" id="523">523</a>
-<a href="#524" id="524">524</a>
-<a href="#525" id="525">525</a>
-<a href="#526" id="526">526</a>
-<a href="#527" id="527">527</a>
-<a href="#528" id="528">528</a>
-<a href="#529" id="529">529</a>
-<a href="#530" id="530">530</a>
-<a href="#531" id="531">531</a>
-<a href="#532" id="532">532</a>
-<a href="#533" id="533">533</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
 <span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
@@ -863,9 +839,7 @@
         <span class="kw">if </span>first.is_some() || second.is_some() {
             <span class="prelude-val">Ok</span>(())
         } <span class="kw">else </span>{
-            <span class="prelude-val">Err</span>(Error::verification_failed(
-                <span class="string">&quot;the only valid header isn&#39;t valid&quot;</span>,
-            ))
+            <span class="prelude-val">Err</span>(Error::verification_failed(<span class="string">&quot;neither header is valid&quot;</span>))
         }
     }
 
@@ -874,23 +848,7 @@
     }
 
     <span class="kw">pub fn </span>needs_cleanup(<span class="kw-2">&amp;</span><span class="self">self</span>, commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;) -&gt; bool {
-        <span class="kw">let </span>commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
-            commit_log.transaction_id
-        });
-        <span class="kw">match </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.header.first, <span class="kw-2">&amp;</span><span class="self">self</span>.header.second) {
-            (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
-                <span class="kw">let </span>first_is_valid = first.transaction_id &lt; commit_transaction
-                    || (first.transaction_id == commit_transaction
-                        &amp;&amp; commit_log
-                            .map_or(<span class="bool-val">true</span>, |commit_log| first.reflects_changes_from(commit_log)));
-                <span class="kw">let </span>second_is_valid = second.transaction_id &lt; commit_transaction
-                    || (second.transaction_id == commit_transaction
-                        &amp;&amp; commit_log
-                            .map_or(<span class="bool-val">true</span>, |commit_log| second.reflects_changes_from(commit_log)));
-                !first_is_valid || !second_is_valid
-            }
-            <span class="kw">_ </span>=&gt; <span class="bool-val">true</span>,
-        }
+        !<span class="macro">matches!</span>(<span class="self">self</span>.headers_valid(commit_log), (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(<span class="kw">_</span>)))
     }
 
     <span class="kw">fn </span>headers_valid(
@@ -972,7 +930,7 @@
         directory: <span class="kw-2">&amp;</span>Path,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>basins = <span class="self">Self</span>::new();
-        <span class="kw">for </span><span class="kw-2">mut </span>stratum <span class="kw">in </span>discovered_strata.into_values() {
+        <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.into_values() {
             <span class="kw">if </span>!stratum.should_exist(index) {
                 std::fs::remove_file(directory.join(stratum.id.to_string()))<span class="question-mark">?</span>;
                 <span class="kw">continue</span>;
@@ -1001,22 +959,16 @@
                     first_is_active: <span class="bool-val">false</span>,
                 },
                 (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; {
-                    <span class="kw">return </span><span class="prelude-val">Err</span>(stratum
-                        .header
-                        .error
-                        .take()
-                        .expect(<span class="string">&quot;no header requires error&quot;</span>))
+                    <span class="macro">unreachable!</span>(<span class="string">&quot;error is handled in validation phase&quot;</span>)
                 }
             };
 
             <span class="kw">let </span>basin = basins.get_or_insert_with(stratum.id.basin(), || {
                 BasinState::default_for(stratum.id.basin())
             });
-            <span class="macro">assert_eq!</span>(
-                basin.stratum.len(),
-                stratum.id.stratum().as_usize(),
-                <span class="string">&quot;strata are non-sequential&quot;
-            </span>);
+            <span class="kw">if </span>stratum.id.stratum().as_usize() != basin.stratum.len() {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(Error::verification_failed(<span class="string">&quot;strata are non-sequential&quot;</span>));
+            }
 
             basin.stratum.push(StratumState {
                 path: Arc::new(directory.join(stratum.id.to_string())),
