@@ -70,19 +70,17 @@ impl DiskState {
             let file_header =
                 FileHeader::<IndexHeader>::read_from(&mut index_writer, &mut scratch)?;
 
-            let (mut first_is_active, mut active, older) =
-                match (file_header.first, file_header.second) {
-                    (Some(first), Some(second)) => {
-                        if first.transaction_id > second.transaction_id {
-                            (true, first, Some(second))
-                        } else {
-                            (false, second, Some(first))
-                        }
+            let (mut first_is_active, mut active, older) = match file_header {
+                FileHeader::Both(first, second) => {
+                    if first.transaction_id > second.transaction_id {
+                        (true, first, Some(second))
+                    } else {
+                        (false, second, Some(first))
                     }
-                    (Some(first), None) => (true, first, None),
-                    (None, Some(second)) => (false, second, None),
-                    (None, None) => unreachable!("FileHeader will return an error"),
-                };
+                }
+                FileHeader::First(first) => (true, first, None),
+                FileHeader::Second(second) => (false, second, None),
+            };
 
             let mut strata_to_clean = None;
             let commit_log = match (BasinMap::verify(&active, &mut discovered_strata), older) {
@@ -325,7 +323,7 @@ impl UnverifiedStratum {
     }
 
     pub fn validate(&self, commit_log: &CommitLogEntry) -> Result<()> {
-        let (first, second) = self.headers_valid(Some(commit_log));
+        let (first, second) = self.validate_headers(Some(commit_log));
 
         if first.is_some() || second.is_some() {
             Ok(())
@@ -339,10 +337,10 @@ impl UnverifiedStratum {
     }
 
     pub fn needs_cleanup(&self, commit_log: Option<&CommitLogEntry>) -> bool {
-        !matches!(self.headers_valid(commit_log), (Some(_), Some(_)))
+        !matches!(self.validate_headers(commit_log), (Some(_), Some(_)))
     }
 
-    fn headers_valid(
+    fn validate_headers(
         &self,
         commit_log: Option<&CommitLogEntry>,
     ) -> (Option<&StratumHeader>, Option<&StratumHeader>) {
@@ -359,15 +357,11 @@ impl UnverifiedStratum {
         let commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
             commit_log.transaction_id
         });
-        let first = self
-            .header
-            .first
-            .as_ref()
+        let (first, second) = self.header.as_options();
+        let first = first
             .and_then(|first| is_valid(first, commit_transaction, commit_log).then_some(first));
-        let second =
-            self.header.second.as_ref().and_then(|second| {
-                is_valid(second, commit_transaction, commit_log).then_some(second)
-            });
+        let second = second
+            .and_then(|second| is_valid(second, commit_transaction, commit_log).then_some(second));
 
         (first, second)
     }
@@ -427,26 +421,26 @@ impl BasinMap<BasinState> {
                 continue;
             }
 
-            let header = match stratum.headers_valid(commit_log) {
+            let header = match stratum.validate_headers(commit_log) {
                 (Some(first), Some(second)) => {
                     if first.transaction_id >= second.transaction_id {
                         Duplicated {
-                            active: stratum.header.first.expect("just matched"),
+                            active: stratum.header.into_first(),
                             first_is_active: true,
                         }
                     } else {
                         Duplicated {
-                            active: stratum.header.second.expect("just matched"),
+                            active: stratum.header.into_second(),
                             first_is_active: false,
                         }
                     }
                 }
                 (Some(_), _) => Duplicated {
-                    active: stratum.header.first.expect("just matched"),
+                    active: stratum.header.into_first(),
                     first_is_active: true,
                 },
                 (_, Some(_)) => Duplicated {
-                    active: stratum.header.second.expect("just matched"),
+                    active: stratum.header.into_second(),
                     first_is_active: false,
                 },
                 (None, None) => {

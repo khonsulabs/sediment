@@ -453,6 +453,20 @@ fn last_write_rollback() {
         ],
         false,
     );
+    // Test overwriting both headers with crc-valid, but not actually valid,
+    // headers.
+    valid_header.write_to(&mut valid_header_bytes).unwrap();
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Stratum,
+                offset: 0,
+                bytes: &valid_header_bytes,
+            },
+        ],
+        true,
+    );
 
     // Test overwriting a grain's transaction ID in both the first and second
     // headers.
@@ -543,9 +557,70 @@ fn last_write_rollback() {
         false,
     );
 
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Index,
+                offset: IndexHeader::BYTES,
+                bytes: &[0xFF],
+            },
+        ],
+        false,
+    );
+
+    // Test writing a "valid" index header, but with broken data.
+    let mut index_header = IndexHeader {
+        // Point the commit log to an invalid id.
+        transaction_id: TransactionId::from(1),
+        commit_log_head: "71fffffffffe-fffff".parse().ok(),
+        ..IndexHeader::default()
+    };
+    let mut index_header_bytes = Vec::new();
+    index_header.write_to(&mut index_header_bytes).unwrap();
+    test_write_after(
+        &[WriteCommand::Write {
+            target: Target::Index,
+            offset: 0,
+            bytes: &index_header_bytes,
+        }],
+        false,
+    );
+    index_header.transaction_id = TransactionId::from(2);
+    index_header_bytes.clear();
+    index_header.write_to(&mut index_header_bytes).unwrap();
+    test_write_after(
+        &[
+            WriteCommand::DoNothing,
+            WriteCommand::Write {
+                target: Target::Index,
+                offset: IndexHeader::BYTES,
+                bytes: &index_header_bytes,
+            },
+        ],
+        false,
+    );
+
     // Test removing the index file. This should generate an error because the
     // existing strata can be found.
     test_write_after(&[WriteCommand::RemoveIndex], true);
+
+    // Test writing a valid index header, then overwriting part of the second header,
+    // causing one header to fail to validate while the other can't parse due to
+    // a crc error. This should never happen in real life.
+    index_header.transaction_id = TransactionId::from(1);
+    index_header_bytes.clear();
+    index_header.write_to(&mut index_header_bytes).unwrap();
+    // Overwrite part of the transaction id of the second header, causing its crc to fail.
+    index_header_bytes.push(1);
+    test_write_after(
+        &[WriteCommand::Write {
+            target: Target::Index,
+            offset: 0,
+            bytes: &index_header_bytes,
+        }],
+        true,
+    );
 
     // Write enough data to need two stratum, then remove the first to receiven
     // error. There are 3 grains required at the current allocation strategy for

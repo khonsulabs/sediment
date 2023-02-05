@@ -382,10 +382,10 @@ impl PartialOrd<EntryId> for TransactionId {
     }
 }
 
-pub struct FileHeader<T> {
-    pub first: Option<T>,
-    pub second: Option<T>,
-    pub error: Option<Error>,
+pub enum FileHeader<T> {
+    Both(T, T),
+    First(T),
+    Second(T),
 }
 
 impl<T> FileHeader<T>
@@ -399,26 +399,32 @@ where
         }
         let second_header = T::read_from(&mut file, scratch);
         match (first_header, second_header) {
-            (Ok(first_header), Ok(second_header)) => Ok(Self {
-                first: Some(first_header),
-                second: Some(second_header),
-                error: None,
-            }),
-            (Err(err), Err(_)) => Ok(Self {
-                first: None,
-                second: None,
-                error: Some(err),
-            }),
-            (Ok(first_header), Err(_)) => Ok(Self {
-                first: Some(first_header),
-                second: None,
-                error: None,
-            }),
-            (Err(_), Ok(second_header)) => Ok(Self {
-                first: None,
-                second: Some(second_header),
-                error: None,
-            }),
+            (Ok(first_header), Ok(second_header)) => Ok(Self::Both(first_header, second_header)),
+            (Err(err), Err(_)) => Err(err),
+            (Ok(first_header), Err(_)) => Ok(Self::First(first_header)),
+            (Err(_), Ok(second_header)) => Ok(Self::Second(second_header)),
+        }
+    }
+
+    pub fn as_options(&self) -> (Option<&T>, Option<&T>) {
+        match self {
+            FileHeader::Both(first, second) => (Some(first), Some(second)),
+            FileHeader::First(first) => (Some(first), None),
+            FileHeader::Second(second) => (None, Some(second)),
+        }
+    }
+
+    pub fn into_first(self) -> T {
+        match self {
+            FileHeader::Both(first, _) | FileHeader::First(first) => first,
+            FileHeader::Second(_) => unreachable!("did not contain a valid first"),
+        }
+    }
+
+    pub fn into_second(self) -> T {
+        match self {
+            FileHeader::Both(_, second) | FileHeader::Second(second) => second,
+            FileHeader::First(_) => unreachable!("did not contain a valid second"),
         }
     }
 }
