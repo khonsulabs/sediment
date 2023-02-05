@@ -844,6 +844,12 @@
 <a href="#844" id="844">844</a>
 <a href="#845" id="845">845</a>
 <a href="#846" id="846">846</a>
+<a href="#847" id="847">847</a>
+<a href="#848" id="848">848</a>
+<a href="#849" id="849">849</a>
+<a href="#850" id="850">850</a>
+<a href="#851" id="851">851</a>
+<a href="#852" id="852">852</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::fmt::{Display, Write <span class="kw">as _</span>};
 <span class="kw">use </span>std::io::{BufWriter, Read, Seek, Write};
 <span class="kw">use </span>std::ops::{AddAssign, Deref, DerefMut};
@@ -1228,10 +1234,10 @@
     }
 }
 
-<span class="kw">pub struct </span>FileHeader&lt;T&gt; {
-    <span class="kw">pub </span>first: <span class="prelude-ty">Option</span>&lt;T&gt;,
-    <span class="kw">pub </span>second: <span class="prelude-ty">Option</span>&lt;T&gt;,
-    <span class="kw">pub </span>error: <span class="prelude-ty">Option</span>&lt;Error&gt;,
+<span class="kw">pub enum </span>FileHeader&lt;T&gt; {
+    Both(T, T),
+    First(T),
+    Second(T),
 }
 
 <span class="kw">impl</span>&lt;T&gt; FileHeader&lt;T&gt;
@@ -1245,26 +1251,32 @@
         }
         <span class="kw">let </span>second_header = T::read_from(<span class="kw-2">&amp;mut </span>file, scratch);
         <span class="kw">match </span>(first_header, second_header) {
-            (<span class="prelude-val">Ok</span>(first_header), <span class="prelude-val">Ok</span>(second_header)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-                first: <span class="prelude-val">Some</span>(first_header),
-                second: <span class="prelude-val">Some</span>(second_header),
-                error: <span class="prelude-val">None</span>,
-            }),
-            (<span class="prelude-val">Err</span>(err), <span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-                first: <span class="prelude-val">None</span>,
-                second: <span class="prelude-val">None</span>,
-                error: <span class="prelude-val">Some</span>(err),
-            }),
-            (<span class="prelude-val">Ok</span>(first_header), <span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-                first: <span class="prelude-val">Some</span>(first_header),
-                second: <span class="prelude-val">None</span>,
-                error: <span class="prelude-val">None</span>,
-            }),
-            (<span class="prelude-val">Err</span>(<span class="kw">_</span>), <span class="prelude-val">Ok</span>(second_header)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
-                first: <span class="prelude-val">None</span>,
-                second: <span class="prelude-val">Some</span>(second_header),
-                error: <span class="prelude-val">None</span>,
-            }),
+            (<span class="prelude-val">Ok</span>(first_header), <span class="prelude-val">Ok</span>(second_header)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Both(first_header, second_header)),
+            (<span class="prelude-val">Err</span>(err), <span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Err</span>(err),
+            (<span class="prelude-val">Ok</span>(first_header), <span class="prelude-val">Err</span>(<span class="kw">_</span>)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::First(first_header)),
+            (<span class="prelude-val">Err</span>(<span class="kw">_</span>), <span class="prelude-val">Ok</span>(second_header)) =&gt; <span class="prelude-val">Ok</span>(<span class="self">Self</span>::Second(second_header)),
+        }
+    }
+
+    <span class="kw">pub fn </span>as_options(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; (<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>T&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>T&gt;) {
+        <span class="kw">match </span><span class="self">self </span>{
+            FileHeader::Both(first, second) =&gt; (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)),
+            FileHeader::First(first) =&gt; (<span class="prelude-val">Some</span>(first), <span class="prelude-val">None</span>),
+            FileHeader::Second(second) =&gt; (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(second)),
+        }
+    }
+
+    <span class="kw">pub fn </span>into_first(<span class="self">self</span>) -&gt; T {
+        <span class="kw">match </span><span class="self">self </span>{
+            FileHeader::Both(first, <span class="kw">_</span>) | FileHeader::First(first) =&gt; first,
+            FileHeader::Second(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;did not contain a valid first&quot;</span>),
+        }
+    }
+
+    <span class="kw">pub fn </span>into_second(<span class="self">self</span>) -&gt; T {
+        <span class="kw">match </span><span class="self">self </span>{
+            FileHeader::Both(<span class="kw">_</span>, second) | FileHeader::Second(second) =&gt; second,
+            FileHeader::First(<span class="kw">_</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;did not contain a valid second&quot;</span>),
         }
     }
 }

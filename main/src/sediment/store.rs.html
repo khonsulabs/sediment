@@ -501,12 +501,6 @@
 <a href="#501" id="501">501</a>
 <a href="#502" id="502">502</a>
 <a href="#503" id="503">503</a>
-<a href="#504" id="504">504</a>
-<a href="#505" id="505">505</a>
-<a href="#506" id="506">506</a>
-<a href="#507" id="507">507</a>
-<a href="#508" id="508">508</a>
-<a href="#509" id="509">509</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
 <span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
 <span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
@@ -579,19 +573,17 @@
             <span class="kw">let </span>file_header =
                 FileHeader::&lt;IndexHeader&gt;::read_from(<span class="kw-2">&amp;mut </span>index_writer, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
 
-            <span class="kw">let </span>(<span class="kw-2">mut </span>first_is_active, <span class="kw-2">mut </span>active, older) =
-                <span class="kw">match </span>(file_header.first, file_header.second) {
-                    (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
-                        <span class="kw">if </span>first.transaction_id &gt; second.transaction_id {
-                            (<span class="bool-val">true</span>, first, <span class="prelude-val">Some</span>(second))
-                        } <span class="kw">else </span>{
-                            (<span class="bool-val">false</span>, second, <span class="prelude-val">Some</span>(first))
-                        }
+            <span class="kw">let </span>(<span class="kw-2">mut </span>first_is_active, <span class="kw-2">mut </span>active, older) = <span class="kw">match </span>file_header {
+                FileHeader::Both(first, second) =&gt; {
+                    <span class="kw">if </span>first.transaction_id &gt; second.transaction_id {
+                        (<span class="bool-val">true</span>, first, <span class="prelude-val">Some</span>(second))
+                    } <span class="kw">else </span>{
+                        (<span class="bool-val">false</span>, second, <span class="prelude-val">Some</span>(first))
                     }
-                    (<span class="prelude-val">Some</span>(first), <span class="prelude-val">None</span>) =&gt; (<span class="bool-val">true</span>, first, <span class="prelude-val">None</span>),
-                    (<span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(second)) =&gt; (<span class="bool-val">false</span>, second, <span class="prelude-val">None</span>),
-                    (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; <span class="macro">unreachable!</span>(<span class="string">&quot;FileHeader will return an error&quot;</span>),
-                };
+                }
+                FileHeader::First(first) =&gt; (<span class="bool-val">true</span>, first, <span class="prelude-val">None</span>),
+                FileHeader::Second(second) =&gt; (<span class="bool-val">false</span>, second, <span class="prelude-val">None</span>),
+            };
 
             <span class="kw">let </span><span class="kw-2">mut </span>strata_to_clean = <span class="prelude-val">None</span>;
             <span class="kw">let </span>commit_log = <span class="kw">match </span>(BasinMap::verify(<span class="kw-2">&amp;</span>active, <span class="kw-2">&amp;mut </span>discovered_strata), older) {
@@ -834,7 +826,7 @@
     }
 
     <span class="kw">pub fn </span>validate(<span class="kw-2">&amp;</span><span class="self">self</span>, commit_log: <span class="kw-2">&amp;</span>CommitLogEntry) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
-        <span class="kw">let </span>(first, second) = <span class="self">self</span>.headers_valid(<span class="prelude-val">Some</span>(commit_log));
+        <span class="kw">let </span>(first, second) = <span class="self">self</span>.validate_headers(<span class="prelude-val">Some</span>(commit_log));
 
         <span class="kw">if </span>first.is_some() || second.is_some() {
             <span class="prelude-val">Ok</span>(())
@@ -848,10 +840,10 @@
     }
 
     <span class="kw">pub fn </span>needs_cleanup(<span class="kw-2">&amp;</span><span class="self">self</span>, commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;) -&gt; bool {
-        !<span class="macro">matches!</span>(<span class="self">self</span>.headers_valid(commit_log), (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(<span class="kw">_</span>)))
+        !<span class="macro">matches!</span>(<span class="self">self</span>.validate_headers(commit_log), (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="prelude-val">Some</span>(<span class="kw">_</span>)))
     }
 
-    <span class="kw">fn </span>headers_valid(
+    <span class="kw">fn </span>validate_headers(
         <span class="kw-2">&amp;</span><span class="self">self</span>,
         commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;,
     ) -&gt; (<span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>StratumHeader&gt;, <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>StratumHeader&gt;) {
@@ -868,15 +860,11 @@
         <span class="kw">let </span>commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
             commit_log.transaction_id
         });
-        <span class="kw">let </span>first = <span class="self">self
-            </span>.header
-            .first
-            .as_ref()
+        <span class="kw">let </span>(first, second) = <span class="self">self</span>.header.as_options();
+        <span class="kw">let </span>first = first
             .and_then(|first| is_valid(first, commit_transaction, commit_log).then_some(first));
-        <span class="kw">let </span>second =
-            <span class="self">self</span>.header.second.as_ref().and_then(|second| {
-                is_valid(second, commit_transaction, commit_log).then_some(second)
-            });
+        <span class="kw">let </span>second = second
+            .and_then(|second| is_valid(second, commit_transaction, commit_log).then_some(second));
 
         (first, second)
     }
@@ -936,26 +924,26 @@
                 <span class="kw">continue</span>;
             }
 
-            <span class="kw">let </span>header = <span class="kw">match </span>stratum.headers_valid(commit_log) {
+            <span class="kw">let </span>header = <span class="kw">match </span>stratum.validate_headers(commit_log) {
                 (<span class="prelude-val">Some</span>(first), <span class="prelude-val">Some</span>(second)) =&gt; {
                     <span class="kw">if </span>first.transaction_id &gt;= second.transaction_id {
                         Duplicated {
-                            active: stratum.header.first.expect(<span class="string">&quot;just matched&quot;</span>),
+                            active: stratum.header.into_first(),
                             first_is_active: <span class="bool-val">true</span>,
                         }
                     } <span class="kw">else </span>{
                         Duplicated {
-                            active: stratum.header.second.expect(<span class="string">&quot;just matched&quot;</span>),
+                            active: stratum.header.into_second(),
                             first_is_active: <span class="bool-val">false</span>,
                         }
                     }
                 }
                 (<span class="prelude-val">Some</span>(<span class="kw">_</span>), <span class="kw">_</span>) =&gt; Duplicated {
-                    active: stratum.header.first.expect(<span class="string">&quot;just matched&quot;</span>),
+                    active: stratum.header.into_first(),
                     first_is_active: <span class="bool-val">true</span>,
                 },
                 (<span class="kw">_</span>, <span class="prelude-val">Some</span>(<span class="kw">_</span>)) =&gt; Duplicated {
-                    active: stratum.header.second.expect(<span class="string">&quot;just matched&quot;</span>),
+                    active: stratum.header.into_second(),
                     first_is_active: <span class="bool-val">false</span>,
                 },
                 (<span class="prelude-val">None</span>, <span class="prelude-val">None</span>) =&gt; {
