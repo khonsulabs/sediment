@@ -59,10 +59,10 @@ fn main() {
     {
         benchmark = benchmark.with::<SqliteThreadedInserts>();
     }
-    #[cfg(feature = "rocksdb")]
-    {
-        benchmark = benchmark.with::<self::rocksdb::ThreadedInserts>();
-    }
+    // #[cfg(feature = "rocksdb")]
+    // {
+    //     benchmark = benchmark.with::<self::rocksdb::ThreadedInserts>();
+    // }
 
     benchmark = benchmark.with::<SedimentThreadedInserts>();
 
@@ -74,8 +74,8 @@ fn main() {
     marble::measure(&measurements);
     #[cfg(feature = "sqlite")]
     measure_sqlite(&measurements);
-    #[cfg(feature = "rocksdb")]
-    self::rocksdb::measure(&measurements);
+    // #[cfg(feature = "rocksdb")]
+    // self::rocksdb::measure(&measurements);
 
     let stats = measurements.wait_for_stats();
     timings::print_table_summaries(&stats).unwrap();
@@ -328,110 +328,110 @@ impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for SqliteThr
     }
 }
 
-#[cfg(feature = "rocksdb")]
-mod rocksdb {
-    use std::path::Path;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Arc;
+// #[cfg(feature = "rocksdb")]
+// mod rocksdb {
+//     use std::path::Path;
+//     use std::sync::atomic::{AtomicU64, Ordering};
+//     use std::sync::Arc;
 
-    use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch, WriteOptions, DB};
-    use timings::{BenchmarkImplementation, LabeledTimings, Timings};
+//     use rocksdb::{DBWithThreadMode, MultiThreaded, WriteBatch, WriteOptions, DB};
+//     use timings::{BenchmarkImplementation, LabeledTimings, Timings};
 
-    use super::ITERS;
-    use crate::ThreadedInsertsData;
+//     use super::ITERS;
+//     use crate::ThreadedInsertsData;
 
-    pub fn measure(measurements: &Timings<String>) {
-        let path = Path::new("./bench-suite.rocksdb");
-        if path.exists() {
-            std::fs::remove_dir_all(path).unwrap();
-        }
-        let db = DB::open_default(path).unwrap();
-        let mut write_opts = WriteOptions::new();
-        write_opts.set_sync(true);
+//     pub fn measure(measurements: &Timings<String>) {
+//         let path = Path::new("./bench-suite.rocksdb");
+//         if path.exists() {
+//             std::fs::remove_dir_all(path).unwrap();
+//         }
+//         let db = DB::open_default(path).unwrap();
+//         let mut write_opts = WriteOptions::new();
+//         write_opts.set_sync(true);
 
-        for i in 0_u128..ITERS {
-            let measurement = measurements.begin("rocksdb", String::from("insert 16b"));
+//         for i in 0_u128..ITERS {
+//             let measurement = measurements.begin("rocksdb", String::from("insert 16b"));
 
-            db.put_opt(i.to_be_bytes(), i.to_le_bytes(), &write_opts)
-                .unwrap();
-            measurement.finish();
-        }
+//             db.put_opt(i.to_be_bytes(), i.to_le_bytes(), &write_opts)
+//                 .unwrap();
+//             measurement.finish();
+//         }
 
-        drop(db);
-        std::fs::remove_dir_all(path).unwrap();
-    }
+//         drop(db);
+//         std::fs::remove_dir_all(path).unwrap();
+//     }
 
-    pub struct ThreadedInserts {
-        number_of_threads: usize,
-        config: ThreadedInsertsConfig,
-    }
+//     pub struct ThreadedInserts {
+//         number_of_threads: usize,
+//         config: ThreadedInsertsConfig,
+//     }
 
-    #[derive(Clone)]
-    pub struct ThreadedInsertsConfig {
-        db: Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
-        unique_id_counter: Arc<AtomicU64>,
-        data: Arc<ThreadedInsertsData>,
-    }
+//     #[derive(Clone)]
+//     pub struct ThreadedInsertsConfig {
+//         db: Arc<rocksdb::DBWithThreadMode<MultiThreaded>>,
+//         unique_id_counter: Arc<AtomicU64>,
+//         data: Arc<ThreadedInsertsData>,
+//     }
 
-    impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for ThreadedInserts {
-        type SharedConfig = ThreadedInsertsConfig;
+//     impl BenchmarkImplementation<String, Arc<ThreadedInsertsData>, ()> for ThreadedInserts {
+//         type SharedConfig = ThreadedInsertsConfig;
 
-        fn initialize_shared_config(
-            _number_of_threads: usize,
-            config: &Arc<ThreadedInsertsData>,
-        ) -> Result<Self::SharedConfig, ()> {
-            let path = Path::new("./.threaded-inserts.rocksdb");
-            let db = DBWithThreadMode::<MultiThreaded>::open_default(path).unwrap();
-            Ok(ThreadedInsertsConfig {
-                db: Arc::new(db),
-                unique_id_counter: Arc::default(),
-                data: config.clone(),
-            })
-        }
+//         fn initialize_shared_config(
+//             _number_of_threads: usize,
+//             config: &Arc<ThreadedInsertsData>,
+//         ) -> Result<Self::SharedConfig, ()> {
+//             let path = Path::new("./.threaded-inserts.rocksdb");
+//             let db = DBWithThreadMode::<MultiThreaded>::open_default(path).unwrap();
+//             Ok(ThreadedInsertsConfig {
+//                 db: Arc::new(db),
+//                 unique_id_counter: Arc::default(),
+//                 data: config.clone(),
+//             })
+//         }
 
-        fn initialize(number_of_threads: usize, config: ThreadedInsertsConfig) -> Result<Self, ()> {
-            Ok(Self {
-                number_of_threads,
-                config,
-            })
-        }
+//         fn initialize(number_of_threads: usize, config: ThreadedInsertsConfig) -> Result<Self, ()> {
+//             Ok(Self {
+//                 number_of_threads,
+//                 config,
+//             })
+//         }
 
-        #[allow(clippy::unnecessary_to_owned)] // TODO submit PR against rocksdb to allow ?Sized
-        fn measure(&mut self, measurements: &LabeledTimings<String>) -> Result<(), ()> {
-            let mut write_opts = WriteOptions::new();
-            write_opts.set_sync(true);
-            for batch in &self.config.data.ranges {
-                let measurement =
-                    measurements.begin(format!("{}-threads-inserts", self.number_of_threads));
-                let mut write_batch = WriteBatch::default();
+//         #[allow(clippy::unnecessary_to_owned)] // TODO submit PR against rocksdb to allow ?Sized
+//         fn measure(&mut self, measurements: &LabeledTimings<String>) -> Result<(), ()> {
+//             let mut write_opts = WriteOptions::new();
+//             write_opts.set_sync(true);
+//             for batch in &self.config.data.ranges {
+//                 let measurement =
+//                     measurements.begin(format!("{}-threads-inserts", self.number_of_threads));
+//                 let mut write_batch = WriteBatch::default();
 
-                for range in batch {
-                    let unique_id = self.config.unique_id_counter.fetch_add(1, Ordering::SeqCst);
-                    write_batch.put(
-                        unique_id.to_be_bytes(),
-                        &self.config.data.source[range.clone()].to_vec(),
-                    );
-                }
-                self.config.db.write_opt(write_batch, &write_opts).unwrap();
-                measurement.finish();
-            }
+//                 for range in batch {
+//                     let unique_id = self.config.unique_id_counter.fetch_add(1, Ordering::SeqCst);
+//                     write_batch.put(
+//                         unique_id.to_be_bytes(),
+//                         &self.config.data.source[range.clone()].to_vec(),
+//                     );
+//                 }
+//                 self.config.db.write_opt(write_batch, &write_opts).unwrap();
+//                 measurement.finish();
+//             }
 
-            Ok(())
-        }
+//             Ok(())
+//         }
 
-        fn reset(shutting_down: bool) -> Result<(), ()> {
-            let path = Path::new("./.threaded-inserts.rocksdb");
-            if path.exists() {
-                std::fs::remove_dir_all(path).unwrap();
-            }
-            if !shutting_down {
-                std::fs::create_dir(path).unwrap();
-            }
-            Ok(())
-        }
+//         fn reset(shutting_down: bool) -> Result<(), ()> {
+//             let path = Path::new("./.threaded-inserts.rocksdb");
+//             if path.exists() {
+//                 std::fs::remove_dir_all(path).unwrap();
+//             }
+//             if !shutting_down {
+//                 std::fs::create_dir(path).unwrap();
+//             }
+//             Ok(())
+//         }
 
-        fn label(_number_of_threads: usize, _config: &Arc<ThreadedInsertsData>) -> timings::Label {
-            "rocksdb".into()
-        }
-    }
-}
+//         fn label(_number_of_threads: usize, _config: &Arc<ThreadedInsertsData>) -> timings::Label {
+//             "rocksdb".into()
+//         }
+//     }
+// }
