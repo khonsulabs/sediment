@@ -6,6 +6,7 @@ use std::str::FromStr;
 use crc32c::crc32c;
 use okaywal::EntryId;
 
+use crate::commit_log::CommitLogEntry;
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -53,10 +54,6 @@ impl GrainId {
 
     pub const fn stratum_id(self) -> StratumId {
         StratumId((self.0 >> 20) & 0x1ff_ffff_ffff)
-    }
-
-    pub const fn sequential_grains(self) -> u8 {
-        (self.0 & 0x3f) as u8
     }
 
     pub(crate) const fn file_position(self) -> u64 {
@@ -643,6 +640,51 @@ pub struct StratumHeader {
 impl StratumHeader {
     pub const fn grain_info(&self, index: usize) -> GrainAllocationInfo {
         GrainAllocationInfo(self.grains[index])
+    }
+
+    pub fn reflects_changes_from(&self, commit_log: &CommitLogEntry) -> bool {
+        let new_grains = commit_log
+            .new_grains
+            .iter()
+            .map(|new_grain| (GrainAllocationStatus::Allocated, new_grain.id));
+        let archived_grains = commit_log
+            .archived_grains
+            .iter()
+            .map(|grain| (GrainAllocationStatus::Archived, *grain));
+        let freed_grains = commit_log
+            .freed_grains
+            .iter()
+            .map(|grain| (GrainAllocationStatus::Free, *grain));
+        for (expected_status, grain_id) in new_grains.chain(archived_grains).chain(freed_grains) {
+            let start = usize::from(grain_id.local_grain_index().as_u16());
+            let mut expected_count = grain_id.grain_count();
+            for info in self
+                .grains
+                .iter()
+                .skip(start)
+                .take(usize::from(expected_count))
+            {
+                let info = GrainAllocationInfo(*info);
+
+                let matches = if info.status() == Some(expected_status) {
+                    if expected_status == GrainAllocationStatus::Free {
+                        info.count() == 0
+                    } else {
+                        info.count() == expected_count
+                    }
+                } else {
+                    false
+                };
+
+                if !matches {
+                    return false;
+                }
+
+                expected_count -= 1;
+            }
+        }
+
+        true
     }
 }
 

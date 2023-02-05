@@ -261,11 +261,11 @@ fn rollback() {
     fs::remove_dir_all(path).unwrap();
 }
 
-enum WriteCommand {
+enum WriteCommand<'a> {
     Write {
         target: Target,
         offset: u64,
-        bytes: &'static [u8],
+        bytes: &'a [u8],
     },
     RemoveStratum,
     DoNothing,
@@ -374,6 +374,29 @@ fn last_write_rollback() {
         offset: 0,
         bytes: &[1; 16_384 * 2],
     }]);
+    // Test overwriting the header with a valid but incorrect header. This
+    // shouldn't ever happen in practice, because recovery is supposed to
+    // overwrite the bad headers.
+    let mut valid_header = StratumHeader::default();
+    let mut valid_header_bytes = Vec::new();
+    valid_header.transaction_id = TransactionId::from(1);
+    valid_header.write_to(&mut valid_header_bytes).unwrap();
+    test_write_after(&[WriteCommand::Write {
+        target: Target::Stratum,
+        offset: 0,
+        bytes: &valid_header_bytes,
+    }]);
+    valid_header.transaction_id = TransactionId::from(2);
+    valid_header_bytes.clear();
+    valid_header.write_to(&mut valid_header_bytes).unwrap();
+    test_write_after(&[
+        WriteCommand::DoNothing,
+        WriteCommand::Write {
+            target: Target::Stratum,
+            offset: StratumHeader::BYTES,
+            bytes: &valid_header_bytes,
+        },
+    ]);
 
     // Test overwriting a grain's transaction ID in both the first and second
     // headers.

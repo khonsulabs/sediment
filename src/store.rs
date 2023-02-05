@@ -85,10 +85,10 @@ impl DiskState {
                 };
 
             let mut strata_to_clean = None;
-            match (BasinMap::verify(&active, &mut discovered_strata), older) {
-                (Ok(_), _) => {}
+            let commit_log = match (BasinMap::verify(&active, &mut discovered_strata), older) {
+                (Ok(commit_log), _) => commit_log,
                 (Err(_), Some(older)) => {
-                    BasinMap::verify(&older, &mut discovered_strata)?;
+                    let commit_log = BasinMap::verify(&older, &mut discovered_strata)?;
 
                     active = older;
                     first_is_active = !first_is_active;
@@ -96,17 +96,19 @@ impl DiskState {
                     let mut invalid_strata = Vec::new();
                     for (id, stratum) in &discovered_strata {
                         if stratum.should_exist(&active)
-                            && stratum.needs_cleanup(active.transaction_id)
+                            && stratum.needs_cleanup(commit_log.as_ref())
                         {
                             invalid_strata.push(*id);
                         }
                     }
                     strata_to_clean = Some(invalid_strata);
+                    commit_log
                 }
                 (Err(err), None) => return Err(err),
             };
 
-            let mut basins = BasinMap::load_from(&active, discovered_strata, path)?;
+            let mut basins =
+                BasinMap::load_from(&active, commit_log.as_ref(), discovered_strata, path)?;
 
             let mut index = Duplicated {
                 active,
@@ -322,23 +324,15 @@ impl UnverifiedStratum {
         Ok(Self { id, header, file })
     }
 
-    pub fn validate(&self, transaction: TransactionId) -> Result<()> {
-        match (&self.header.first, &self.header.second) {
-            (Some(first), Some(second)) => {
-                let first_is_valid = first.transaction_id <= transaction;
-                let second_is_valid = second.transaction_id <= transaction;
-                let first_is_newest = first_is_valid
-                    && (first.transaction_id > second.transaction_id || !second_is_valid);
-                let second_is_newest = second_is_valid
-                    && (second.transaction_id > first.transaction_id || !first_is_valid);
-                if first_is_newest || second_is_newest || first.transaction_id == 0 {
-                    Ok(())
-                } else {
-                    Err(Error::VerificationFailed)
-                }
-            }
-            (Some(active), _) | (_, Some(active)) if active.transaction_id <= transaction => Ok(()),
-            _ => Err(Error::VerificationFailed),
+    pub fn validate(&self, commit_log: &CommitLogEntry) -> Result<()> {
+        let (first, second) = self.headers_valid(Some(commit_log));
+
+        if first.is_some() || second.is_some() {
+            Ok(())
+        } else {
+            Err(Error::verification_failed(
+                "the only valid header isn't valid",
+            ))
         }
     }
 
@@ -346,15 +340,54 @@ impl UnverifiedStratum {
         self.id.stratum().as_u64() < index.basin_strata_count[usize::from(self.id.basin().index())]
     }
 
-    pub fn needs_cleanup(&self, transaction: TransactionId) -> bool {
+    pub fn needs_cleanup(&self, commit_log: Option<&CommitLogEntry>) -> bool {
+        let commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
+            commit_log.transaction_id
+        });
         match (&self.header.first, &self.header.second) {
             (Some(first), Some(second)) => {
-                let first_is_valid = first.transaction_id <= transaction;
-                let second_is_valid = second.transaction_id <= transaction;
+                let first_is_valid = first.transaction_id < commit_transaction
+                    || (first.transaction_id == commit_transaction
+                        && commit_log
+                            .map_or(true, |commit_log| first.reflects_changes_from(commit_log)));
+                let second_is_valid = second.transaction_id < commit_transaction
+                    || (second.transaction_id == commit_transaction
+                        && commit_log
+                            .map_or(true, |commit_log| second.reflects_changes_from(commit_log)));
                 !first_is_valid || !second_is_valid
             }
             _ => true,
         }
+    }
+
+    fn headers_valid(
+        &self,
+        commit_log: Option<&CommitLogEntry>,
+    ) -> (Option<&StratumHeader>, Option<&StratumHeader>) {
+        fn is_valid(
+            header: &StratumHeader,
+            commit_transaction: TransactionId,
+            commit_log: Option<&CommitLogEntry>,
+        ) -> bool {
+            header.transaction_id < commit_transaction
+                || (header.transaction_id == commit_transaction
+                    && commit_log
+                        .map_or(true, |commit_log| header.reflects_changes_from(commit_log)))
+        }
+        let commit_transaction = commit_log.map_or_else(TransactionId::default, |commit_log| {
+            commit_log.transaction_id
+        });
+        let first = self
+            .header
+            .first
+            .as_ref()
+            .and_then(|first| is_valid(first, commit_transaction, commit_log).then_some(first));
+        let second =
+            self.header.second.as_ref().and_then(|second| {
+                is_valid(second, commit_transaction, commit_log).then_some(second)
+            });
+
+        (first, second)
     }
 }
 
@@ -362,13 +395,7 @@ impl BasinMap<BasinState> {
     pub fn verify(
         index: &IndexHeader,
         discovered_strata: &mut BTreeMap<BasinAndStratum, UnverifiedStratum>,
-    ) -> Result<()> {
-        for stratum in discovered_strata.values() {
-            if stratum.should_exist(index) {
-                stratum.validate(index.transaction_id)?;
-            }
-        }
-
+    ) -> Result<Option<CommitLogEntry>> {
         let mut scratch = Vec::new();
         if let Some(commit_log_head) = index.commit_log_head {
             if let Some(stratum) = discovered_strata.get_mut(&commit_log_head.basin_and_stratum()) {
@@ -390,17 +417,24 @@ impl BasinMap<BasinState> {
                         &mut scratch,
                     )?;
                 }
+
+                for stratum in discovered_strata.values() {
+                    if stratum.should_exist(index) {
+                        stratum.validate(&commit_log_entry)?;
+                    }
+                }
+                return Ok(Some(commit_log_entry));
             } else {
-                // Couldn't find the stratum with the commit log.
-                return Err(Error::VerificationFailed);
+                return Err(Error::verification_failed("commit log stratum not found"));
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     pub fn load_from(
         index: &IndexHeader,
+        commit_log: Option<&CommitLogEntry>,
         discovered_strata: BTreeMap<BasinAndStratum, UnverifiedStratum>,
         directory: &Path,
     ) -> Result<Self> {
@@ -411,32 +445,26 @@ impl BasinMap<BasinState> {
                 continue;
             }
 
-            let header = match (stratum.header.first, stratum.header.second) {
+            let header = match stratum.headers_valid(commit_log) {
                 (Some(first), Some(second)) => {
-                    // Because we've already verified this, we can trust that if
-                    // the first is larger and still valid, we should use it,
-                    // otherwise we can use the second.
-                    let first_is_valid = first.transaction_id <= index.transaction_id;
-                    let second_is_valid = second.transaction_id <= index.transaction_id;
-                    let first_is_newest = first.transaction_id > second.transaction_id;
-                    if (first_is_newest && first_is_valid) || !second_is_valid {
+                    if first.transaction_id >= second.transaction_id {
                         Duplicated {
-                            active: first,
+                            active: stratum.header.first.expect("just matched"),
                             first_is_active: true,
                         }
                     } else {
                         Duplicated {
-                            active: second,
+                            active: stratum.header.second.expect("just matched"),
                             first_is_active: false,
                         }
                     }
                 }
-                (Some(active), _) if active.transaction_id <= index.transaction_id => Duplicated {
-                    active,
+                (Some(_), _) => Duplicated {
+                    active: stratum.header.first.expect("just matched"),
                     first_is_active: true,
                 },
-                (_, Some(active)) if active.transaction_id <= index.transaction_id => Duplicated {
-                    active,
+                (_, Some(_)) => Duplicated {
+                    active: stratum.header.second.expect("just matched"),
                     first_is_active: false,
                 },
                 (None, None) => {
@@ -446,7 +474,6 @@ impl BasinMap<BasinState> {
                         .take()
                         .expect("no header requires error"))
                 }
-                _ => unreachable!("verify() is called before load_from"),
             };
 
             let basin = basins.get_or_insert_with(stratum.id.basin(), || {
@@ -480,7 +507,9 @@ fn verify_read_grain(
     file.read_exact(&mut eight_bytes)?;
     let grain_transaction_id = TransactionId::from_be_bytes(eight_bytes);
     if grain_transaction_id != transaction_id {
-        return Err(Error::VerificationFailed);
+        return Err(Error::verification_failed(
+            "new grain was written in a different transaction",
+        ));
     }
 
     let mut four_bytes = [0; 4];

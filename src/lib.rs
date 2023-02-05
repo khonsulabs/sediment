@@ -169,8 +169,14 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("the service has shut down")]
     Shutdown,
-    #[error("database verification failed")]
-    VerificationFailed,
+    #[error("database verification failed: {0}")]
+    VerificationFailed(String),
+}
+
+impl Error {
+    fn verification_failed(reason: impl Into<String>) -> Self {
+        Self::VerificationFailed(reason.into())
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
