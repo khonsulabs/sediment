@@ -360,11 +360,29 @@
 <a href="#360" id="360">360</a>
 <a href="#361" id="361">361</a>
 <a href="#362" id="362">362</a>
+<a href="#363" id="363">363</a>
+<a href="#364" id="364">364</a>
+<a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
+<a href="#377" id="377">377</a>
+<a href="#378" id="378">378</a>
+<a href="#379" id="379">379</a>
+<a href="#380" id="380">380</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::VecDeque;
 <span class="kw">use </span>std::sync::{Arc, Condvar, Mutex};
 
 <span class="kw">use </span>crc32c::crc32c;
-<span class="kw">use </span>okaywal::{EntryWriter, LogPosition};
+<span class="kw">use </span>okaywal::{file_manager, EntryWriter, LogPosition};
 
 <span class="kw">use </span><span class="kw">crate</span>::atlas::IndexMetadata;
 <span class="kw">use </span><span class="kw">crate</span>::commit_log::{CommitLogEntry, NewGrain};
@@ -374,17 +392,23 @@
 <span class="kw">use crate</span>::{Database, Error, <span class="prelude-ty">Result</span>};
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>Transaction&lt;<span class="lifetime">&#39;db</span>&gt; {
-    database: <span class="kw-2">&amp;</span><span class="lifetime">&#39;db </span>Database,
-    entry: <span class="prelude-ty">Option</span>&lt;EntryWriter&lt;<span class="lifetime">&#39;db</span>&gt;&gt;,
+</span><span class="kw">pub struct </span>Transaction&lt;<span class="lifetime">&#39;db</span>, FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    database: <span class="kw-2">&amp;</span><span class="lifetime">&#39;db </span>Database&lt;FileManager&gt;,
+    entry: <span class="prelude-ty">Option</span>&lt;EntryWriter&lt;<span class="lifetime">&#39;db</span>, FileManager&gt;&gt;,
     guard: <span class="prelude-ty">Option</span>&lt;TransactionGuard&gt;,
     state: <span class="prelude-ty">Option</span>&lt;CommittingTransaction&gt;,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;db</span>&gt; Transaction&lt;<span class="lifetime">&#39;db</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;db</span>, FileManager&gt; Transaction&lt;<span class="lifetime">&#39;db</span>, FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
     <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>new(
-        database: <span class="kw-2">&amp;</span><span class="lifetime">&#39;db </span>Database,
-        entry: EntryWriter&lt;<span class="lifetime">&#39;db</span>&gt;,
+        database: <span class="kw-2">&amp;</span><span class="lifetime">&#39;db </span>Database&lt;FileManager&gt;,
+        entry: EntryWriter&lt;<span class="lifetime">&#39;db</span>, FileManager&gt;,
         guard: TransactionGuard,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span>metadata = guard.current_index_metadata();
@@ -567,7 +591,10 @@
     }
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;db</span>&gt; Drop <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;db</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;db</span>, FileManager&gt; Drop <span class="kw">for </span>Transaction&lt;<span class="lifetime">&#39;db</span>, FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
     <span class="kw">fn </span>drop(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
         <span class="kw">if </span><span class="self">self</span>.entry.is_some() {
             <span class="self">self</span>.rollback_transaction()
@@ -630,11 +657,14 @@
         state.metadata
     }
 
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>stage(
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>stage&lt;FileManager&gt;(
         <span class="self">self</span>,
         tx: CommittingTransaction,
-        db: <span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span>Database,
-    ) -&gt; TransactionFinalizer&lt;<span class="lifetime">&#39;_</span>&gt; {
+        db: <span class="kw-2">&amp;</span><span class="lifetime">&#39;_ </span>Database&lt;FileManager&gt;,
+    ) -&gt; TransactionFinalizer&lt;<span class="lifetime">&#39;_</span>, FileManager&gt;
+    <span class="kw">where
+        </span>FileManager: file_manager::FileManager,
+    {
         <span class="kw">let </span>id = tx.log_entry.transaction_id;
         <span class="kw">let </span><span class="kw-2">mut </span>state = <span class="self">self</span>.lock.data.tx_lock.lock().expect(<span class="string">&quot;cannot panic&quot;</span>);
         state.metadata = tx.metadata;
@@ -685,13 +715,19 @@
 }
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>TransactionFinalizer&lt;<span class="lifetime">&#39;a</span>&gt; {
-    db: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Database,
+</span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">struct </span>TransactionFinalizer&lt;<span class="lifetime">&#39;a</span>, FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    db: <span class="kw-2">&amp;</span><span class="lifetime">&#39;a </span>Database&lt;FileManager&gt;,
     lock: TransactionLock,
     id: TransactionId,
 }
 
-<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>&gt; TransactionFinalizer&lt;<span class="lifetime">&#39;a</span>&gt; {
+<span class="kw">impl</span>&lt;<span class="lifetime">&#39;a</span>, FileManager&gt; TransactionFinalizer&lt;<span class="lifetime">&#39;a</span>, FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
     <span class="kw">pub fn </span>finalize(<span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>state = <span class="self">self</span>.lock.data.tx_lock.lock().expect(<span class="string">&quot;can&#39;t panic&quot;</span>);
 

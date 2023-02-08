@@ -124,10 +124,16 @@
 <a href="#124" id="124">124</a>
 <a href="#125" id="125">125</a>
 <a href="#126" id="126">126</a>
+<a href="#127" id="127">127</a>
+<a href="#128" id="128">128</a>
+<a href="#129" id="129">129</a>
+<a href="#130" id="130">130</a>
+<a href="#131" id="131">131</a>
+<a href="#132" id="132">132</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::sync::{Arc, Weak};
 <span class="kw">use </span>std::thread::JoinHandle;
 
-<span class="kw">use </span>okaywal::WriteAheadLog;
+<span class="kw">use </span>okaywal::{file_manager, WriteAheadLog};
 <span class="kw">use </span>watchable::{Watchable, Watcher};
 
 <span class="kw">use </span><span class="kw">crate</span>::format::TransactionId;
@@ -178,12 +184,15 @@
 }
 
 <span class="kw">impl </span>Spawner {
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>spawn(
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>spawn&lt;FileManager&gt;(
         <span class="self">self</span>,
         current_checkpointed_tx: TransactionId,
-        data: <span class="kw-2">&amp;</span>Arc&lt;Data&gt;,
-        wal: <span class="kw-2">&amp;</span>WriteAheadLog,
-    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+        data: <span class="kw-2">&amp;</span>Arc&lt;Data&lt;FileManager&gt;&gt;,
+        wal: <span class="kw-2">&amp;</span>WriteAheadLog&lt;FileManager&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt;
+    <span class="kw">where
+        </span>FileManager: file_manager::FileManager,
+    {
         <span class="kw">let </span>data = Arc::downgrade(data);
         <span class="kw">let </span>wal = wal.clone();
         <span class="kw">let </span>thread_handle = std::thread::Builder::new()
@@ -199,12 +208,15 @@
     }
 }
 
-<span class="kw">fn </span>sediment_checkpoint_thread(
+<span class="kw">fn </span>sediment_checkpoint_thread&lt;FileManager&gt;(
     baseline_transaction: TransactionId,
     <span class="kw-2">mut </span>tx_receiver: Watcher&lt;TransactionId&gt;,
-    data: Weak&lt;Data&gt;,
-    wal: WriteAheadLog,
-) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    data: Weak&lt;Data&lt;FileManager&gt;&gt;,
+    wal: WriteAheadLog&lt;FileManager&gt;,
+) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
     <span class="kw">let </span><span class="kw-2">mut </span>current_tx_id = baseline_transaction;
     <span class="kw">while let </span><span class="prelude-val">Ok</span>(transaction_to_checkpoint) = tx_receiver.next_value() {
         <span class="kw">if </span>transaction_to_checkpoint &lt;= current_tx_id {

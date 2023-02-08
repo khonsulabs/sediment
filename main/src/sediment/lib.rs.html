@@ -203,6 +203,44 @@
 <a href="#203" id="203">203</a>
 <a href="#204" id="204">204</a>
 <a href="#205" id="205">205</a>
+<a href="#206" id="206">206</a>
+<a href="#207" id="207">207</a>
+<a href="#208" id="208">208</a>
+<a href="#209" id="209">209</a>
+<a href="#210" id="210">210</a>
+<a href="#211" id="211">211</a>
+<a href="#212" id="212">212</a>
+<a href="#213" id="213">213</a>
+<a href="#214" id="214">214</a>
+<a href="#215" id="215">215</a>
+<a href="#216" id="216">216</a>
+<a href="#217" id="217">217</a>
+<a href="#218" id="218">218</a>
+<a href="#219" id="219">219</a>
+<a href="#220" id="220">220</a>
+<a href="#221" id="221">221</a>
+<a href="#222" id="222">222</a>
+<a href="#223" id="223">223</a>
+<a href="#224" id="224">224</a>
+<a href="#225" id="225">225</a>
+<a href="#226" id="226">226</a>
+<a href="#227" id="227">227</a>
+<a href="#228" id="228">228</a>
+<a href="#229" id="229">229</a>
+<a href="#230" id="230">230</a>
+<a href="#231" id="231">231</a>
+<a href="#232" id="232">232</a>
+<a href="#233" id="233">233</a>
+<a href="#234" id="234">234</a>
+<a href="#235" id="235">235</a>
+<a href="#236" id="236">236</a>
+<a href="#237" id="237">237</a>
+<a href="#238" id="238">238</a>
+<a href="#239" id="239">239</a>
+<a href="#240" id="240">240</a>
+<a href="#241" id="241">241</a>
+<a href="#242" id="242">242</a>
+<a href="#243" id="243">243</a>
 </pre><pre class="rust"><code><span class="attr">#![forbid(unsafe_code)]
 
 </span><span class="kw">use </span>std::io::{<span class="self">self</span>};
@@ -210,7 +248,10 @@
 <span class="kw">use </span>std::path::Path;
 <span class="kw">use </span>std::sync::{Arc, PoisonError};
 
-<span class="kw">use </span>okaywal::WriteAheadLog;
+<span class="kw">use </span>okaywal::file_manager::fs::StdFileManager;
+<span class="kw">use </span>okaywal::file_manager::memory::MemoryFileManager;
+<span class="kw">use </span>okaywal::file_manager::FSyncError;
+<span class="kw">use </span>okaywal::{file_manager, WriteAheadLog};
 <span class="kw">pub use </span>transaction::Transaction;
 
 <span class="kw">use </span><span class="kw">crate</span>::atlas::{Atlas, GrainReader};
@@ -228,7 +269,6 @@
 <span class="kw">mod </span>commit_log;
 <span class="kw">pub mod </span>config;
 <span class="kw">pub mod </span>format;
-<span class="kw">mod </span>fsync;
 <span class="kw">mod </span>store;
 <span class="attr">#[cfg(test)]
 </span><span class="kw">mod </span>tests;
@@ -237,20 +277,39 @@
 <span class="kw">mod </span>wal;
 
 <span class="attr">#[derive(Debug, Clone)]
-</span><span class="kw">pub struct </span>Database {
-    data: Arc&lt;Data&gt;,
-    wal: WriteAheadLog,
+</span><span class="kw">pub struct </span>Database&lt;FileManager = StdFileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    data: Arc&lt;Data&lt;FileManager&gt;&gt;,
+    wal: WriteAheadLog&lt;FileManager&gt;,
 }
 
-<span class="kw">impl </span>Database {
+<span class="kw">impl </span>Database&lt;StdFileManager&gt; {
     <span class="kw">pub fn </span>recover&lt;AsRefPath: AsRef&lt;Path&gt;&gt;(directory: AsRefPath) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         Config::for_directory(directory).recover()
     }
+}
 
-    <span class="kw">fn </span>recover_config(config: Config) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+<span class="kw">impl </span>Database&lt;MemoryFileManager&gt; {
+    <span class="kw">pub fn </span>in_memory() -&gt; <span class="self">Self </span>{
+        Config::in_memory()
+            .recover()
+            .expect(<span class="string">&quot;somehow failed to recover on default memory file manager&quot;</span>)
+    }
+}
+
+<span class="kw">impl</span>&lt;FileManager&gt; Database&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    <span class="kw">fn </span>recover_config(config: Config&lt;FileManager&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="comment">// Opening the store restores the database to the last fully committed
         // state. Each commit happens when the write ahead log is checkpointed.
-        </span><span class="kw">let </span>store = Store::recover(config.wal.directory.as_ref())<span class="question-mark">?</span>;
+        </span><span class="kw">let </span>store = Store::recover(
+            config.wal.directory.as_ref(),
+            config.wal.file_manager.clone(),
+        )<span class="question-mark">?</span>;
         <span class="kw">let </span>atlas = Atlas::new(<span class="kw-2">&amp;</span>store);
         <span class="kw">let </span>current_metadata = atlas.current_index_metadata()<span class="question-mark">?</span>;
         <span class="kw">let </span>(checkpointer, cp_spawner) = Checkpointer::new(current_metadata.checkpointed_to);
@@ -278,14 +337,14 @@
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ data, wal })
     }
 
-    <span class="kw">pub fn </span>begin_transaction(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Transaction&lt;<span class="lifetime">&#39;_</span>&gt;&gt; {
+    <span class="kw">pub fn </span>begin_transaction(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;Transaction&lt;<span class="lifetime">&#39;_</span>, FileManager&gt;&gt; {
         <span class="kw">let </span>tx_guard = <span class="self">self</span>.data.tx_lock.lock();
         <span class="kw">let </span>wal_entry = <span class="self">self</span>.wal.begin_entry()<span class="question-mark">?</span>;
 
         Transaction::new(<span class="self">self</span>, wal_entry, tx_guard)
     }
 
-    <span class="kw">pub fn </span>read(<span class="kw-2">&amp;</span><span class="self">self</span>, grain: GrainId) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;GrainReader&gt;&gt; {
+    <span class="kw">pub fn </span>read(<span class="kw-2">&amp;</span><span class="self">self</span>, grain: GrainId) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;GrainReader&lt;FileManager&gt;&gt;&gt; {
         <span class="self">self</span>.data.atlas.find(grain, <span class="kw-2">&amp;</span><span class="self">self</span>.wal)
     }
 
@@ -301,8 +360,8 @@
         // checkpointing process finishing up. This may require the file syncer.
         </span><span class="self">self</span>.wal.shutdown()<span class="question-mark">?</span>;
         <span class="comment">// With everything else shut down, we can now shut down the file
-        // synchronization threadpool.
-        </span><span class="self">self</span>.data.store.syncer.shutdown()<span class="question-mark">?</span>;
+        // manager.
+        </span><span class="self">self</span>.data.store.file_manager.shutdown()<span class="question-mark">?</span>;
 
         <span class="prelude-val">Ok</span>(())
     }
@@ -337,19 +396,25 @@
     }
 }
 
-<span class="kw">impl </span>Eq <span class="kw">for </span>Database {}
+<span class="kw">impl</span>&lt;FileManager&gt; Eq <span class="kw">for </span>Database&lt;FileManager&gt; <span class="kw">where </span>FileManager: file_manager::FileManager {}
 
-<span class="kw">impl </span>PartialEq <span class="kw">for </span>Database {
+<span class="kw">impl</span>&lt;FileManager&gt; PartialEq <span class="kw">for </span>Database&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
     <span class="kw">fn </span>eq(<span class="kw-2">&amp;</span><span class="self">self</span>, other: <span class="kw-2">&amp;</span><span class="self">Self</span>) -&gt; bool {
         Arc::ptr_eq(<span class="kw-2">&amp;</span><span class="self">self</span>.data, <span class="kw-2">&amp;</span>other.data)
     }
 }
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">struct </span>Data {
-    store: Store,
+</span><span class="kw">struct </span>Data&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    store: Store&lt;FileManager&gt;,
     checkpointer: Checkpointer,
-    atlas: Atlas,
+    atlas: Atlas&lt;FileManager&gt;,
     commit_logs: CommitLogs,
     tx_lock: TransactionLock,
 }
@@ -406,6 +471,17 @@
 <span class="kw">impl </span>From&lt;TryFromIntError&gt; <span class="kw">for </span>Error {
     <span class="kw">fn </span>from(<span class="kw">_</span>: TryFromIntError) -&gt; <span class="self">Self </span>{
         <span class="self">Self</span>::ValueOutOfBounds
+    }
+}
+
+<span class="kw">impl </span>From&lt;FSyncError&gt; <span class="kw">for </span>Error {
+    <span class="kw">fn </span>from(error: FSyncError) -&gt; <span class="self">Self </span>{
+        <span class="kw">match </span>error {
+            FSyncError::Shutdown =&gt; <span class="self">Self</span>::Shutdown,
+            FSyncError::ThreadJoin =&gt; <span class="self">Self</span>::ThreadJoin,
+            FSyncError::InternalInconstency =&gt; <span class="self">Self</span>::LockPoisoned,
+            FSyncError::Io(io) =&gt; <span class="self">Self</span>::Io(io),
+        }
     }
 }
 </code></pre></div>

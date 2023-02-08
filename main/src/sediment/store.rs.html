@@ -501,14 +501,70 @@
 <a href="#501" id="501">501</a>
 <a href="#502" id="502">502</a>
 <a href="#503" id="503">503</a>
+<a href="#504" id="504">504</a>
+<a href="#505" id="505">505</a>
+<a href="#506" id="506">506</a>
+<a href="#507" id="507">507</a>
+<a href="#508" id="508">508</a>
+<a href="#509" id="509">509</a>
+<a href="#510" id="510">510</a>
+<a href="#511" id="511">511</a>
+<a href="#512" id="512">512</a>
+<a href="#513" id="513">513</a>
+<a href="#514" id="514">514</a>
+<a href="#515" id="515">515</a>
+<a href="#516" id="516">516</a>
+<a href="#517" id="517">517</a>
+<a href="#518" id="518">518</a>
+<a href="#519" id="519">519</a>
+<a href="#520" id="520">520</a>
+<a href="#521" id="521">521</a>
+<a href="#522" id="522">522</a>
+<a href="#523" id="523">523</a>
+<a href="#524" id="524">524</a>
+<a href="#525" id="525">525</a>
+<a href="#526" id="526">526</a>
+<a href="#527" id="527">527</a>
+<a href="#528" id="528">528</a>
+<a href="#529" id="529">529</a>
+<a href="#530" id="530">530</a>
+<a href="#531" id="531">531</a>
+<a href="#532" id="532">532</a>
+<a href="#533" id="533">533</a>
+<a href="#534" id="534">534</a>
+<a href="#535" id="535">535</a>
+<a href="#536" id="536">536</a>
+<a href="#537" id="537">537</a>
+<a href="#538" id="538">538</a>
+<a href="#539" id="539">539</a>
+<a href="#540" id="540">540</a>
+<a href="#541" id="541">541</a>
+<a href="#542" id="542">542</a>
+<a href="#543" id="543">543</a>
+<a href="#544" id="544">544</a>
+<a href="#545" id="545">545</a>
+<a href="#546" id="546">546</a>
+<a href="#547" id="547">547</a>
+<a href="#548" id="548">548</a>
+<a href="#549" id="549">549</a>
+<a href="#550" id="550">550</a>
+<a href="#551" id="551">551</a>
+<a href="#552" id="552">552</a>
+<a href="#553" id="553">553</a>
+<a href="#554" id="554">554</a>
+<a href="#555" id="555">555</a>
+<a href="#556" id="556">556</a>
+<a href="#557" id="557">557</a>
+<a href="#558" id="558">558</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::collections::BTreeMap;
-<span class="kw">use </span>std::fs::{<span class="self">self</span>, File, OpenOptions};
+<span class="kw">use </span>std::ffi::OsStr;
 <span class="kw">use </span>std::io::{<span class="self">self</span>, BufReader, Read, Seek};
 <span class="kw">use </span>std::path::{Path, PathBuf};
 <span class="kw">use </span>std::str::FromStr;
 <span class="kw">use </span>std::sync::{Arc, Mutex, MutexGuard};
 
 <span class="kw">use </span>crc32c::crc32c;
+<span class="kw">use </span>okaywal::file_manager::{<span class="self">self</span>, FSyncBatch, FileManager, OpenOptions, PathId};
 
 <span class="kw">use </span><span class="kw">crate</span>::basinmap::BasinMap;
 <span class="kw">use </span><span class="kw">crate</span>::commit_log::CommitLogEntry;
@@ -516,59 +572,69 @@
     BasinAndStratum, BasinId, Duplicable, FileHeader, GrainId, IndexHeader, StratumHeader,
     StratumId, TransactionId,
 };
-<span class="kw">use </span><span class="kw">crate</span>::fsync::{FSyncBatch, FSyncManager};
 <span class="kw">use </span><span class="kw">crate</span>::util::u32_to_usize;
 <span class="kw">use crate</span>::{Error, <span class="prelude-ty">Result</span>};
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>Store {
+</span><span class="kw">pub struct </span>Store&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
     <span class="kw">pub </span>directory: Arc&lt;PathBuf&gt;,
-    disk_state: Mutex&lt;DiskState&gt;,
-    <span class="kw">pub </span>syncer: FSyncManager,
+    disk_state: Mutex&lt;DiskState&lt;FileManager::File&gt;&gt;,
+    <span class="kw">pub </span>file_manager: FileManager,
 }
 
-<span class="kw">impl </span>Store {
-    <span class="kw">pub fn </span>recover(path: <span class="kw-2">&amp;</span>Path) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span>disk_state = DiskState::recover(path)<span class="question-mark">?</span>;
+<span class="kw">impl</span>&lt;FileManager&gt; Store&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    <span class="kw">pub fn </span>recover(path: <span class="kw-2">&amp;</span>Path, file_manager: FileManager) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span>disk_state = DiskState::recover(path, <span class="kw-2">&amp;</span>file_manager)<span class="question-mark">?</span>;
         <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
             directory: Arc::new(path.to_path_buf()),
             disk_state: Mutex::new(disk_state),
-            syncer: FSyncManager::default(),
+            file_manager,
         })
     }
 
-    <span class="kw">pub fn </span>lock(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;MutexGuard&lt;<span class="lifetime">&#39;_</span>, DiskState&gt;&gt; {
+    <span class="kw">pub fn </span>lock(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;MutexGuard&lt;<span class="lifetime">&#39;_</span>, DiskState&lt;FileManager::File&gt;&gt;&gt; {
         <span class="prelude-val">Ok</span>(<span class="self">self</span>.disk_state.lock()<span class="question-mark">?</span>)
     }
 }
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>DiskState {
+</span><span class="kw">pub struct </span>DiskState&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
     <span class="kw">pub </span>needs_directory_sync: bool,
     <span class="kw">pub </span>directory: File,
     <span class="kw">pub </span>index: Duplicated&lt;IndexHeader&gt;,
     <span class="kw">pub </span>index_writer: File,
-    <span class="kw">pub </span>basins: BasinMap&lt;BasinState&gt;,
+    <span class="kw">pub </span>basins: BasinMap&lt;BasinState&lt;File&gt;&gt;,
 }
 
-<span class="kw">impl </span>DiskState {
-    <span class="kw">pub fn </span>recover(path: <span class="kw-2">&amp;</span>Path) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">if </span>!path.exists() {
-            fs::create_dir_all(path)<span class="question-mark">?</span>;
+<span class="kw">impl</span>&lt;File&gt; DiskState&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
+    <span class="kw">pub fn </span>recover(path: <span class="kw-2">&amp;</span>Path, manager: <span class="kw-2">&amp;</span>File::Manager) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span>path = PathId::from(path);
+        <span class="kw">if </span>!manager.exists(<span class="kw-2">&amp;</span>path) {
+            manager.create_dir_all(<span class="kw-2">&amp;</span>path)<span class="question-mark">?</span>;
         }
 
-        <span class="kw">let </span>directory = OpenOptions::new().read(<span class="bool-val">true</span>).open(path)<span class="question-mark">?</span>;
+        <span class="kw">let </span>directory = manager.open(<span class="kw-2">&amp;</span>path, OpenOptions::new().read(<span class="bool-val">true</span>))<span class="question-mark">?</span>;
 
-        <span class="kw">let </span>index_path = path.join(<span class="string">&quot;index&quot;</span>);
+        <span class="kw">let </span>index_path = PathId::from(path.join(<span class="string">&quot;index&quot;</span>));
 
         <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
-        <span class="kw">let </span><span class="kw-2">mut </span>discovered_strata = discover_strata(path, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
+        <span class="kw">let </span><span class="kw-2">mut </span>discovered_strata = discover_strata(<span class="kw-2">&amp;</span>path, manager, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
 
         <span class="kw">if </span>index_path.exists() {
-            <span class="kw">let </span><span class="kw-2">mut </span>index_writer = OpenOptions::new()
-                .read(<span class="bool-val">true</span>)
-                .write(<span class="bool-val">true</span>)
-                .open(<span class="kw-2">&amp;</span>index_path)<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>index_writer =
+                manager.open(<span class="kw-2">&amp;</span>index_path, OpenOptions::new().read(<span class="bool-val">true</span>).write(<span class="bool-val">true</span>))<span class="question-mark">?</span>;
 
             <span class="kw">let </span>file_header =
                 FileHeader::&lt;IndexHeader&gt;::read_from(<span class="kw-2">&amp;mut </span>index_writer, <span class="kw-2">&amp;mut </span>scratch)<span class="question-mark">?</span>;
@@ -609,7 +675,7 @@
             };
 
             <span class="kw">let </span><span class="kw-2">mut </span>basins =
-                BasinMap::load_from(<span class="kw-2">&amp;</span>active, commit_log.as_ref(), discovered_strata, path)<span class="question-mark">?</span>;
+                BasinMap::load_from(<span class="kw-2">&amp;</span>active, commit_log.as_ref(), discovered_strata, <span class="kw-2">&amp;</span>path)<span class="question-mark">?</span>;
 
             <span class="kw">let </span><span class="kw-2">mut </span>index = Duplicated {
                 active,
@@ -637,11 +703,10 @@
                 basins,
             })
         } <span class="kw">else </span>{
-            <span class="kw">let </span><span class="kw-2">mut </span>index_writer = OpenOptions::new()
-                .read(<span class="bool-val">true</span>)
-                .write(<span class="bool-val">true</span>)
-                .create(<span class="bool-val">true</span>)
-                .open(<span class="kw-2">&amp;</span>index_path)<span class="question-mark">?</span>;
+            <span class="kw">let </span><span class="kw-2">mut </span>index_writer = manager.open(
+                <span class="kw-2">&amp;</span>index_path,
+                OpenOptions::new().read(<span class="bool-val">true</span>).write(<span class="bool-val">true</span>).create(<span class="bool-val">true</span>),
+            )<span class="question-mark">?</span>;
 
             <span class="kw">let </span><span class="kw-2">mut </span>empty_header = IndexHeader::default();
             empty_header.write_to(<span class="kw-2">&amp;mut </span>index_writer)<span class="question-mark">?</span>;
@@ -668,7 +733,11 @@
         }
     }
 
-    <span class="kw">pub fn </span>write_header(<span class="kw-2">&amp;mut </span><span class="self">self</span>, transaction_id: TransactionId, sync: <span class="kw-2">&amp;</span>FSyncBatch) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    <span class="kw">pub fn </span>write_header(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        transaction_id: TransactionId,
+        sync: <span class="kw-2">&amp;</span>FSyncBatch&lt;File::Manager&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
         <span class="self">self</span>.index.active.transaction_id = transaction_id;
         <span class="kw">for </span>(basin, count) <span class="kw">in </span>(<span class="kw-2">&amp;</span><span class="self">self</span>.basins)
             .into_iter()
@@ -694,7 +763,10 @@
 <span class="kw">where
     </span>T: Duplicable,
 {
-    <span class="kw">pub fn </span>write_to(<span class="kw-2">&amp;mut </span><span class="self">self</span>, file: <span class="kw-2">&amp;mut </span>File) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    <span class="kw">pub fn </span>write_to&lt;File&gt;(<span class="kw-2">&amp;mut </span><span class="self">self</span>, file: <span class="kw-2">&amp;mut </span>File) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt;
+    <span class="kw">where
+        </span>File: file_manager::File,
+    {
         <span class="kw">let </span>offset = <span class="kw">if </span><span class="self">self</span>.first_is_active { T::BYTES } <span class="kw">else </span>{ <span class="number">0 </span>};
 
         file.seek(io::SeekFrom::Start(offset))<span class="question-mark">?</span>;
@@ -706,12 +778,18 @@
 }
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>BasinState {
+</span><span class="kw">pub struct </span>BasinState&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
     <span class="kw">pub </span>id: BasinId,
-    <span class="kw">pub </span>stratum: Vec&lt;StratumState&gt;,
+    <span class="kw">pub </span>stratum: Vec&lt;StratumState&lt;File&gt;&gt;,
 }
 
-<span class="kw">impl </span>BasinState {
+<span class="kw">impl</span>&lt;File&gt; BasinState&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
     <span class="kw">pub fn </span>default_for(id: BasinId) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             id,
@@ -723,33 +801,36 @@
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         id: StratumId,
         directory: <span class="kw-2">&amp;</span>Path,
-    ) -&gt; <span class="kw-2">&amp;mut </span>StratumState {
+    ) -&gt; <span class="kw-2">&amp;mut </span>StratumState&lt;File&gt; {
         <span class="kw">while </span>id.as_usize() &gt;= <span class="self">self</span>.stratum.len() {
             <span class="kw">let </span>new_id =
                 StratumId::new(u64::try_from(<span class="self">self</span>.stratum.len()).expect(<span class="string">&quot;too large of a database&quot;</span>))
                     .expect(<span class="string">&quot;invalid id&quot;</span>);
-            <span class="self">self</span>.stratum.push(StratumState::default_for(
+            <span class="self">self</span>.stratum.push(StratumState::default_for(PathId::from(
                 directory.join(<span class="macro">format!</span>(<span class="string">&quot;{}{}&quot;</span>, <span class="self">self</span>.id, new_id)),
-            ))
+            )))
         }
 
         <span class="kw-2">&amp;mut </span><span class="self">self</span>.stratum[id.as_usize()]
     }
 }
 
-<span class="kw">fn </span>discover_strata(
-    path: <span class="kw-2">&amp;</span>Path,
+<span class="kw">fn </span>discover_strata&lt;File&gt;(
+    path: <span class="kw-2">&amp;</span>PathId,
+    manager: <span class="kw-2">&amp;</span>File::Manager,
     scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
-) -&gt; <span class="prelude-ty">Result</span>&lt;BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;BTreeMap&lt;BasinAndStratum, UnverifiedStratum&lt;File&gt;&gt;&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
     <span class="kw">let </span><span class="kw-2">mut </span>discovered = BTreeMap::new();
 
-    <span class="kw">for </span>entry <span class="kw">in </span>fs::read_dir(path)<span class="question-mark">? </span>{
-        <span class="kw">let </span>entry = entry<span class="question-mark">?</span>;
-        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = entry.file_name().to_str() {
+    <span class="kw">for </span>entry <span class="kw">in </span>manager.list(path)<span class="question-mark">? </span>{
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = entry.file_name().and_then(OsStr::to_str) {
             <span class="kw">if let </span><span class="prelude-val">Ok</span>(basin_and_stratum) = BasinAndStratum::from_str(name) {
                 discovered.insert(
                     basin_and_stratum,
-                    UnverifiedStratum::read_from(<span class="kw-2">&amp;</span>entry.path(), basin_and_stratum, scratch)<span class="question-mark">?</span>,
+                    UnverifiedStratum::read_from(entry, manager, basin_and_stratum, scratch)<span class="question-mark">?</span>,
                 );
             }
         }
@@ -759,32 +840,41 @@
 }
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>StratumState {
-    <span class="kw">pub </span>path: Arc&lt;PathBuf&gt;,
+</span><span class="kw">pub struct </span>StratumState&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
+    <span class="kw">pub </span>path: PathId,
     <span class="kw">pub </span>header: Duplicated&lt;StratumHeader&gt;,
     <span class="kw">pub </span>file: <span class="prelude-ty">Option</span>&lt;File&gt;,
 }
 
-<span class="kw">impl </span>StratumState {
-    <span class="kw">fn </span>default_for(path: PathBuf) -&gt; <span class="self">Self </span>{
+<span class="kw">impl</span>&lt;File&gt; StratumState&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
+    <span class="kw">fn </span>default_for(path: PathId) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
-            path: Arc::new(path),
+            path,
             header: Duplicated::default(),
             file: <span class="prelude-val">None</span>,
         }
     }
 
-    <span class="kw">pub fn </span>get_or_open_file(<span class="kw-2">&amp;mut </span><span class="self">self</span>, needs_directory_sync: <span class="kw-2">&amp;mut </span>bool) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;mut </span>File&gt; {
+    <span class="kw">pub fn </span>get_or_open_file(
+        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+        manager: <span class="kw-2">&amp;</span>File::Manager,
+        needs_directory_sync: <span class="kw-2">&amp;mut </span>bool,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="kw-2">&amp;mut </span>File&gt; {
         <span class="kw">if </span><span class="self">self</span>.file.is_none() {
             <span class="comment">// If this file doesn&#39;t exist, we need to do a directory sync to
             // ensure the file is persisted.
             </span><span class="kw-2">*</span>needs_directory_sync |= !<span class="self">self</span>.path.exists();
 
-            <span class="kw">let </span>file = OpenOptions::new()
-                .read(<span class="bool-val">true</span>)
-                .write(<span class="bool-val">true</span>)
-                .create(<span class="bool-val">true</span>)
-                .open(<span class="self">self</span>.path.as_ref())<span class="question-mark">?</span>;
+            <span class="kw">let </span>file = manager.open(
+                <span class="kw-2">&amp;</span><span class="self">self</span>.path,
+                OpenOptions::new().read(<span class="bool-val">true</span>).write(<span class="bool-val">true</span>).create(<span class="bool-val">true</span>),
+            )<span class="question-mark">?</span>;
 
             <span class="self">self</span>.file = <span class="prelude-val">Some</span>(file);
         }
@@ -795,7 +885,7 @@
     <span class="kw">pub fn </span>write_header(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         new_transaction_id: TransactionId,
-        sync_batch: <span class="kw-2">&amp;</span>FSyncBatch,
+        sync_batch: <span class="kw-2">&amp;</span>FSyncBatch&lt;File::Manager&gt;,
     ) -&gt; io::Result&lt;()&gt; {
         <span class="kw">let </span>file = <span class="self">self
             </span>.file
@@ -812,17 +902,31 @@
     }
 }
 
-<span class="kw">pub struct </span>UnverifiedStratum {
+<span class="kw">pub struct </span>UnverifiedStratum&lt;File&gt; {
+    <span class="kw">pub </span>path: PathId,
     <span class="kw">pub </span>id: BasinAndStratum,
     <span class="kw">pub </span>header: FileHeader&lt;StratumHeader&gt;,
     <span class="kw">pub </span>file: File,
 }
 
-<span class="kw">impl </span>UnverifiedStratum {
-    <span class="kw">pub fn </span>read_from(path: <span class="kw-2">&amp;</span>Path, id: BasinAndStratum, scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
-        <span class="kw">let </span><span class="kw-2">mut </span>file = OpenOptions::new().read(<span class="bool-val">true</span>).write(<span class="bool-val">true</span>).open(path)<span class="question-mark">?</span>;
+<span class="kw">impl</span>&lt;File&gt; UnverifiedStratum&lt;File&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
+    <span class="kw">pub fn </span>read_from(
+        path: PathId,
+        manager: <span class="kw-2">&amp;</span>File::Manager,
+        id: BasinAndStratum,
+        scratch: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
+    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
+        <span class="kw">let </span><span class="kw-2">mut </span>file = manager.open(<span class="kw-2">&amp;</span>path, OpenOptions::new().read(<span class="bool-val">true</span>).write(<span class="bool-val">true</span>))<span class="question-mark">?</span>;
         <span class="kw">let </span>header = FileHeader::read_from(<span class="kw-2">&amp;mut </span>file, scratch)<span class="question-mark">?</span>;
-        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{ id, header, file })
+        <span class="prelude-val">Ok</span>(<span class="self">Self </span>{
+            path,
+            id,
+            header,
+            file,
+        })
     }
 
     <span class="kw">pub fn </span>validate(<span class="kw-2">&amp;</span><span class="self">self</span>, commit_log: <span class="kw-2">&amp;</span>CommitLogEntry) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
@@ -870,10 +974,13 @@
     }
 }
 
-<span class="kw">impl </span>BasinMap&lt;BasinState&gt; {
+<span class="kw">impl</span>&lt;File&gt; BasinMap&lt;BasinState&lt;File&gt;&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
     <span class="kw">pub fn </span>verify(
         index: <span class="kw-2">&amp;</span>IndexHeader,
-        discovered_strata: <span class="kw-2">&amp;mut </span>BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
+        discovered_strata: <span class="kw-2">&amp;mut </span>BTreeMap&lt;BasinAndStratum, UnverifiedStratum&lt;File&gt;&gt;,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;CommitLogEntry&gt;&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>scratch = Vec::new();
         <span class="kw">if let </span><span class="prelude-val">Some</span>(commit_log_head) = index.commit_log_head {
@@ -914,8 +1021,8 @@
     <span class="kw">pub fn </span>load_from(
         index: <span class="kw-2">&amp;</span>IndexHeader,
         commit_log: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>CommitLogEntry&gt;,
-        discovered_strata: BTreeMap&lt;BasinAndStratum, UnverifiedStratum&gt;,
-        directory: <span class="kw-2">&amp;</span>Path,
+        discovered_strata: BTreeMap&lt;BasinAndStratum, UnverifiedStratum&lt;File&gt;&gt;,
+        directory: <span class="kw-2">&amp;</span>PathId,
     ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="self">Self</span>&gt; {
         <span class="kw">let </span><span class="kw-2">mut </span>basins = <span class="self">Self</span>::new();
         <span class="kw">for </span>stratum <span class="kw">in </span>discovered_strata.into_values() {
@@ -959,7 +1066,7 @@
             }
 
             basin.stratum.push(StratumState {
-                path: Arc::new(directory.join(stratum.id.to_string())),
+                path: stratum.path,
                 header,
                 file: <span class="prelude-val">Some</span>(stratum.file),
             });
@@ -968,13 +1075,16 @@
     }
 }
 
-<span class="kw">fn </span>verify_read_grain(
+<span class="kw">fn </span>verify_read_grain&lt;File&gt;(
     grain: GrainId,
     file: <span class="kw-2">&amp;mut </span>BufReader&lt;<span class="kw-2">&amp;mut </span>File&gt;,
     transaction_id: TransactionId,
     expected_crc: <span class="prelude-ty">Option</span>&lt;u32&gt;,
     buffer: <span class="kw-2">&amp;mut </span>Vec&lt;u8&gt;,
-) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt;
+<span class="kw">where
+    </span>File: file_manager::File,
+{
     file.seek(io::SeekFrom::Start(grain.file_position()))<span class="question-mark">?</span>;
     <span class="kw">let </span><span class="kw-2">mut </span>eight_bytes = [<span class="number">0</span>; <span class="number">8</span>];
     file.read_exact(<span class="kw-2">&amp;mut </span>eight_bytes)<span class="question-mark">?</span>;

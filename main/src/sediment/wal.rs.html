@@ -363,9 +363,21 @@
 <a href="#363" id="363">363</a>
 <a href="#364" id="364">364</a>
 <a href="#365" id="365">365</a>
+<a href="#366" id="366">366</a>
+<a href="#367" id="367">367</a>
+<a href="#368" id="368">368</a>
+<a href="#369" id="369">369</a>
+<a href="#370" id="370">370</a>
+<a href="#371" id="371">371</a>
+<a href="#372" id="372">372</a>
+<a href="#373" id="373">373</a>
+<a href="#374" id="374">374</a>
+<a href="#375" id="375">375</a>
+<a href="#376" id="376">376</a>
 </pre><pre class="rust"><code><span class="kw">use </span>std::io::{<span class="self">self</span>, BufWriter, Read, Seek, SeekFrom, Write};
 <span class="kw">use </span>std::sync::{Arc, Weak};
 
+<span class="kw">use </span>okaywal::file_manager::{<span class="self">self</span>, File <span class="kw">as _</span>};
 <span class="kw">use </span>okaywal::{EntryId, LogManager, ReadChunkResult, WriteAheadLog};
 
 <span class="kw">use </span><span class="kw">crate</span>::format::{ByteUtil, GrainAllocationInfo, GrainAllocationStatus, GrainId, TransactionId};
@@ -374,13 +386,19 @@
 <span class="kw">use crate</span>::{Data <span class="kw">as </span>DatabaseData, Database, Error, <span class="prelude-ty">Result</span>};
 
 <span class="attr">#[derive(Debug)]
-</span><span class="kw">pub struct </span>WalManager {
-    db: Weak&lt;DatabaseData&gt;,
+</span><span class="kw">pub struct </span>WalManager&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    db: Weak&lt;DatabaseData&lt;FileManager&gt;&gt;,
     scratch: Vec&lt;u8&gt;,
 }
 
-<span class="kw">impl </span>WalManager {
-    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>new(database: <span class="kw-2">&amp;</span>Arc&lt;DatabaseData&gt;) -&gt; <span class="self">Self </span>{
+<span class="kw">impl</span>&lt;FileManager&gt; WalManager&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    <span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>new(database: <span class="kw-2">&amp;</span>Arc&lt;DatabaseData&lt;FileManager&gt;&gt;) -&gt; <span class="self">Self </span>{
         <span class="self">Self </span>{
             db: Arc::downgrade(database),
             scratch: Vec::new(),
@@ -388,8 +406,11 @@
     }
 }
 
-<span class="kw">impl </span>LogManager <span class="kw">for </span>WalManager {
-    <span class="kw">fn </span>recover(<span class="kw-2">&amp;mut </span><span class="self">self</span>, entry: <span class="kw-2">&amp;mut </span>okaywal::Entry&lt;<span class="lifetime">&#39;_</span>&gt;) -&gt; io::Result&lt;()&gt; {
+<span class="kw">impl</span>&lt;FileManager&gt; LogManager&lt;FileManager&gt; <span class="kw">for </span>WalManager&lt;FileManager&gt;
+<span class="kw">where
+    </span>FileManager: file_manager::FileManager,
+{
+    <span class="kw">fn </span>recover(<span class="kw-2">&amp;mut </span><span class="self">self</span>, entry: <span class="kw-2">&amp;mut </span>okaywal::Entry&lt;<span class="lifetime">&#39;_</span>, FileManager::File&gt;) -&gt; io::Result&lt;()&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(database) = <span class="self">self</span>.db.upgrade() {
             <span class="kw">let </span><span class="kw-2">mut </span>written_grains = Vec::new();
             <span class="kw">let </span><span class="kw-2">mut </span>freed_grains = Vec::new();
@@ -447,15 +468,15 @@
     <span class="kw">fn </span>checkpoint_to(
         <span class="kw-2">&amp;mut </span><span class="self">self</span>,
         last_checkpointed_id: okaywal::EntryId,
-        checkpointed_entries: <span class="kw-2">&amp;mut </span>okaywal::SegmentReader,
-        wal: <span class="kw-2">&amp;</span>WriteAheadLog,
+        checkpointed_entries: <span class="kw-2">&amp;mut </span>okaywal::SegmentReader&lt;FileManager::File&gt;,
+        wal: <span class="kw-2">&amp;</span>WriteAheadLog&lt;FileManager&gt;,
     ) -&gt; std::io::Result&lt;()&gt; {
         <span class="kw">if let </span><span class="prelude-val">Some</span>(database) = <span class="self">self</span>.db.upgrade() {
             <span class="kw">let </span>database = Database {
                 data: database,
                 wal: wal.clone(),
             };
-            <span class="kw">let </span>fsyncs = database.data.store.syncer.new_batch()<span class="question-mark">?</span>;
+            <span class="kw">let </span>fsyncs = database.data.store.file_manager.new_fsync_batch()<span class="question-mark">?</span>;
             <span class="kw">let </span>latest_tx_id = TransactionId::from(last_checkpointed_id);
             <span class="kw">let </span><span class="kw-2">mut </span>store = database.data.store.lock()<span class="question-mark">?</span>;
             <span class="kw">let </span><span class="kw-2">mut </span>needs_directory_sync = store.needs_directory_sync;
@@ -494,9 +515,10 @@
                                 id.stratum_id(),
                                 <span class="kw-2">&amp;</span>database.data.store.directory,
                             );
-                            <span class="kw">let </span><span class="kw-2">mut </span>file = BufWriter::new(
-                                stratum.get_or_open_file(<span class="kw-2">&amp;mut </span>needs_directory_sync)<span class="question-mark">?</span>,
-                            );
+                            <span class="kw">let </span><span class="kw-2">mut </span>file = BufWriter::new(stratum.get_or_open_file(
+                                <span class="kw-2">&amp;</span>database.data.store.file_manager,
+                                <span class="kw-2">&amp;mut </span>needs_directory_sync,
+                            )<span class="question-mark">?</span>);
 
                             <span class="comment">// Write the grain data to disk.
                             </span><span class="kw">let </span>file_position = id.file_position();
