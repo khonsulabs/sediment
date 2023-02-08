@@ -2,20 +2,27 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, Write};
 use std::path::Path;
 
+use okaywal::file_manager::{self};
+
 use crate::config::Config;
 use crate::format::{
     BasinAndStratum, Duplicable, IndexHeader, StratumHeader, StratumId, TransactionId,
 };
 use crate::{Database, Error};
 
-#[test]
-fn basic() {
-    let path = Path::new("test");
-    if path.exists() {
-        fs::remove_dir_all(path).unwrap();
+fn basic<FileManager>(config: Config<FileManager>)
+where
+    FileManager: file_manager::FileManager,
+{
+    if config.wal.file_manager.exists(&config.wal.directory) {
+        config
+            .wal
+            .file_manager
+            .remove_dir_all(&config.wal.directory)
+            .unwrap();
     }
 
-    let db = Database::recover(path).unwrap();
+    let db = config.clone().recover().unwrap();
     assert!(db.embedded_header().unwrap().is_none());
     let mut tx = db.begin_transaction().unwrap();
     let grain = tx.write(b"hello, world").unwrap();
@@ -25,7 +32,7 @@ fn basic() {
     let tx_id = tx.commit().unwrap();
     assert_eq!(db.embedded_header().unwrap(), Some(grain));
 
-    let verify = |db: &Database| {
+    let verify = |db: &Database<FileManager>| {
         let mut reader = db.read(grain).unwrap().expect("grain not found");
         assert_eq!(reader.length(), 12);
         assert_eq!(reader.bytes_remaining(), reader.length());
@@ -54,12 +61,26 @@ fn basic() {
     // configuration, this transaction will be recovered from the WAL, unlike a
     // lot of the other unit tests.
     db.shutdown().unwrap();
-    let db = Database::recover(path).unwrap();
+    let db = config.clone().recover().unwrap();
 
     verify(&db);
     db.shutdown().unwrap();
 
-    fs::remove_dir_all(path).unwrap();
+    config
+        .wal
+        .file_manager
+        .remove_dir_all(&config.wal.directory)
+        .unwrap();
+}
+
+#[test]
+fn basic_std() {
+    basic(Config::for_directory("test"));
+}
+
+#[test]
+fn basic_memory() {
+    basic(Config::in_memory());
 }
 
 #[test]

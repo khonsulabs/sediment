@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
 use crc32c::crc32c;
-use okaywal::{EntryWriter, LogPosition};
+use okaywal::{file_manager, EntryWriter, LogPosition};
 
 use crate::atlas::IndexMetadata;
 use crate::commit_log::{CommitLogEntry, NewGrain};
@@ -12,17 +12,23 @@ use crate::wal::WalChunk;
 use crate::{Database, Error, Result};
 
 #[derive(Debug)]
-pub struct Transaction<'db> {
-    database: &'db Database,
-    entry: Option<EntryWriter<'db>>,
+pub struct Transaction<'db, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    database: &'db Database<FileManager>,
+    entry: Option<EntryWriter<'db, FileManager>>,
     guard: Option<TransactionGuard>,
     state: Option<CommittingTransaction>,
 }
 
-impl<'db> Transaction<'db> {
+impl<'db, FileManager> Transaction<'db, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     pub(super) fn new(
-        database: &'db Database,
-        entry: EntryWriter<'db>,
+        database: &'db Database<FileManager>,
+        entry: EntryWriter<'db, FileManager>,
         guard: TransactionGuard,
     ) -> Result<Self> {
         let metadata = guard.current_index_metadata();
@@ -205,7 +211,10 @@ impl<'db> Transaction<'db> {
     }
 }
 
-impl<'db> Drop for Transaction<'db> {
+impl<'db, FileManager> Drop for Transaction<'db, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     fn drop(&mut self) {
         if self.entry.is_some() {
             self.rollback_transaction()
@@ -268,11 +277,14 @@ impl TransactionGuard {
         state.metadata
     }
 
-    pub(super) fn stage(
+    pub(super) fn stage<FileManager>(
         self,
         tx: CommittingTransaction,
-        db: &'_ Database,
-    ) -> TransactionFinalizer<'_> {
+        db: &'_ Database<FileManager>,
+    ) -> TransactionFinalizer<'_, FileManager>
+    where
+        FileManager: file_manager::FileManager,
+    {
         let id = tx.log_entry.transaction_id;
         let mut state = self.lock.data.tx_lock.lock().expect("cannot panic");
         state.metadata = tx.metadata;
@@ -323,13 +335,19 @@ pub(super) struct CommittingTransaction {
 }
 
 #[derive(Debug)]
-pub(super) struct TransactionFinalizer<'a> {
-    db: &'a Database,
+pub(super) struct TransactionFinalizer<'a, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    db: &'a Database<FileManager>,
     lock: TransactionLock,
     id: TransactionId,
 }
 
-impl<'a> TransactionFinalizer<'a> {
+impl<'a, FileManager> TransactionFinalizer<'a, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     pub fn finalize(self) -> Result<()> {
         let mut state = self.lock.data.tx_lock.lock().expect("can't panic");
 

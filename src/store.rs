@@ -1,11 +1,12 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::ffi::OsStr;
 use std::io::{self, BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crc32c::crc32c;
+use okaywal::file_manager::{self, FSyncBatch, FileManager, OpenOptions, PathId};
 
 use crate::basinmap::BasinMap;
 use crate::commit_log::CommitLogEntry;
@@ -13,59 +14,69 @@ use crate::format::{
     BasinAndStratum, BasinId, Duplicable, FileHeader, GrainId, IndexHeader, StratumHeader,
     StratumId, TransactionId,
 };
-use crate::fsync::{FSyncBatch, FSyncManager};
 use crate::util::u32_to_usize;
 use crate::{Error, Result};
 
 #[derive(Debug)]
-pub struct Store {
+pub struct Store<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     pub directory: Arc<PathBuf>,
-    disk_state: Mutex<DiskState>,
-    pub syncer: FSyncManager,
+    disk_state: Mutex<DiskState<FileManager::File>>,
+    pub file_manager: FileManager,
 }
 
-impl Store {
-    pub fn recover(path: &Path) -> Result<Self> {
-        let disk_state = DiskState::recover(path)?;
+impl<FileManager> Store<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    pub fn recover(path: &Path, file_manager: FileManager) -> Result<Self> {
+        let disk_state = DiskState::recover(path, &file_manager)?;
         Ok(Self {
             directory: Arc::new(path.to_path_buf()),
             disk_state: Mutex::new(disk_state),
-            syncer: FSyncManager::default(),
+            file_manager,
         })
     }
 
-    pub fn lock(&self) -> Result<MutexGuard<'_, DiskState>> {
+    pub fn lock(&self) -> Result<MutexGuard<'_, DiskState<FileManager::File>>> {
         Ok(self.disk_state.lock()?)
     }
 }
 
 #[derive(Debug)]
-pub struct DiskState {
+pub struct DiskState<File>
+where
+    File: file_manager::File,
+{
     pub needs_directory_sync: bool,
     pub directory: File,
     pub index: Duplicated<IndexHeader>,
     pub index_writer: File,
-    pub basins: BasinMap<BasinState>,
+    pub basins: BasinMap<BasinState<File>>,
 }
 
-impl DiskState {
-    pub fn recover(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            fs::create_dir_all(path)?;
+impl<File> DiskState<File>
+where
+    File: file_manager::File,
+{
+    pub fn recover(path: &Path, manager: &File::Manager) -> Result<Self> {
+        let path = PathId::from(path);
+        if !manager.exists(&path) {
+            manager.create_dir_all(&path)?;
         }
 
-        let directory = OpenOptions::new().read(true).open(path)?;
+        let directory = manager.open(&path, OpenOptions::new().read(true))?;
 
-        let index_path = path.join("index");
+        let index_path = PathId::from(path.join("index"));
 
         let mut scratch = Vec::new();
-        let mut discovered_strata = discover_strata(path, &mut scratch)?;
+        let mut discovered_strata = discover_strata(&path, manager, &mut scratch)?;
 
         if index_path.exists() {
-            let mut index_writer = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&index_path)?;
+            let mut index_writer =
+                manager.open(&index_path, OpenOptions::new().read(true).write(true))?;
 
             let file_header =
                 FileHeader::<IndexHeader>::read_from(&mut index_writer, &mut scratch)?;
@@ -106,7 +117,7 @@ impl DiskState {
             };
 
             let mut basins =
-                BasinMap::load_from(&active, commit_log.as_ref(), discovered_strata, path)?;
+                BasinMap::load_from(&active, commit_log.as_ref(), discovered_strata, &path)?;
 
             let mut index = Duplicated {
                 active,
@@ -134,11 +145,10 @@ impl DiskState {
                 basins,
             })
         } else {
-            let mut index_writer = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(&index_path)?;
+            let mut index_writer = manager.open(
+                &index_path,
+                OpenOptions::new().read(true).write(true).create(true),
+            )?;
 
             let mut empty_header = IndexHeader::default();
             empty_header.write_to(&mut index_writer)?;
@@ -165,7 +175,11 @@ impl DiskState {
         }
     }
 
-    pub fn write_header(&mut self, transaction_id: TransactionId, sync: &FSyncBatch) -> Result<()> {
+    pub fn write_header(
+        &mut self,
+        transaction_id: TransactionId,
+        sync: &FSyncBatch<File::Manager>,
+    ) -> Result<()> {
         self.index.active.transaction_id = transaction_id;
         for (basin, count) in (&self.basins)
             .into_iter()
@@ -191,7 +205,10 @@ impl<T> Duplicated<T>
 where
     T: Duplicable,
 {
-    pub fn write_to(&mut self, file: &mut File) -> Result<()> {
+    pub fn write_to<File>(&mut self, file: &mut File) -> Result<()>
+    where
+        File: file_manager::File,
+    {
         let offset = if self.first_is_active { T::BYTES } else { 0 };
 
         file.seek(io::SeekFrom::Start(offset))?;
@@ -203,12 +220,18 @@ where
 }
 
 #[derive(Debug)]
-pub struct BasinState {
+pub struct BasinState<File>
+where
+    File: file_manager::File,
+{
     pub id: BasinId,
-    pub stratum: Vec<StratumState>,
+    pub stratum: Vec<StratumState<File>>,
 }
 
-impl BasinState {
+impl<File> BasinState<File>
+where
+    File: file_manager::File,
+{
     pub fn default_for(id: BasinId) -> Self {
         Self {
             id,
@@ -220,33 +243,36 @@ impl BasinState {
         &mut self,
         id: StratumId,
         directory: &Path,
-    ) -> &mut StratumState {
+    ) -> &mut StratumState<File> {
         while id.as_usize() >= self.stratum.len() {
             let new_id =
                 StratumId::new(u64::try_from(self.stratum.len()).expect("too large of a database"))
                     .expect("invalid id");
-            self.stratum.push(StratumState::default_for(
+            self.stratum.push(StratumState::default_for(PathId::from(
                 directory.join(format!("{}{}", self.id, new_id)),
-            ))
+            )))
         }
 
         &mut self.stratum[id.as_usize()]
     }
 }
 
-fn discover_strata(
-    path: &Path,
+fn discover_strata<File>(
+    path: &PathId,
+    manager: &File::Manager,
     scratch: &mut Vec<u8>,
-) -> Result<BTreeMap<BasinAndStratum, UnverifiedStratum>> {
+) -> Result<BTreeMap<BasinAndStratum, UnverifiedStratum<File>>>
+where
+    File: file_manager::File,
+{
     let mut discovered = BTreeMap::new();
 
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        if let Some(name) = entry.file_name().to_str() {
+    for entry in manager.list(path)? {
+        if let Some(name) = entry.file_name().and_then(OsStr::to_str) {
             if let Ok(basin_and_stratum) = BasinAndStratum::from_str(name) {
                 discovered.insert(
                     basin_and_stratum,
-                    UnverifiedStratum::read_from(&entry.path(), basin_and_stratum, scratch)?,
+                    UnverifiedStratum::read_from(entry, manager, basin_and_stratum, scratch)?,
                 );
             }
         }
@@ -256,32 +282,41 @@ fn discover_strata(
 }
 
 #[derive(Debug)]
-pub struct StratumState {
-    pub path: Arc<PathBuf>,
+pub struct StratumState<File>
+where
+    File: file_manager::File,
+{
+    pub path: PathId,
     pub header: Duplicated<StratumHeader>,
     pub file: Option<File>,
 }
 
-impl StratumState {
-    fn default_for(path: PathBuf) -> Self {
+impl<File> StratumState<File>
+where
+    File: file_manager::File,
+{
+    fn default_for(path: PathId) -> Self {
         Self {
-            path: Arc::new(path),
+            path,
             header: Duplicated::default(),
             file: None,
         }
     }
 
-    pub fn get_or_open_file(&mut self, needs_directory_sync: &mut bool) -> Result<&mut File> {
+    pub fn get_or_open_file(
+        &mut self,
+        manager: &File::Manager,
+        needs_directory_sync: &mut bool,
+    ) -> Result<&mut File> {
         if self.file.is_none() {
             // If this file doesn't exist, we need to do a directory sync to
             // ensure the file is persisted.
             *needs_directory_sync |= !self.path.exists();
 
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .open(self.path.as_ref())?;
+            let file = manager.open(
+                &self.path,
+                OpenOptions::new().read(true).write(true).create(true),
+            )?;
 
             self.file = Some(file);
         }
@@ -292,7 +327,7 @@ impl StratumState {
     pub fn write_header(
         &mut self,
         new_transaction_id: TransactionId,
-        sync_batch: &FSyncBatch,
+        sync_batch: &FSyncBatch<File::Manager>,
     ) -> io::Result<()> {
         let file = self
             .file
@@ -309,17 +344,31 @@ impl StratumState {
     }
 }
 
-pub struct UnverifiedStratum {
+pub struct UnverifiedStratum<File> {
+    pub path: PathId,
     pub id: BasinAndStratum,
     pub header: FileHeader<StratumHeader>,
     pub file: File,
 }
 
-impl UnverifiedStratum {
-    pub fn read_from(path: &Path, id: BasinAndStratum, scratch: &mut Vec<u8>) -> Result<Self> {
-        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+impl<File> UnverifiedStratum<File>
+where
+    File: file_manager::File,
+{
+    pub fn read_from(
+        path: PathId,
+        manager: &File::Manager,
+        id: BasinAndStratum,
+        scratch: &mut Vec<u8>,
+    ) -> Result<Self> {
+        let mut file = manager.open(&path, OpenOptions::new().read(true).write(true))?;
         let header = FileHeader::read_from(&mut file, scratch)?;
-        Ok(Self { id, header, file })
+        Ok(Self {
+            path,
+            id,
+            header,
+            file,
+        })
     }
 
     pub fn validate(&self, commit_log: &CommitLogEntry) -> Result<()> {
@@ -367,10 +416,13 @@ impl UnverifiedStratum {
     }
 }
 
-impl BasinMap<BasinState> {
+impl<File> BasinMap<BasinState<File>>
+where
+    File: file_manager::File,
+{
     pub fn verify(
         index: &IndexHeader,
-        discovered_strata: &mut BTreeMap<BasinAndStratum, UnverifiedStratum>,
+        discovered_strata: &mut BTreeMap<BasinAndStratum, UnverifiedStratum<File>>,
     ) -> Result<Option<CommitLogEntry>> {
         let mut scratch = Vec::new();
         if let Some(commit_log_head) = index.commit_log_head {
@@ -411,8 +463,8 @@ impl BasinMap<BasinState> {
     pub fn load_from(
         index: &IndexHeader,
         commit_log: Option<&CommitLogEntry>,
-        discovered_strata: BTreeMap<BasinAndStratum, UnverifiedStratum>,
-        directory: &Path,
+        discovered_strata: BTreeMap<BasinAndStratum, UnverifiedStratum<File>>,
+        directory: &PathId,
     ) -> Result<Self> {
         let mut basins = Self::new();
         for stratum in discovered_strata.into_values() {
@@ -456,7 +508,7 @@ impl BasinMap<BasinState> {
             }
 
             basin.stratum.push(StratumState {
-                path: Arc::new(directory.join(stratum.id.to_string())),
+                path: stratum.path,
                 header,
                 file: Some(stratum.file),
             });
@@ -465,13 +517,16 @@ impl BasinMap<BasinState> {
     }
 }
 
-fn verify_read_grain(
+fn verify_read_grain<File>(
     grain: GrainId,
     file: &mut BufReader<&mut File>,
     transaction_id: TransactionId,
     expected_crc: Option<u32>,
     buffer: &mut Vec<u8>,
-) -> Result<()> {
+) -> Result<()>
+where
+    File: file_manager::File,
+{
     file.seek(io::SeekFrom::Start(grain.file_position()))?;
     let mut eight_bytes = [0; 8];
     file.read_exact(&mut eight_bytes)?;

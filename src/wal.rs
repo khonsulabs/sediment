@@ -1,6 +1,7 @@
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Weak};
 
+use okaywal::file_manager::{self, File as _};
 use okaywal::{EntryId, LogManager, ReadChunkResult, WriteAheadLog};
 
 use crate::format::{ByteUtil, GrainAllocationInfo, GrainAllocationStatus, GrainId, TransactionId};
@@ -9,13 +10,19 @@ use crate::util::{u32_to_usize, usize_to_u32};
 use crate::{Data as DatabaseData, Database, Error, Result};
 
 #[derive(Debug)]
-pub struct WalManager {
-    db: Weak<DatabaseData>,
+pub struct WalManager<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    db: Weak<DatabaseData<FileManager>>,
     scratch: Vec<u8>,
 }
 
-impl WalManager {
-    pub(super) fn new(database: &Arc<DatabaseData>) -> Self {
+impl<FileManager> WalManager<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    pub(super) fn new(database: &Arc<DatabaseData<FileManager>>) -> Self {
         Self {
             db: Arc::downgrade(database),
             scratch: Vec::new(),
@@ -23,8 +30,11 @@ impl WalManager {
     }
 }
 
-impl LogManager for WalManager {
-    fn recover(&mut self, entry: &mut okaywal::Entry<'_>) -> io::Result<()> {
+impl<FileManager> LogManager<FileManager> for WalManager<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    fn recover(&mut self, entry: &mut okaywal::Entry<'_, FileManager::File>) -> io::Result<()> {
         if let Some(database) = self.db.upgrade() {
             let mut written_grains = Vec::new();
             let mut freed_grains = Vec::new();
@@ -82,15 +92,15 @@ impl LogManager for WalManager {
     fn checkpoint_to(
         &mut self,
         last_checkpointed_id: okaywal::EntryId,
-        checkpointed_entries: &mut okaywal::SegmentReader,
-        wal: &WriteAheadLog,
+        checkpointed_entries: &mut okaywal::SegmentReader<FileManager::File>,
+        wal: &WriteAheadLog<FileManager>,
     ) -> std::io::Result<()> {
         if let Some(database) = self.db.upgrade() {
             let database = Database {
                 data: database,
                 wal: wal.clone(),
             };
-            let fsyncs = database.data.store.syncer.new_batch()?;
+            let fsyncs = database.data.store.file_manager.new_fsync_batch()?;
             let latest_tx_id = TransactionId::from(last_checkpointed_id);
             let mut store = database.data.store.lock()?;
             let mut needs_directory_sync = store.needs_directory_sync;
@@ -129,9 +139,10 @@ impl LogManager for WalManager {
                                 id.stratum_id(),
                                 &database.data.store.directory,
                             );
-                            let mut file = BufWriter::new(
-                                stratum.get_or_open_file(&mut needs_directory_sync)?,
-                            );
+                            let mut file = BufWriter::new(stratum.get_or_open_file(
+                                &database.data.store.file_manager,
+                                &mut needs_directory_sync,
+                            )?);
 
                             // Write the grain data to disk.
                             let file_position = id.file_position();

@@ -2,6 +2,8 @@ use std::collections::{hash_map, HashMap};
 use std::io::{Read, Write};
 use std::sync::{Arc, Condvar, Mutex};
 
+use okaywal::file_manager;
+
 use crate::format::{ByteUtil, GrainId, Stored, TransactionId};
 use crate::util::{u32_to_usize, usize_to_u32};
 use crate::{Database, Error, Result};
@@ -134,7 +136,13 @@ impl CommitLogEntry {
         })
     }
 
-    pub fn next_entry(&self, database: &Database) -> Result<Option<Stored<Arc<Self>>>> {
+    pub fn next_entry<FileManager>(
+        &self,
+        database: &Database<FileManager>,
+    ) -> Result<Option<Stored<Arc<Self>>>>
+    where
+        FileManager: file_manager::FileManager,
+    {
         if self.transaction_id > database.checkpointed_to()? {
             if let Some(entry_id) = self.next_entry {
                 if let Some(entry) = database.read_commit_log_entry(entry_id)? {
@@ -174,11 +182,14 @@ impl CommitLogs {
         Ok(())
     }
 
-    pub fn get_or_lookup(
+    pub fn get_or_lookup<FileManager>(
         &self,
         grain_id: GrainId,
-        db: &Database,
-    ) -> Result<Option<Arc<CommitLogEntry>>> {
+        db: &Database<FileManager>,
+    ) -> Result<Option<Arc<CommitLogEntry>>>
+    where
+        FileManager: file_manager::FileManager,
+    {
         let mut data = self.cached.lock()?;
         loop {
             match data.entry(grain_id) {
@@ -223,7 +234,13 @@ impl CommitLogs {
         }
     }
 
-    fn read_entry(grain_id: GrainId, db: &Database) -> Result<Option<CommitLogEntry>> {
+    fn read_entry<FileManager>(
+        grain_id: GrainId,
+        db: &Database<FileManager>,
+    ) -> Result<Option<CommitLogEntry>>
+    where
+        FileManager: file_manager::FileManager,
+    {
         if let Some(reader) = db.read(grain_id)? {
             let data = reader.read_all_data()?;
             let entry = CommitLogEntry::read_from(&data[..])?;

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Weak};
 use std::thread::JoinHandle;
 
-use okaywal::WriteAheadLog;
+use okaywal::{file_manager, WriteAheadLog};
 use watchable::{Watchable, Watcher};
 
 use crate::format::TransactionId;
@@ -52,12 +52,15 @@ pub struct Spawner {
 }
 
 impl Spawner {
-    pub(super) fn spawn(
+    pub(super) fn spawn<FileManager>(
         self,
         current_checkpointed_tx: TransactionId,
-        data: &Arc<Data>,
-        wal: &WriteAheadLog,
-    ) -> Result<()> {
+        data: &Arc<Data<FileManager>>,
+        wal: &WriteAheadLog<FileManager>,
+    ) -> Result<()>
+    where
+        FileManager: file_manager::FileManager,
+    {
         let data = Arc::downgrade(data);
         let wal = wal.clone();
         let thread_handle = std::thread::Builder::new()
@@ -73,12 +76,15 @@ impl Spawner {
     }
 }
 
-fn sediment_checkpoint_thread(
+fn sediment_checkpoint_thread<FileManager>(
     baseline_transaction: TransactionId,
     mut tx_receiver: Watcher<TransactionId>,
-    data: Weak<Data>,
-    wal: WriteAheadLog,
-) -> Result<()> {
+    data: Weak<Data<FileManager>>,
+    wal: WriteAheadLog<FileManager>,
+) -> Result<()>
+where
+    FileManager: file_manager::FileManager,
+{
     let mut current_tx_id = baseline_transaction;
     while let Ok(transaction_to_checkpoint) = tx_receiver.next_value() {
         if transaction_to_checkpoint <= current_tx_id {

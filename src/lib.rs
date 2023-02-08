@@ -5,7 +5,10 @@ use std::num::TryFromIntError;
 use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
-use okaywal::WriteAheadLog;
+use okaywal::file_manager::fs::StdFileManager;
+use okaywal::file_manager::memory::MemoryFileManager;
+use okaywal::file_manager::FSyncError;
+use okaywal::{file_manager, WriteAheadLog};
 pub use transaction::Transaction;
 
 use crate::atlas::{Atlas, GrainReader};
@@ -23,7 +26,6 @@ mod checkpointer;
 mod commit_log;
 pub mod config;
 pub mod format;
-mod fsync;
 mod store;
 #[cfg(test)]
 mod tests;
@@ -32,20 +34,39 @@ mod util;
 mod wal;
 
 #[derive(Debug, Clone)]
-pub struct Database {
-    data: Arc<Data>,
-    wal: WriteAheadLog,
+pub struct Database<FileManager = StdFileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    data: Arc<Data<FileManager>>,
+    wal: WriteAheadLog<FileManager>,
 }
 
-impl Database {
+impl Database<StdFileManager> {
     pub fn recover<AsRefPath: AsRef<Path>>(directory: AsRefPath) -> Result<Self> {
         Config::for_directory(directory).recover()
     }
+}
 
-    fn recover_config(config: Config) -> Result<Self> {
+impl Database<MemoryFileManager> {
+    pub fn in_memory() -> Self {
+        Config::in_memory()
+            .recover()
+            .expect("somehow failed to recover on default memory file manager")
+    }
+}
+
+impl<FileManager> Database<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    fn recover_config(config: Config<FileManager>) -> Result<Self> {
         // Opening the store restores the database to the last fully committed
         // state. Each commit happens when the write ahead log is checkpointed.
-        let store = Store::recover(config.wal.directory.as_ref())?;
+        let store = Store::recover(
+            config.wal.directory.as_ref(),
+            config.wal.file_manager.clone(),
+        )?;
         let atlas = Atlas::new(&store);
         let current_metadata = atlas.current_index_metadata()?;
         let (checkpointer, cp_spawner) = Checkpointer::new(current_metadata.checkpointed_to);
@@ -73,14 +94,14 @@ impl Database {
         Ok(Self { data, wal })
     }
 
-    pub fn begin_transaction(&self) -> Result<Transaction<'_>> {
+    pub fn begin_transaction(&self) -> Result<Transaction<'_, FileManager>> {
         let tx_guard = self.data.tx_lock.lock();
         let wal_entry = self.wal.begin_entry()?;
 
         Transaction::new(self, wal_entry, tx_guard)
     }
 
-    pub fn read(&self, grain: GrainId) -> Result<Option<GrainReader>> {
+    pub fn read(&self, grain: GrainId) -> Result<Option<GrainReader<FileManager>>> {
         self.data.atlas.find(grain, &self.wal)
     }
 
@@ -96,8 +117,8 @@ impl Database {
         // checkpointing process finishing up. This may require the file syncer.
         self.wal.shutdown()?;
         // With everything else shut down, we can now shut down the file
-        // synchronization threadpool.
-        self.data.store.syncer.shutdown()?;
+        // manager.
+        self.data.store.file_manager.shutdown()?;
 
         Ok(())
     }
@@ -132,19 +153,25 @@ impl Database {
     }
 }
 
-impl Eq for Database {}
+impl<FileManager> Eq for Database<FileManager> where FileManager: file_manager::FileManager {}
 
-impl PartialEq for Database {
+impl<FileManager> PartialEq for Database<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     fn eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.data, &other.data)
     }
 }
 
 #[derive(Debug)]
-struct Data {
-    store: Store,
+struct Data<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    store: Store<FileManager>,
     checkpointer: Checkpointer,
-    atlas: Atlas,
+    atlas: Atlas<FileManager>,
     commit_logs: CommitLogs,
     tx_lock: TransactionLock,
 }
@@ -201,5 +228,16 @@ impl<T> From<PoisonError<T>> for Error {
 impl From<TryFromIntError> for Error {
     fn from(_: TryFromIntError) -> Self {
         Self::ValueOutOfBounds
+    }
+}
+
+impl From<FSyncError> for Error {
+    fn from(error: FSyncError) -> Self {
+        match error {
+            FSyncError::Shutdown => Self::Shutdown,
+            FSyncError::ThreadJoin => Self::ThreadJoin,
+            FSyncError::InternalInconstency => Self::LockPoisoned,
+            FSyncError::Io(io) => Self::Io(io),
+        }
     }
 }

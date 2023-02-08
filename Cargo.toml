@@ -20,6 +20,7 @@ watchable = "1.1.0"
 # Comment out before checking into CI.
 [patch.crates-io]
 # okaywal = { path = "../okaywal2" }
+okaywal = { git = "https://github.com/khonsulabs/okaywal", branch = "main" }
 # watchable = { path = "../watchable" }
 
 [workspace]

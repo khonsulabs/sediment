@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Seek};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use okaywal::{ChunkReader, LogPosition, WriteAheadLog};
+use okaywal::file_manager::{OpenOptions, PathId};
+use okaywal::{file_manager, ChunkReader, LogPosition, WriteAheadLog};
 use tinyvec::ArrayVec;
 
 use crate::allocations::FreeLocations;
@@ -18,12 +18,15 @@ use crate::util::{u32_to_usize, usize_to_u32};
 use crate::{Error, Result};
 
 #[derive(Debug)]
-pub struct Atlas {
-    data: Mutex<Data>,
+pub struct Atlas<FileManager> {
+    data: Mutex<Data<FileManager>>,
 }
 
-impl Atlas {
-    pub fn new(store: &Store) -> Self {
+impl<FileManager> Atlas<FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    pub fn new(store: &Store<FileManager>) -> Self {
         let disk_state = store.lock().expect("unable to lock store");
 
         let mut basins = BasinMap::new();
@@ -43,6 +46,7 @@ impl Atlas {
                 },
                 basins,
                 uncheckpointed_grains: HashMap::new(),
+                file_manager: store.file_manager.clone(),
             }),
         }
     }
@@ -55,8 +59,8 @@ impl Atlas {
     pub fn find<'wal>(
         &self,
         grain: GrainId,
-        wal: &'wal WriteAheadLog,
-    ) -> Result<Option<GrainReader<'wal>>> {
+        wal: &'wal WriteAheadLog<FileManager>,
+    ) -> Result<Option<GrainReader<'wal, FileManager>>> {
         let data = self.data.lock()?;
         match data.uncheckpointed_grains.get(&grain) {
             Some(UncheckpointedGrain::PendingCommit) => Ok(None),
@@ -88,9 +92,10 @@ impl Atlas {
                     .clone();
 
                 // Remove the lock before we do any file operations.
+                let file_manager = data.file_manager.clone();
                 drop(data);
 
-                let mut file = OpenOptions::new().read(true).open(file_path.as_ref())?;
+                let mut file = file_manager.open(&file_path, OpenOptions::new().read(true))?;
                 // The grain data starts with the transaction id, followed
                 // by the byte length.
                 file.seek(std::io::SeekFrom::Start(grain.file_position() + 8))?;
@@ -187,9 +192,9 @@ impl Atlas {
         let new_id = StratumId::new(basin.strata.len() as u64).expect("valid stratum id");
         basin
             .strata
-            .push(Stratum::default_for(data.directory.join(
+            .push(Stratum::default_for(PathId::from(data.directory.join(
                 BasinAndStratum::from_parts(*basin_id, new_id).to_string(),
-            )));
+            ))));
         basin.free_strata.push(new_id);
         Ok(allocate_grain_within_stratum(
             basin.strata.last_mut().expect("just pushed"),
@@ -221,11 +226,11 @@ impl Atlas {
                 while grain.stratum_id().as_usize() >= basin.strata.len() {
                     let new_id =
                         StratumId::new(basin.strata.len().try_into()?).expect("invalid statum id");
-                    basin.strata.push(Stratum::default_for(
+                    basin.strata.push(Stratum::default_for(PathId::from(
                         data.directory.join(
                             BasinAndStratum::from_parts(grain.basin_id(), new_id).to_string(),
                         ),
-                    ));
+                    )));
                 }
 
                 let stratum = &mut basin.strata[grain.stratum_id().as_usize()];
@@ -311,14 +316,15 @@ impl Atlas {
 }
 
 #[derive(Debug)]
-struct Data {
+struct Data<FileManager> {
     directory: Arc<PathBuf>,
     index: IndexMetadata,
     basins: BasinMap<Basin>,
     uncheckpointed_grains: HashMap<GrainId, UncheckpointedGrain>,
+    file_manager: FileManager,
 }
 
-impl Data {
+impl<FileManager> Data<FileManager> {
     pub fn check_grain_validity(&self, grain: GrainId) -> Result<()> {
         let basin = self.basins[grain.basin_id()]
             .as_ref()
@@ -360,8 +366,11 @@ struct Basin {
     free_strata: StratumIdRing,
 }
 
-impl<'a> From<&'a BasinState> for Basin {
-    fn from(state: &'a BasinState) -> Self {
+impl<'a, File> From<&'a BasinState<File>> for Basin
+where
+    File: file_manager::File,
+{
+    fn from(state: &'a BasinState<File>) -> Self {
         let mut strata = Vec::new();
         let mut free_strata = StratumIdRing::default();
         for stratum in &state.stratum {
@@ -383,13 +392,13 @@ impl<'a> From<&'a BasinState> for Basin {
 
 #[derive(Debug)]
 struct Stratum {
-    path: Arc<PathBuf>,
+    path: PathId,
     allocations: FreeLocations,
     known_grains: HashSet<GrainIndex>,
 }
 
 impl Stratum {
-    fn from_stratum(path: Arc<PathBuf>, stratum: &StratumHeader) -> Self {
+    fn from_stratum(path: PathId, stratum: &StratumHeader) -> Self {
         let allocations = FreeLocations::from_stratum(stratum);
 
         let mut known_grains = HashSet::new();
@@ -420,9 +429,9 @@ impl Stratum {
         }
     }
 
-    fn default_for(path: PathBuf) -> Self {
+    fn default_for(path: PathId) -> Self {
         Self {
-            path: Arc::new(path),
+            path,
             allocations: FreeLocations::default(),
             known_grains: HashSet::default(),
         }
@@ -430,12 +439,18 @@ impl Stratum {
 }
 
 #[derive(Debug)]
-pub enum GrainReader<'a> {
-    InWal(ChunkReader<'a>),
-    InStratum(StratumGrainReader),
+pub enum GrainReader<'a, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
+    InWal(ChunkReader<'a, FileManager>),
+    InStratum(StratumGrainReader<FileManager::File>),
 }
 
-impl<'a> GrainReader<'a> {
+impl<'a, FileManager> GrainReader<'a, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     pub const fn bytes_remaining(&self) -> u32 {
         match self {
             GrainReader::InWal(reader) => reader.bytes_remaining(),
@@ -460,7 +475,10 @@ impl<'a> GrainReader<'a> {
     }
 }
 
-impl<'a> Read for GrainReader<'a> {
+impl<'a, FileManager> Read for GrainReader<'a, FileManager>
+where
+    FileManager: file_manager::FileManager,
+{
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             GrainReader::InWal(reader) => reader.read(buf),
@@ -476,7 +494,10 @@ impl<'a> Read for GrainReader<'a> {
 }
 
 #[derive(Debug)]
-pub struct StratumGrainReader {
+pub struct StratumGrainReader<File>
+where
+    File: file_manager::File,
+{
     file: BufReader<File>,
     length: u32,
     bytes_remaining: u32,
