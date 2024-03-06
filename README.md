@@ -15,7 +15,7 @@ databases.
 - Uses a [write-ahead log][okaywal] for efficient, atomic, durable writes.
 - Data chunks can be written and assigned a unique ID.
 - Data chunks can be archived by their unique ID.
-- The database can be checkpointed to free preivously archived data for reuse.
+- The database can be checkpointed to free previously archived data for reuse.
 - The lifecycle of data allows building full database replication from the
   commit log contained within the database and ensuring data isn't overwritten
   before all clients are replicated.
